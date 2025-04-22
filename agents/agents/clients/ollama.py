@@ -1,3 +1,4 @@
+from types import GeneratorType
 from typing import Any, Optional, Dict, Union
 
 import httpx
@@ -85,8 +86,10 @@ class OllamaClient(ModelClient):
         input = {
             "model": self.model_init_params["checkpoint"],
             "messages": query,
+            "stream": inference_input["stream"],
         }
         inference_input.pop("query")
+        inference_input.pop("stream")
 
         # make images part of the latest message in message list
         if images := inference_input.get("images"):
@@ -112,6 +115,10 @@ class OllamaClient(ModelClient):
         except Exception as e:
             self.logger.error(str(e))
             return None
+
+        if isinstance(ollama_result, GeneratorType):
+            input["output"] = ollama_result
+            return input
 
         self.logger.debug(str(ollama_result))
 
