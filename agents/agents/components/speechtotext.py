@@ -77,6 +77,8 @@ class SpeechToText(ModelComponent):
                 "SpeechToText component cannot be started as a timed component"
             )
 
+        self.model_client = model_client
+
         super().__init__(
             inputs,
             outputs,
@@ -302,16 +304,14 @@ class SpeechToText(ModelComponent):
             return
 
         # conduct inference
-        if self.model_client:
-            result = self.model_client.inference(inference_input)
-            if result:
-                # publish inference result
-                if self.publishers_dict:
-                    for publisher in self.publishers_dict.values():
-                        publisher.publish(**result)
-            else:
-                # raise a fallback trigger via health status
-                self.health_status.set_failure()
+        result = self.model_client.inference(inference_input)
+        if result:
+            # publish inference result
+            for publisher in self.publishers_dict.values():
+                publisher.publish(**result)
+        else:
+            # raise a fallback trigger via health status
+            self.health_status.set_failure()
 
     def _warmup(self):
         """Warm up and stat check"""

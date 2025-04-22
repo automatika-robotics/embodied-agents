@@ -391,8 +391,25 @@ class LLM(ModelComponent):
         result = self.model_client.inference(inference_input)
 
         if result:
-            result_message = {"role": "assistant", "content": result["output"]}
-            self.messages.append(result_message)
+            if self.config.stream:
+                result_output = []
+                try:
+                    for token in result["output"]:
+                        if content := token["message"]["content"]:
+                            self._publish({"output": content})
+                            result_output.append(content)
+                except Exception as e:
+                    self.get_logger().error(str(e))
+                    # raise a fallback trigger via health status
+                    self.health_status.set_failure()
+                    return
+                self.messages.append({
+                    "role": "assistant",
+                    "content": "".join(result_output),
+                })
+                return
+
+            self.messages.append({"role": "assistant", "content": result["output"]})
 
             # handle tool calls
             if self.config._tool_descriptions:
@@ -404,13 +421,21 @@ class LLM(ModelComponent):
                 return
 
             # publish inference result
-            if hasattr(self, "publishers_dict"):
-                for publisher in self.publishers_dict.values():
-                    publisher.publish(**result)
+            self._publish(result)
 
         else:
             # raise a fallback trigger via health status
             self.health_status.set_failure()
+
+    def _publish(self, result: Dict) -> None:
+        """
+        Publishes the given result to all registered publishers.
+
+        :param result: A dictionary containing the data to be published.
+        :type result: dict
+        """
+        for publisher in self.publishers_dict.values():
+            publisher.publish(**result)
 
     def set_topic_prompt(self, input_topic: Topic, template: Union[str, Path]) -> None:
         """Set prompt template on any input topic of type string.
@@ -528,6 +553,10 @@ class LLM(ModelComponent):
             raise TypeError(
                 "Currently registering tools is only supported when using an Ollama client with the component."
             )
+        if self.config.stream:
+            raise TypeError(
+                "Tools cannot be registered for a component with streaming output. Please set stream option to False."
+            )
         self._external_processors[tool_description["function"]["name"]] = (
             [tool],
             "tool",
@@ -574,5 +603,6 @@ class LLM(ModelComponent):
         result = self.model_client.inference(inference_input)
         elapsed_time = time.time() - start_time
 
-        self.get_logger().warning(f"Model Output: {result['output']}")
+        if result:
+            self.get_logger().warning(f"Model Output: {result['output']}")
         self.get_logger().warning(f"Approximate Inference time: {elapsed_time} seconds")

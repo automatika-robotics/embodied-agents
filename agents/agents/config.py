@@ -52,6 +52,10 @@ class LLMConfig(ModelComponentConfig):
     :type temperature: float
     :param max_new_tokens: The maximum number of new tokens to generate.
         Default is 100 and must be greater than 0.
+    :type max_new_tokens: int
+    :param stream: Publish the llm output as a stream of tokens, useful when sending llm output to a user facing client or to a TTS component. Cannot be used in conjunction with tool calling.
+        Default is false
+    :type stream: bool
 
     Example of usage:
     ```python
@@ -73,6 +77,7 @@ class LLMConfig(ModelComponentConfig):
     )  # number of user messages
     temperature: float = field(default=0.8, validator=base_validators.gt(0.0))
     max_new_tokens: int = field(default=100, validator=base_validators.gt(0))
+    stream: bool = field(default=False)
     _system_prompt: Optional[str] = field(default=None, alias="_system_prompt")
     _component_prompt: Optional[Union[str, Path]] = field(
         default=None, alias="_component_prompt"
@@ -95,6 +100,7 @@ class LLMConfig(ModelComponentConfig):
             "chat_history": self.chat_history,
             "temperature": self.temperature,
             "max_new_tokens": self.max_new_tokens,
+            "stream": self.stream,
         }
 
 
