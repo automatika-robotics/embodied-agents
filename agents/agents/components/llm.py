@@ -395,9 +395,11 @@ class LLM(ModelComponent):
                 result_output = []
                 try:
                     for token in result["output"]:
-                        if content := token["message"]["content"]:
-                            self._publish({"output": content})
-                            result_output.append(content)
+                        # Handle ollama client streaming format
+                        if isinstance(self.model_client, OllamaClient):
+                            token = token["message"]["content"]
+                        self._publish({"output": token})
+                        result_output.append(token)
                 except Exception as e:
                     self.get_logger().error(str(e))
                     # raise a fallback trigger via health status

@@ -1,4 +1,5 @@
 import base64
+import json
 from enum import Enum
 from typing import Any, Optional, Dict, Union
 
@@ -56,6 +57,9 @@ class HTTPModelClient(ModelClient):
             **kwargs,
         )
         self.url = f"http://{self.host}:{self.port}"
+
+        # create httpx client
+        self.client = httpx.Client(base_url=self.url, timeout=self.inference_timeout)
         self._check_connection()
 
     def _check_connection(self) -> None:
@@ -63,8 +67,7 @@ class HTTPModelClient(ModelClient):
         # Ping remote server to check connection
         self.logger.info("Checking connection with remote RoboML")
         try:
-            # port specific to ollama
-            httpx.get(f"{self.url}/").raise_for_status()
+            self.client.get("/").raise_for_status()
         except Exception as e:
             self.__handle_exceptions(e)
             raise
@@ -82,16 +85,14 @@ class HTTPModelClient(ModelClient):
             model_type = TransformersMLLM.__name__
         else:
             model_type = self.model_type
-        start_params = {"node_name": self.model_name, "node_type": model_type}
+        start_params = {"node_name": self.model_name, "node_model": model_type}
         try:
-            r = httpx.post(
-                f"{self.url}/add_node", params=start_params, timeout=self.init_timeout
-            ).raise_for_status()
+            r = self.client.post("/add_node", params=start_params).raise_for_status()
             self.logger.debug(str(r.json()))
             self.logger.info(f"Initializing {self.model_name} on RoboML remote")
             # get initialization params and initiale model
-            httpx.post(
-                f"{self.url}/{self.model_name}/initialize",
+            self.client.post(
+                f"/{self.model_name}/initialize",
                 params=self.model_init_params,
                 timeout=self.init_timeout,
             ).raise_for_status()
@@ -102,19 +103,39 @@ class HTTPModelClient(ModelClient):
 
     def _inference(self, inference_input: Dict[str, Any]) -> Optional[Dict]:
         """Call inference on the model using data and inference parameters from the component"""
+        # encode any byte or numpy array data
+        if inference_input.get("query") and isinstance(inference_input["query"], bytes):
+            inference_input["query"] = base64.b64encode(
+                inference_input["query"]
+            ).decode("utf-8")
+        if images := inference_input.get("images"):
+            inference_input["images"] = [encode_arr_base64(img) for img in images]
+
+        # if stream is set to true, then return a generator
+        if inference_input.get("stream"):
+
+            def gen():
+                with self.client.stream(
+                    method="POST",
+                    url=f"/{self.model_name}/inference",
+                    json=inference_input,
+                    timeout=self.inference_timeout,
+                ) as r:
+                    try:
+                        r.raise_for_status()
+                    except Exception as e:
+                        self.__handle_exceptions(e)
+
+                    for token in r.iter_text():
+                        self.logger.debug(f"{token}")
+                        yield token
+
+            return {"output": gen()}
+
         try:
-            # encode any byte or numpy array data
-            if inference_input.get("query") and isinstance(
-                inference_input["query"], bytes
-            ):
-                inference_input["query"] = base64.b64encode(
-                    inference_input["query"]
-                ).decode("utf-8")
-            if images := inference_input.get("images"):
-                inference_input["images"] = [encode_arr_base64(img) for img in images]
             # call inference method
-            r = httpx.post(
-                f"{self.url}/{self.model_name}/inference",
+            r = self.client.post(
+                f"/{self.model_name}/inference",
                 json=inference_input,
                 timeout=self.inference_timeout,
             ).raise_for_status()
@@ -129,12 +150,15 @@ class HTTPModelClient(ModelClient):
     def _deinitialize(self) -> None:
         """Deinitialize the model on the platform"""
 
-        self.logger.error(f"Deinitializing {self.model_name} model on RoboML remote")
+        self.logger.info(f"Deinitializing {self.model_name} model on RoboML remote")
         stop_params = {"node_name": self.model_name}
         try:
-            httpx.post(f"{self.url}/remove_node", params=stop_params).raise_for_status()
+            self.client.post("/remove_node", params=stop_params).raise_for_status()
         except Exception as e:
             self.__handle_exceptions(e)
+            if hasattr(self, "client") and self.client and not self.client.is_closed:
+                self.logger.info("Closing HTTPX client.")
+                self.client.close()
 
     def __handle_exceptions(self, excep: Exception) -> None:
         """__handle_exceptions.
@@ -203,7 +227,7 @@ class HTTPDBClient(DBClient):
         """
         # Create a DB node on RoboML
         self.logger.info("Creating db node on remote")
-        start_params = {"node_name": self.db_name, "node_type": self.db_type}
+        start_params = {"node_name": self.db_name, "node_model": self.db_type}
         try:
             r = httpx.post(
                 f"{self.url}/add_node", params=start_params, timeout=self.init_timeout
@@ -408,7 +432,7 @@ class RESPModelClient(ModelClient):
             model_type = TransformersMLLM.__name__
         else:
             model_type = self.model_type
-        start_params = {"node_name": self.model_name, "node_type": model_type}
+        start_params = {"node_name": self.model_name, "node_model": model_type}
         try:
             start_params_b = self.packer(start_params)
             node_init_result = self.redis.execute_command("add_node", start_params_b)
@@ -557,7 +581,7 @@ class RESPDBClient(DBClient):
         """
         # Creating DB node on remote
         self.logger.info("Creating db node on remote")
-        start_params = {"node_name": self.db_name, "node_type": self.db_type}
+        start_params = {"node_name": self.db_name, "node_model": self.db_type}
 
         try:
             start_params_b = self.packer(start_params)
