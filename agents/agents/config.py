@@ -56,6 +56,9 @@ class LLMConfig(ModelComponentConfig):
     :param stream: Publish the llm output as a stream of tokens, useful when sending llm output to a user facing client or to a TTS component. Cannot be used in conjunction with tool calling.
         Default is false
     :type stream: bool
+    :param break_character: A string character marking that the output thus far received in a stream should be published. This parameter only takes effect when stream is set to True. As stream output is received token by token, it is useful to publish full sentences instead of individual tokens as the components output (for example, for downstream text to speech conversion). This value can be set to an empty string to publish output token by token.
+        Default is '.' (period)
+    :type break_character: str
 
     Example of usage:
     ```python
@@ -78,6 +81,7 @@ class LLMConfig(ModelComponentConfig):
     temperature: float = field(default=0.8, validator=base_validators.gt(0.0))
     max_new_tokens: int = field(default=100, validator=base_validators.gt(0))
     stream: bool = field(default=False)
+    break_character: str = field(default=".")
     _system_prompt: Optional[str] = field(default=None, alias="_system_prompt")
     _component_prompt: Optional[Union[str, Path]] = field(
         default=None, alias="_component_prompt"

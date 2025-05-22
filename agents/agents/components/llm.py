@@ -364,6 +364,35 @@ class LLM(ModelComponent):
 
         return input
 
+    def __handle_streaming(self, result: Dict) -> Optional[List]:
+        result_partial = []
+        result_complete = []
+        try:
+            for token in result["output"]:
+                # Handle ollama client streaming format
+                if isinstance(self.model_client, OllamaClient):
+                    token = token["message"]["content"]
+                result_partial.append(token)
+                if self.config.break_character:
+                    if self.config.break_character in token:
+                        result_complete += result_partial
+                        self._publish({"output": "".join(result_partial)})
+                        result_partial = []
+                        continue
+                else:
+                    result_complete += result_partial
+                    self._publish({"output": "".join(result_partial)})
+                    result_partial = []
+            # Send remaining result after break character if any
+            if result_partial:
+                result_complete += result_partial
+                self._publish({"output": "".join(result_partial)})
+            return result_complete
+        except Exception as e:
+            self.get_logger().error(str(e))
+            # raise a fallback trigger via health status
+            self.health_status.set_failure()
+
     def _execution_step(self, *args, **kwargs):
         """_execution_step.
 
@@ -392,22 +421,12 @@ class LLM(ModelComponent):
 
         if result:
             if self.config.stream:
-                result_output = []
-                try:
-                    for token in result["output"]:
-                        # Handle ollama client streaming format
-                        if isinstance(self.model_client, OllamaClient):
-                            token = token["message"]["content"]
-                        self._publish({"output": token})
-                        result_output.append(token)
-                except Exception as e:
-                    self.get_logger().error(str(e))
-                    # raise a fallback trigger via health status
-                    self.health_status.set_failure()
+                result_complete = self.__handle_streaming(result)
+                if not result_complete:
                     return
                 self.messages.append({
                     "role": "assistant",
-                    "content": "".join(result_output),
+                    "content": "".join(result_complete),
                 })
                 return
 
