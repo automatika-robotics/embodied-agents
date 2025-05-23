@@ -1,8 +1,12 @@
+import time
+import asyncio
 import base64
-import json
+import queue
+import threading
 from enum import Enum
 from typing import Any, Optional, Dict, Union
 
+import websockets
 import httpx
 
 from .. import models
@@ -187,6 +191,197 @@ class HTTPModelClient(ModelClient):
                 )
         else:
             self.logger.error(str(excep))
+
+
+class WebSocketClient(HTTPModelClient):
+    """An websocket client for interaction with ML models served on RoboML"""
+
+    def __init__(
+        self,
+        model: Union[Model, Dict],
+        host: str = "127.0.0.1",
+        port: int = 8000,
+        inference_timeout: int = 30,
+        init_on_activation: bool = True,
+        logging_level: str = "info",
+        **kwargs,
+    ):
+        if isinstance(model, OllamaModel):
+            raise TypeError(
+                "An ollama model cannot be passed to a RoboML client. Please use the OllamaClient"
+            )
+        try:
+            import msgpack
+            import msgpack_numpy as m_pack
+
+            # patch msgpack for numpy arrays
+            m_pack.patch()
+            self.packer = msgpack.packb
+            self.unpacker = msgpack.unpackb
+        except ModuleNotFoundError as e:
+            raise ModuleNotFoundError(
+                "In order to use the WebSocketClient, you need msgpack packages installed. You can install it with 'pip install msgpack msgpack-numpy'"
+            ) from e
+        super().__init__(
+            model=model,
+            host=host,
+            port=port,
+            inference_timeout=inference_timeout,
+            init_on_activation=init_on_activation,
+            logging_level=logging_level,
+            **kwargs,
+        )
+        # Add queues and events
+        self.stop_event: Optional[threading.Event] = None
+        self.request_queue: Optional[queue.Queue] = None
+        self.response_queue: Optional[queue.Queue] = None
+        self.websocket_endpoint = (
+            f"ws://{self.host}:{self.port}/{self.model_name}/ws_inference"
+        )
+
+    def _inference(self) -> Optional[Dict]:
+        """Run the event loop for websocket client function. This function is executed in a separate thread to not block the main component"""
+        # Each thread needs its own asyncio event loop
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(self.__websocket_client())
+        finally:
+            self.logger.info("Closing asyncio event loop.")
+            # Gracefully cancel all pending asyncio tasks in this loop
+            for task in asyncio.all_tasks(loop):
+                task.cancel()
+            # Run loop one last time to allow tasks to process cancellation
+            loop.run_until_complete(
+                asyncio.gather(*asyncio.all_tasks(loop), return_exceptions=True)
+            )
+            loop.close()
+        self.logger.info("WebSocket client thread finished.")
+
+    async def __websocket_client(self):
+        if not (self.stop_event and self.request_queue and self.response_queue):
+            self.logger.error("WebSocketClient is not configured.")
+            return
+
+        try:
+            async with websockets.connect(self.websocket_endpoint) as websocket:
+                # Create concurrent tasks for sending and receiving
+                receiver_task = asyncio.create_task(
+                    self.__receive_messages(
+                        websocket, self.response_queue, self.stop_event
+                    )
+                )
+                sender_task = asyncio.create_task(
+                    self.__send_requests(websocket, self.request_queue, self.stop_event)
+                )
+                while not self.stop_event.is_set():
+                    if receiver_task.done() or sender_task.done():
+                        self.stop_event.set()  # Ensure full shutdown if a task finishes unexpectedly
+                        break
+                    await asyncio.sleep(
+                        0.1
+                    )  # Keep alive, check stop_event periodically
+
+            # Tasks should ideally respond to stop_event, but cancellation is a fallback
+            if not sender_task.done():
+                sender_task.cancel()
+            if not receiver_task.done():
+                receiver_task.cancel()
+            # Wait for tasks to complete cancellation/exit
+            await asyncio.gather(sender_task, receiver_task, return_exceptions=True)
+
+        except websockets.exceptions.InvalidURI:
+            self.logger.error(f"Invalid WebSocket URI: {self.websocket_endpoint}")
+        except (
+            websockets.exceptions.WebSocketException
+        ) as e:  # Covers connection errors like gaierror
+            self.logger.error(
+                f"Failed to connect to WebSocket server {self.websocket_endpoint}: {e}"
+            )
+        except Exception as e:
+            self.logger.error(f"An unexpected error occurred in client_logic: {e}")
+        finally:
+            self.logger.info("WebSocket client logic finished.")
+            self.stop_event.set()  # Ensure main thread knows if client dies
+
+    async def __receive_messages(self, websocket, res_queue, stop_evt):
+        """Coroutine to continuously receive messages from the WebSocket."""
+        self.logger.debug("Receiver task started.")
+        try:
+            async for message in websocket:  # Continuously iterates as messages arrive
+                if stop_evt.is_set():
+                    self.logger.info("Receiver: Stop event detected, exiting.")
+                    break
+                if not isinstance(message, str):
+                    message = self.unpacker(message)
+                self.logger.debug(f"Receiver: Received from server: '{message}'")
+                res_queue.put(message)
+        except websockets.exceptions.ConnectionClosedOK:
+            self.logger.info(
+                "WebSocketClient Receiver: WebSocket connection closed gracefully by server."
+            )
+        except websockets.exceptions.ConnectionClosedError as e:
+            self.logger.error(
+                f"WebSocketClient Receiver: WebSocket connection closed with error: {e}"
+            )
+        except Exception as e:
+            # Avoid logging error if we are stopping and the error is due to connection closure
+            if not stop_evt.is_set() and not isinstance(e, asyncio.CancelledError):
+                self.logger.error(f"Receiver: Unexpected error: {e}")
+        finally:
+            self.logger.debug("Receiver task finished.")
+            stop_evt.set()  # Ensure other parts of the client know to stop
+
+    async def __send_requests(self, websocket, req_queue, stop_evt):
+        """Coroutine to send requests from the request_queue."""
+        self.logger.debug("Sender task started.")
+        try:
+            while not stop_evt.is_set():
+                try:
+                    # Get request from main thread with a short timeout
+                    inference_input = req_queue.get(block=True, timeout=0.1)
+                    # encode any byte or numpy array data
+                    if inference_input.get("query") and isinstance(
+                        inference_input["query"], bytes
+                    ):
+                        inference_input["query"] = base64.b64encode(
+                            inference_input["query"]
+                        ).decode("utf-8")
+                    if images := inference_input.get("images"):
+                        inference_input["images"] = [
+                            encode_arr_base64(img) for img in images
+                        ]
+                    if websocket.closed:
+                        self.logger.warning("Sender: WebSocket is closed, cannot send.")
+                        req_queue.put(
+                            inference_input
+                        )  # Put back for potential reprocessing or logging
+                        stop_evt.set()
+                        break
+                    await websocket.send(self.packer(inference_input))
+                    req_queue.task_done()  # Signal that this request item has been processed
+                except queue.Empty:
+                    # No request, loop again to check stop_event or new requests
+                    if stop_evt.is_set():
+                        self.logger.info("Sender: Stop event detected, exiting.")
+                        break
+                    continue
+                except websockets.exceptions.ConnectionClosed:
+                    self.logger.warning(
+                        "Sender: WebSocket connection closed. Cannot send."
+                    )
+                    stop_evt.set()  # Signal other parts to stop
+                    break
+                except Exception as e:
+                    if not stop_evt.is_set() and not isinstance(
+                        e, asyncio.CancelledError
+                    ):
+                        self.logger.error(f"Sender: Error sending message: {e}")
+                    if stop_evt.is_set():
+                        break
+                    time.sleep(0.1)  # avoid busy loop on continuous errors
+        finally:
+            self.logger.debug("Sender task finished.")
 
 
 class HTTPDBClient(DBClient):

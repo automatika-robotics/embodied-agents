@@ -1,9 +1,13 @@
 from abc import abstractmethod
 import inspect
 import json
+import queue
+import threading
 from typing import Any, Optional, Sequence, Union, List, Dict, Type
 
+
 from ..clients.model_base import ModelClient
+from ..clients.roboml import WebSocketClient
 from ..config import ModelComponentConfig
 from ..ros import FixedInput, Topic, SupportedType
 from .component_base import Component
@@ -56,11 +60,26 @@ class ModelComponent(Component):
         if self.model_client:
             self.model_client.check_connection()
             self.model_client.initialize()
-            if self.config.warmup:
-                try:
-                    self._warmup()
-                except Exception as e:
-                    self.get_logger().error(f"Error encountered in warmup: {e}")
+            if isinstance(self.model_client, WebSocketClient):
+                # create queues and threads
+                self.req_queue = queue.Queue()
+                self.resp_queue = queue.Queue()
+                self.client_stop_event = threading.Event()
+                self.model_client.request_queue = self.req_queue
+                self.model_client.response_queue = self.resp_queue
+                self.model_client.stop_event = self.client_stop_event
+                self.client_thread = threading.Thread(
+                    target=self.model_client._inference,
+                    name="WebSocketClientThread",
+                    daemon=True,
+                )
+                self.client_thread.start()
+            else:
+                if self.config.warmup:
+                    try:
+                        self._warmup()
+                    except Exception as e:
+                        self.get_logger().error(f"Error encountered in warmup: {e}")
 
     def custom_on_deactivate(self):
         """
@@ -70,6 +89,23 @@ class ModelComponent(Component):
         if self.model_client:
             self.model_client.check_connection()
             self.model_client.deinitialize()
+            if isinstance(self.model_client, WebSocketClient):
+                # stop running thread
+                self.client_stop_event.set()
+                self.client_thread.join(timeout=10)
+                # mark any pendings tasks as finished
+                while not self.resp_queue.empty():
+                    try:
+                        self.resp_queue.get_nowait()
+                        self.resp_queue.task_done()
+                    except queue.Empty:
+                        break
+                while not self.req_queue.empty():
+                    try:
+                        self.req_queue.get_nowait()
+                        self.req_queue.task_done()
+                    except queue.Empty:
+                        break
 
     def _validate_output_topics(self) -> None:
         """
