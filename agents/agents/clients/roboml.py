@@ -171,6 +171,10 @@ class HTTPModelClient(ModelClient):
             self.logger.error(
                 f"{excep} RoboML server inaccessible. Might not be running. Make sure remote is correctly configured."
             )
+        elif isinstance(excep, httpx.TimeoutException):
+            self.logger.error(
+                f"{excep}. Request to RoboML server timed out. Make sure the server is configured correctly."
+            )
         elif isinstance(excep, httpx.HTTPStatusError):
             try:
                 excep_json = excep.response.json()

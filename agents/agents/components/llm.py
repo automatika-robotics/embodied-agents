@@ -365,6 +365,7 @@ class LLM(ModelComponent):
         return input
 
     def __handle_streaming(self, result: Dict) -> Optional[List]:
+        """Handle streaming output"""
         result_partial = []
         result_complete = []
         try:
