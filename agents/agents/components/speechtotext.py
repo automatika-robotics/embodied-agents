@@ -143,7 +143,9 @@ class SpeechToText(ModelComponent):
                     device=self.config.device_wakeword,
                 )
                 self.wake_word_triggered = False
-            self.listening_thread = threading.Thread(target=self._process_audio).start()
+            self.listening_thread = threading.Thread(
+                target=self._process_audio, daemon=True
+            ).start()
 
     def custom_on_deactivate(self):
         # If VAD is enabled, stop the listening stream thread

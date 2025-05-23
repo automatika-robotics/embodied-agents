@@ -256,7 +256,9 @@ class TextToSpeech(ModelComponent):
                     self.queue.queue.clear()
                 # Start a new playback thread
                 threading.Thread(
-                    target=self._playback_audio, args=(result.get("output"),)
+                    target=self._playback_audio,
+                    args=(result.get("output"),),
+                    daemon=True,
                 ).start()
             # publish inference result
             for publisher in self.publishers_dict.values():
