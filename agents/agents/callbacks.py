@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Tuple
 import os
 import cv2
 import numpy as np
@@ -73,6 +73,39 @@ class VideoCallback(GenericCallback):
             for img in self.msg.compressed_frames:
                 video.append(read_compressed_image(img))
             return np.array(video)
+
+
+class RGBDCallback(GenericCallback):
+    """
+    Video Callback class. Its get method saves a video as list of bytes
+    """
+
+    def __init__(self, input_topic, node_name: Optional[str] = None) -> None:
+        """
+        Constructs a new instance.
+        :param      input_topic:  Subscription topic
+        :type       input_topic:  Input
+        """
+        super().__init__(input_topic, node_name)
+        self.msg = None
+        # fixed RGBD message cannot be read from a file
+        if hasattr(input_topic, "fixed"):
+            get_logger(self.node_name).error(
+                "RGBD message cannot be read from a fixed file"
+            )
+
+    def _get_output(self, **_) -> Optional[np.ndarray]:
+        """
+        Gets video as a numpy array.
+        :returns:   Image and Depth as nd_array
+        :rtype:     np.ndarray
+        """
+        if not self.msg:
+            return None
+
+        else:
+            # pre-process in case of weird encodings and reshape ROS topic
+            return image_pre_processing(self.msg.rgb)
 
 
 class ObjectDetectionCallback(GenericCallback):

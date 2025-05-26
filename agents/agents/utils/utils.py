@@ -14,6 +14,7 @@ from typing import (
     get_origin,
     _GenericAlias,
 )
+from collections.abc import Iterable
 
 import cv2
 import httpx
@@ -122,8 +123,7 @@ def _check_type_from_signature(value, fn_param: inspect.Parameter) -> None:
 
     # Handles only the origin of GenericAlias (dict, list)
     _annotated_types = [
-        get_origin(t) if isinstance(t, _GenericAlias) else t
-        for t in _annotated_types
+        get_origin(t) if isinstance(t, _GenericAlias) else t for t in _annotated_types
     ]
 
     type_check = any(isinstance(value, t) for t in _annotated_types)
@@ -219,7 +219,7 @@ def load_model(model_name: str, model_path: str) -> str:
     """Model download utility function"""
     from tqdm import tqdm
     from platformdirs import user_cache_dir
-    
+
     cachedir = user_cache_dir("ros_agents")
     model_full_path = Path(cachedir) / Path("models") / Path(f"{model_name}.onnx")
 
@@ -260,6 +260,15 @@ def load_model(model_name: str, model_path: str) -> str:
 
     progress_bar.close()
     return str(model_full_path)
+
+
+def flatten(xs):
+    """Generator to flatten lists of arbitrary types"""
+    for x in xs:
+        if isinstance(x, Iterable) and not isinstance(x, (str, bytes)):
+            yield from flatten(x)
+        else:
+            yield x
 
 
 class PDFReader:

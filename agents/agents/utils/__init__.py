@@ -8,9 +8,11 @@ from .utils import (
     VADStatus,
     WakeWordStatus,
     load_model,
+    flatten,
 )
 
 __all__ = [
+    "flatten",
     "create_detection_context",
     "validate_kwargs",
     "validate_func_args",

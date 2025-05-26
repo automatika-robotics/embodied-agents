@@ -5,6 +5,7 @@ from typing import Optional, Sequence, Union, List, Dict, Type
 
 from ..ros import BaseComponent, ComponentRunType, FixedInput, SupportedType, Topic
 from ..config import BaseComponentConfig
+from ..utils import flatten
 
 
 class Component(BaseComponent):
@@ -23,8 +24,12 @@ class Component(BaseComponent):
         self.config: BaseComponentConfig = (
             deepcopy(config) if config else BaseComponentConfig()
         )
-        self.allowed_inputs: Dict[str, List[Type[SupportedType]]]
-        self.allowed_outputs: Dict[str, List[Type[SupportedType]]]
+        self.allowed_inputs: Dict[
+            str, List[Union[Type[SupportedType], List[Type[SupportedType]]]]
+        ]
+        self.allowed_outputs: Dict[
+            str, List[Union[Type[SupportedType], List[Type[SupportedType]]]]
+        ]
 
         # setup inputs and outputs
         if inputs:
@@ -144,7 +149,9 @@ class Component(BaseComponent):
     def validate_topics(
         self,
         topics: Sequence[Union[Topic, FixedInput]],
-        allowed_topic_types: Optional[Dict[str, List[Type[SupportedType]]]] = None,
+        allowed_topic_types: Optional[
+            Dict[str, List[Union[Type[SupportedType], List[Type[SupportedType]]]]]
+        ] = None,
         topics_direction: str = "Topics",
     ):
         """
@@ -162,9 +169,13 @@ class Component(BaseComponent):
             return
 
         all_msg_types = {topic.msg_type for topic in topics}
-        all_topic_types = allowed_topic_types["Required"] + (
-            allowed_topic_types.get("Optional") or []
+        flattened_required = list(flatten(allowed_topic_types["Required"]))
+        flattened_optional = (
+            list(flatten(allowed_topic_types.get("Optional")))
+            if allowed_topic_types.get("Optional")
+            else []
         )
+        all_topic_types = flattened_required + flattened_optional
 
         if msg_type := next(
             (
@@ -180,15 +191,23 @@ class Component(BaseComponent):
                 f"{topics_direction} to the component of type {self.__class__.__name__} can only be of the allowed datatypes: {[topic.__name__ for topic in all_topic_types]} or their subclasses. A topic of type {msg_type.__name__} cannot be given to this component."
             )
 
+        def _check_type(
+            m_type: Type[SupportedType],
+            allowed_type: Union[Type[SupportedType], List[Type[SupportedType]]],
+        ) -> bool:
+            if isinstance(allowed_type, List):
+                return any(issubclass(m_type, allowed_t) for allowed_t in allowed_type)
+            return issubclass(m_type, allowed_type)
+
         # Check that all required topics (or subtypes) have been given
         sufficient_topics = all(
-            any(issubclass(m_type, allowed_type) for m_type in all_msg_types)
+            any(_check_type(m_type, allowed_type) for m_type in all_msg_types)
             for allowed_type in allowed_topic_types["Required"]
         )
 
         if not sufficient_topics:
             raise TypeError(
-                f"{self.__class__.__name__} component {topics_direction} should have at least one topic of each datatype in the following list: {[topic.__name__ for topic in allowed_topic_types['Required']]}"
+                f"{self.__class__.__name__} component {topics_direction} should have at least one topic of each datatype in the following list: {[topic.__name__ for topic in flattened_required]}"
             )
 
     @abstractmethod

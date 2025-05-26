@@ -10,6 +10,7 @@ from ..ros import (
     Detections,
     FixedInput,
     Image,
+    RGBD,
     Topic,
     Trackings,
     ROSImage,
@@ -76,7 +77,7 @@ class Vision(ModelComponent):
         **kwargs,
     ):
         self.config: VisionConfig = config or VisionConfig()
-        self.allowed_inputs = {"Required": [Image]}
+        self.allowed_inputs = {"Required": [[Image, RGBD]]}
         self.handled_outputs = [Detections, Trackings]
 
         self._images: List[Union[np.ndarray, ROSImage, ROSCompressedImage]] = []

@@ -3,6 +3,7 @@
 from typing import Union, Any, Dict, List, Tuple
 import numpy as np
 from attrs import define, field, Factory
+from importlib.util import find_spec
 
 # FROM ROS_SUGAR
 from ros_sugar.supported_types import (
@@ -36,7 +37,7 @@ from automatika_embodied_agents.msg import (
     Tracking as ROSTracking,
     Trackings as ROSTrackings,
 )
-from .callbacks import ObjectDetectionCallback, VideoCallback
+from .callbacks import ObjectDetectionCallback, RGBDCallback, VideoCallback
 
 __all__ = [
     "String",
@@ -118,6 +119,10 @@ class Detection(SupportedType):
         msg.boxes = boxes
         if isinstance(img, ROSCompressedImage):
             msg.compressed_image = CompressedImage.convert(img)
+        # Handle RealSense RGBD msgs
+        elif hasattr(img, "depth"):
+            msg.image = Image.convert(img.rgb)
+            msg.depth = Image.convert(img.depth)
         else:
             msg.image = Image.convert(img)
         return msg
@@ -193,6 +198,10 @@ class Tracking(SupportedType):
         msg.estimated_velocities = estimated_velocities
         if isinstance(img, ROSCompressedImage):
             msg.compressed_image = CompressedImage.convert(img)
+        # Handle RealSense RGBD msgs
+        elif hasattr(img, "depth"):
+            msg.image = Image.convert(img.rgb)
+            msg.depth = Image.convert(img.depth)
         else:
             msg.image = Image.convert(img)
         return msg
@@ -219,7 +228,23 @@ class Trackings(SupportedType):
         return msg
 
 
-agent_types = [Video, Detection, Detections, Tracking, Trackings]
+class RGBD(SupportedType):
+    """Adds callback for automatika_embodied_agents/msg/Detections2D message"""
+
+    callback = RGBDCallback
+
+    @classmethod
+    def get_ros_type(cls) -> type:
+        if find_spec("realsense2_camera_msgs") is None:
+            raise ModuleNotFoundError(
+                "'realsense2_camera_msgs' module is required to use 'RGBD' msg type but it is not installed"
+            )
+        from realsense2_camera_msgs.msg import RealSenseRGBD
+
+        return RealSenseRGBD
+
+
+agent_types = [Video, Detection, Detections, Tracking, Trackings, RGBD]
 
 
 add_additional_datatypes(agent_types)
