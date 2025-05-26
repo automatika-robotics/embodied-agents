@@ -258,37 +258,97 @@ class WebSocketClient(HTTPModelClient):
             loop.close()
         self.logger.info("WebSocket client thread finished.")
 
-    async def __websocket_client(self):
+    async def __websocket_client(self):  # noqa: C901
         if not (self.stop_event and self.request_queue and self.response_queue):
             self.logger.error("WebSocketClient is not configured.")
             return
 
         try:
             async with websockets.connect(self.websocket_endpoint) as websocket:
-                # Create concurrent tasks for sending and receiving
-                receiver_task = asyncio.create_task(
-                    self.__receive_messages(
-                        websocket, self.response_queue, self.stop_event
-                    )
-                )
-                sender_task = asyncio.create_task(
-                    self.__send_requests(websocket, self.request_queue, self.stop_event)
-                )
                 while not self.stop_event.is_set():
-                    if receiver_task.done() or sender_task.done():
-                        self.stop_event.set()  # Ensure full shutdown if a task finishes unexpectedly
-                        break
-                    await asyncio.sleep(
-                        0.1
-                    )  # Keep alive, check stop_event periodically
+                    try:
+                        # Attempt to send
+                        inference_input = (
+                            self.request_queue.get_nowait()
+                        )  # Non-blocking
+                        if inference_input.get("query") and isinstance(
+                            inference_input["query"], bytes
+                        ):
+                            inference_input["query"] = base64.b64encode(
+                                inference_input["query"]
+                            ).decode("utf-8")
+                        if images := inference_input.get("images"):
+                            inference_input["images"] = [
+                                encode_arr_base64(img) for img in images
+                            ]
+                        if websocket.close_code is None:
+                            await websocket.send(self.packer(inference_input))
+                            self.logger.debug("Sent input to server")
+                            self.request_queue.task_done()
+                        else:
+                            self.logger.warning(
+                                "WebSocket is closed, requeueing request."
+                            )
+                            # Try to put it back, might fail if main thread is also stopping
+                            try:
+                                self.request_queue.put_nowait(inference_input)
+                            except queue.Full:
+                                self.logger.error(
+                                    "Request queue full, cannot requeue lost message."
+                                )
+                            self.stop_event.set()  # Connection is closed, signal stop
+                            break
+                    except queue.Empty:
+                        pass  # No request to send, this is normal
+                    except websockets.exceptions.ConnectionClosed:
+                        self.logger.error("Connection closed while trying to send.")
+                        self.stop_event.set()
+                        break  # Exit loop
+                    except Exception as e_send:
+                        self.logger.error(
+                            f"Error sending message: {e_send} (Type: {type(e_send)})"
+                        )
 
-            # Tasks should ideally respond to stop_event, but cancellation is a fallback
-            if not sender_task.done():
-                sender_task.cancel()
-            if not receiver_task.done():
-                receiver_task.cancel()
-            # Wait for tasks to complete cancellation/exit
-            await asyncio.gather(sender_task, receiver_task, return_exceptions=True)
+                    # Check stop event before attempting to receive
+                    if self.stop_event.is_set():
+                        break
+
+                    # Attempt to receive
+                    try:
+                        # Use a short timeout for recv to keep the loop responsive
+                        # to new send requests and the stop_event.
+                        message = await asyncio.wait_for(
+                            websocket.recv(), timeout=0.05
+                        )  # 50ms timeout
+                        self.logger.debug(f"Received from server: '{message}'")
+                        self.response_queue.put(message)
+                    except asyncio.TimeoutError:
+                        pass  # No message received within timeout
+                    except websockets.exceptions.ConnectionClosedOK:
+                        self.logger.info(
+                            "WebSocket connection closed gracefully by server."
+                        )
+                        self.stop_event.set()
+                        break
+                    except websockets.exceptions.ConnectionClosedError as e_close:
+                        self.logger.error(
+                            f"WebSocket connection closed with error: {e_close}"
+                        )
+                        self.stop_event.set()
+                        break
+                    except Exception as e_recv:
+                        if not self.stop_event.is_set() and not isinstance(
+                            e_recv, asyncio.CancelledError
+                        ):
+                            self.logger.error(
+                                f"Error receiving message: {e_recv} (Type: {type(e_recv)})"
+                            )
+                        # assume the connection is compromised
+                        self.stop_event.set()
+                        break
+
+                    # Yield control to prevent a tight loop if queues are empty
+                    await asyncio.sleep(0.005)  # 5ms sleep
 
         except websockets.exceptions.InvalidURI:
             self.logger.error(f"Invalid WebSocket URI: {self.websocket_endpoint}")
@@ -301,87 +361,10 @@ class WebSocketClient(HTTPModelClient):
         except Exception as e:
             self.logger.error(f"An unexpected error occurred in client_logic: {e}")
         finally:
-            self.logger.info("WebSocket client logic finished.")
-            self.stop_event.set()  # Ensure main thread knows if client dies
-
-    async def __receive_messages(self, websocket, res_queue, stop_evt):
-        """Coroutine to continuously receive messages from the WebSocket."""
-        self.logger.debug("Receiver task started.")
-        try:
-            async for message in websocket:  # Continuously iterates as messages arrive
-                if stop_evt.is_set():
-                    self.logger.info("Receiver: Stop event detected, exiting.")
-                    break
-                if not isinstance(message, str):
-                    message = self.unpacker(message)
-                self.logger.debug(f"Receiver: Received from server: '{message}'")
-                res_queue.put(message)
-        except websockets.exceptions.ConnectionClosedOK:
             self.logger.info(
-                "WebSocketClient Receiver: WebSocket connection closed gracefully by server."
+                "WebSocket client logic finished. Rerun the script if this was caused by an error."
             )
-        except websockets.exceptions.ConnectionClosedError as e:
-            self.logger.error(
-                f"WebSocketClient Receiver: WebSocket connection closed with error: {e}"
-            )
-        except Exception as e:
-            # Avoid logging error if we are stopping and the error is due to connection closure
-            if not stop_evt.is_set() and not isinstance(e, asyncio.CancelledError):
-                self.logger.error(f"Receiver: Unexpected error: {e}")
-        finally:
-            self.logger.debug("Receiver task finished.")
-            stop_evt.set()  # Ensure other parts of the client know to stop
-
-    async def __send_requests(self, websocket, req_queue, stop_evt):
-        """Coroutine to send requests from the request_queue."""
-        self.logger.debug("Sender task started.")
-        try:
-            while not stop_evt.is_set():
-                try:
-                    # Get request from main thread with a short timeout
-                    inference_input = req_queue.get(block=True, timeout=0.1)
-                    # encode any byte or numpy array data
-                    if inference_input.get("query") and isinstance(
-                        inference_input["query"], bytes
-                    ):
-                        inference_input["query"] = base64.b64encode(
-                            inference_input["query"]
-                        ).decode("utf-8")
-                    if images := inference_input.get("images"):
-                        inference_input["images"] = [
-                            encode_arr_base64(img) for img in images
-                        ]
-                    if websocket.closed:
-                        self.logger.warning("Sender: WebSocket is closed, cannot send.")
-                        req_queue.put(
-                            inference_input
-                        )  # Put back for potential reprocessing or logging
-                        stop_evt.set()
-                        break
-                    await websocket.send(self.packer(inference_input))
-                    req_queue.task_done()  # Signal that this request item has been processed
-                except queue.Empty:
-                    # No request, loop again to check stop_event or new requests
-                    if stop_evt.is_set():
-                        self.logger.info("Sender: Stop event detected, exiting.")
-                        break
-                    continue
-                except websockets.exceptions.ConnectionClosed:
-                    self.logger.warning(
-                        "Sender: WebSocket connection closed. Cannot send."
-                    )
-                    stop_evt.set()  # Signal other parts to stop
-                    break
-                except Exception as e:
-                    if not stop_evt.is_set() and not isinstance(
-                        e, asyncio.CancelledError
-                    ):
-                        self.logger.error(f"Sender: Error sending message: {e}")
-                    if stop_evt.is_set():
-                        break
-                    time.sleep(0.1)  # avoid busy loop on continuous errors
-        finally:
-            self.logger.debug("Sender task finished.")
+            self.stop_event.set()  # Ensure main thread knows if client dies
 
 
 class HTTPDBClient(DBClient):

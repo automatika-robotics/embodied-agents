@@ -35,13 +35,20 @@ Some clients might need additional dependacies, which are provided in the follow
 """
 
 from .ollama import OllamaClient
-from .roboml import HTTPDBClient, HTTPModelClient, RESPDBClient, RESPModelClient
+from .roboml import (
+    HTTPDBClient,
+    HTTPModelClient,
+    RESPDBClient,
+    RESPModelClient,
+    WebSocketClient,
+)
 
 
 __all__ = [
     "OllamaClient",
     "HTTPDBClient",
     "HTTPModelClient",
+    "WebSocketClient",
     "RESPDBClient",
     "RESPModelClient",
 ]
