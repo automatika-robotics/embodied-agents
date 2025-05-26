@@ -239,7 +239,7 @@ class RGBD(SupportedType):
             raise ModuleNotFoundError(
                 "'realsense2_camera_msgs' module is required to use 'RGBD' msg type but it is not installed"
             )
-        from realsense2_camera_msgs.msg import RealSenseRGBD
+        from realsense2_camera_msgs.msg import RGBD as RealSenseRGBD
 
         return RealSenseRGBD
 
