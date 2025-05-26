@@ -169,13 +169,11 @@ class Component(BaseComponent):
             return
 
         all_msg_types = {topic.msg_type for topic in topics}
-        flattened_required = list(flatten(allowed_topic_types["Required"]))
-        flattened_optional = (
+        all_topic_types = list(flatten(allowed_topic_types["Required"])) + (
             list(flatten(allowed_topic_types.get("Optional")))
             if allowed_topic_types.get("Optional")
             else []
         )
-        all_topic_types = flattened_required + flattened_optional
 
         if msg_type := next(
             (
@@ -207,7 +205,7 @@ class Component(BaseComponent):
 
         if not sufficient_topics:
             raise TypeError(
-                f"{self.__class__.__name__} component {topics_direction} should have at least one topic of each datatype in the following list: {[topic.__name__ for topic in flattened_required]}"
+                f"{self.__class__.__name__} component {topics_direction} should have at least one topic of each datatype in the following list: {[' or '.join([t.__name__ for t in topic]) if isinstance(topic, List) else topic.__name__ for topic in allowed_topic_types['Required']]}"
             )
 
     @abstractmethod
