@@ -26,7 +26,7 @@ class Vision(ModelComponent):
     This component performs object detection and tracking on input images and outputs a list of detected objects, along with their bounding boxes and confidence scores.
 
     :param inputs: The input topics for the object detection.
-        This should be a list of Topic objects or FixedInput objects, limited to Image type.
+        This should be a list of Topic objects or FixedInput objects, limited to Image (or RGBD) type.
     :type inputs: list[Union[Topic, FixedInput]]
     :param outputs: The output topics for the object detection.
         This should be a list of Topic objects, Detection and Tracking types are handled automatically.
