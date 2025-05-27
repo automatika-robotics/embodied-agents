@@ -1,3 +1,4 @@
+import queue
 import json
 from pathlib import Path
 from typing import Any, Optional, Union, Callable, List, Dict
@@ -6,6 +7,7 @@ import msgpack_numpy as m_pack
 
 from ..callbacks import TextCallback
 from ..clients.db_base import DBClient
+from ..clients import WebSocketClient
 from ..clients.model_base import ModelClient
 from ..clients import OllamaClient
 from ..config import LLMConfig
@@ -364,7 +366,41 @@ class LLM(ModelComponent):
 
         return input
 
-    def __handle_streaming(self, result: Dict) -> Optional[List]:
+    def __handle_websocket_streaming(self, inference_input: Dict) -> Optional[List]:
+        """Handle streaming output from a websocket client"""
+        result_partial = []
+        result_complete = []
+        try:
+            while True:
+                token = self.resp_queue.get(block=True)
+                if token:
+                    if token == self.config.response_terminator:
+                        break
+                    if self.config.break_character:
+                        result_partial.append(token)
+                        if self.config.break_character in token:
+                            result_complete += result_partial
+                            self._publish({"output": "".join(result_partial)})
+                            result_partial = []
+                            continue
+                    else:
+                        result_complete.append(token)
+                        self._publish({"output": token})
+                        result_partial = []
+            # Send remaining result after break character or termination if any
+            if result_partial:
+                result_complete += result_partial
+                self._publish({"output": "".join(result_partial)})
+            self.messages.append({
+                "role": "assistant",
+                "content": "".join(result_complete),
+            })
+        except Exception as e:
+            self.get_logger().error(str(e))
+            # raise a fallback trigger via health status
+            self.health_status.set_failure()
+
+    def __handle_streaming_generator(self, result: Dict) -> Optional[List]:
         """Handle streaming output"""
         result_partial = []
         result_complete = []
@@ -373,22 +409,25 @@ class LLM(ModelComponent):
                 # Handle ollama client streaming format
                 if isinstance(self.model_client, OllamaClient):
                     token = token["message"]["content"]
-                result_partial.append(token)
                 if self.config.break_character:
+                    result_partial.append(token)
                     if self.config.break_character in token:
                         result_complete += result_partial
                         self._publish({"output": "".join(result_partial)})
                         result_partial = []
                         continue
                 else:
-                    result_complete += result_partial
-                    self._publish({"output": "".join(result_partial)})
+                    result_complete.append(token)
+                    self._publish({"output": token})
                     result_partial = []
             # Send remaining result after break character if any
             if result_partial:
                 result_complete += result_partial
                 self._publish({"output": "".join(result_partial)})
-            return result_complete
+            self.messages.append({
+                "role": "assistant",
+                "content": "".join(result_complete),
+            })
         except Exception as e:
             self.get_logger().error(str(e))
             # raise a fallback trigger via health status
@@ -418,17 +457,25 @@ class LLM(ModelComponent):
             return
 
         # conduct inference
-        result = self.model_client.inference(inference_input)
+        if isinstance(self.model_client, WebSocketClient):
+            self.req_queue.put_nowait(inference_input)
+            if self.config.stream:
+                self.__handle_websocket_streaming(inference_input)
+                return
+            else:
+                result = {}
+                try:
+                    result["output"] = self.resp_queue.get(
+                        block=True, timeout=self.model_client.inference_timeout
+                    )
+                except queue.Empty:
+                    result = None
+        else:
+            result = self.model_client.inference(inference_input)
 
         if result:
             if self.config.stream:
-                result_complete = self.__handle_streaming(result)
-                if not result_complete:
-                    return
-                self.messages.append({
-                    "role": "assistant",
-                    "content": "".join(result_complete),
-                })
+                self.__handle_streaming_generator(result)
                 return
 
             self.messages.append({"role": "assistant", "content": result["output"]})
@@ -443,6 +490,7 @@ class LLM(ModelComponent):
                 return
 
             # publish inference result
+            self.get_logger().info("Going to publish")
             self._publish(result)
 
         else:

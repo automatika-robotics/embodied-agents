@@ -1,4 +1,3 @@
-import time
 import asyncio
 import base64
 import queue
@@ -16,7 +15,7 @@ from ..vectordbs import DB
 from .db_base import DBClient
 from .model_base import ModelClient
 
-__all__ = ["HTTPModelClient", "HTTPDBClient", "RESPDBClient", "RESPModelClient"]
+__all__ = ["HTTPModelClient", "HTTPDBClient", "WebSocketClient", "RESPModelClient"]
 
 
 class Status(str, Enum):
@@ -217,7 +216,6 @@ class WebSocketClient(HTTPModelClient):
             # patch msgpack for numpy arrays
             m_pack.patch()
             self.packer = msgpack.packb
-            self.unpacker = msgpack.unpackb
         except ModuleNotFoundError as e:
             raise ModuleNotFoundError(
                 "In order to use the WebSocketClient, you need msgpack packages installed. You can install it with 'pip install msgpack msgpack-numpy'"
@@ -316,7 +314,7 @@ class WebSocketClient(HTTPModelClient):
                     # Attempt to receive
                     try:
                         # Use a short timeout for recv to keep the loop responsive
-                        # to new send requests and the stop_event.
+                        # for new send requests and the stop_event.
                         message = await asyncio.wait_for(
                             websocket.recv(), timeout=0.05
                         )  # 50ms timeout

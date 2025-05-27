@@ -17,16 +17,12 @@ Some clients might need additional dependacies, which are provided in the follow
   - An HTTP client for interaction with ML models served on RoboML.
 
 * - **RoboML**
-  - [HTTPDBClient](agents.clients.roboml.HTTPDBClient)
-  - An HTTP client for interaction with vector DBs served on RoboML.
+  - [WebSocketClient](agents.clients.roboml.WebSocketClient)
+  - A websocket based client for persistent interaction with ML models served on RoboML. Specially useful for low latency streaming of audio or text data.
 
 * - **RoboML**
   - [RESPModelClient](agents.clients.roboml.RESPModelClient)
   - A Redis Serialization Protocol (RESP) based client for interaction with ML models served on RoboML. **Note:** In order to use this client, please install dependancies with `pip install redis[hiredis] msgpack msgpack-numpy`
-
-* - **RoboML**
-  - [RESPDBClient](agents.clients.roboml.RESPDBClient)
-  - A Redis Serialization Protocol (RESP) based client for interaction with vector DBs served on RoboML. **Note:** In order to use this client, please install dependancies with `pip install redis[hiredis] msgpack msgpack-numpy`
 
 * - **Ollama**
   - [OllamaClient](agents.clients.ollama.OllamaClient)

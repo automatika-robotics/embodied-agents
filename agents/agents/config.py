@@ -59,6 +59,9 @@ class LLMConfig(ModelComponentConfig):
     :param break_character: A string character marking that the output thus far received in a stream should be published. This parameter only takes effect when stream is set to True. As stream output is received token by token, it is useful to publish full sentences instead of individual tokens as the components output (for example, for downstream text to speech conversion). This value can be set to an empty string to publish output token by token.
         Default is '.' (period)
     :type break_character: str
+    :param response_terminator: A string token marking that the end of a single response from the model. This token is only used in case of a persistent clients, such as a websocket client and it is not published. This value cannot be an empty string.
+        Default is '<<Response Ended>>'
+    :type response_terminator: str
 
     Example of usage:
     ```python
@@ -82,6 +85,7 @@ class LLMConfig(ModelComponentConfig):
     max_new_tokens: int = field(default=100, validator=base_validators.gt(0))
     stream: bool = field(default=False)
     break_character: str = field(default=".")
+    response_terminator: str = field(default="<<Response Ended>>")
     _system_prompt: Optional[str] = field(default=None, alias="_system_prompt")
     _component_prompt: Optional[Union[str, Path]] = field(
         default=None, alias="_component_prompt"
@@ -95,6 +99,11 @@ class LLMConfig(ModelComponentConfig):
     _tool_response_flags: Dict[str, bool] = field(
         default=Factory(dict), alias="_tool_response_flags"
     )
+
+    @response_terminator.validator
+    def not_empty(self, _, value):
+        if not value:
+            raise ValueError("response_terminator must not be an empty string")
 
     def _get_inference_params(self) -> Dict:
         """get_inference_params.
