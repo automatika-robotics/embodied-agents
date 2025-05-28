@@ -23,8 +23,6 @@ class OllamaClient(ModelClient):
         logging_level: str = "info",
         **kwargs,
     ):
-        if isinstance(model, LLM):
-            model._set_ollama_checkpoint()
         try:
             from ollama import Client
 
@@ -33,6 +31,14 @@ class OllamaClient(ModelClient):
             raise ModuleNotFoundError(
                 "In order to use the OllamaClient, you need ollama-python package installed. You can install it with 'pip install ollama'"
             ) from e
+
+        if not isinstance(model, LLM):
+            raise TypeError(
+                "OllamaClient can only be used with LLM and MLLM components"
+            )
+
+        model._set_ollama_checkpoint()
+
         super().__init__(
             model=model,
             host=host,
@@ -74,22 +80,15 @@ class OllamaClient(ModelClient):
             self.logger.info(f"{self.model_name} model initialized")
         except Exception as e:
             self.logger.error(str(e))
-            return None
 
     def _inference(self, inference_input: Dict[str, Any]) -> Optional[Dict]:
         """Call inference on the model using data and inference parameters from the component"""
-        if not (query := inference_input.get("query")):
-            raise TypeError(
-                "OllamaClient can only be used with LLM and MLLM components"
-            )
         # create input
         input = {
             "model": self.model_init_params["checkpoint"],
-            "messages": query,
-            "stream": inference_input["stream"],
+            "messages": inference_input.pop("query"),
+            "stream": inference_input.pop("stream"),
         }
-        inference_input.pop("query")
-        inference_input.pop("stream")
 
         # make images part of the latest message in message list
         if images := inference_input.get("images"):
@@ -102,8 +101,8 @@ class OllamaClient(ModelClient):
             inference_input.pop("tools")
 
         # ollama uses num_predict for max_new_tokens
-        if inference_input.get("max_new_tokens"):
-            inference_input["num_predict"] = inference_input["max_new_tokens"]
+        if max_new_tokens := inference_input.get("max_new_tokens"):
+            inference_input["num_predict"] = max_new_tokens
             inference_input.pop("max_new_tokens")
         input["options"] = inference_input
 
@@ -114,7 +113,7 @@ class OllamaClient(ModelClient):
             ollama_result = self.client.chat(**input)
         except Exception as e:
             self.logger.error(str(e))
-            return None
+            return
 
         if isinstance(ollama_result, GeneratorType):
             input["output"] = ollama_result
@@ -138,7 +137,6 @@ class OllamaClient(ModelClient):
 
             # no output or tool calls
             self.logger.debug("Output not received")
-            return
 
     def _deinitialize(self):
         """Deinitialize the model on the platform"""
@@ -150,4 +148,3 @@ class OllamaClient(ModelClient):
             )
         except Exception as e:
             self.logger.error(str(e))
-            return None
