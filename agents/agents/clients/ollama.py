@@ -82,9 +82,12 @@ class OllamaClient(ModelClient):
                 self.client.generate(
                     model=self.model_init_params["checkpoint"], keep_alive=10
                 )
-            self.logger.info(f"{self.model_name} model initialized")
         except Exception as e:
-            self.logger.error(str(e))
+            self.logger.error(
+                f"Failed to initialize model {self.model_init_params['checkpoint']} on Ollama, please ensure that the checkpoint name is correct. Received the following error: {e}"
+            )
+            raise
+        self.logger.info(f"{self.model_name} model initialized")
 
     def _inference(self, inference_input: Dict[str, Any]) -> Optional[Dict]:
         """Call inference on the model using data and inference parameters from the component"""

@@ -51,6 +51,16 @@ class HTTPDBClient(DBClient):
                 port=self.db_init_params["ollama_port"],
                 logging_level=logging_level,
             )
+        else:
+            try:
+                from sentence_transformers import SentenceTransformer
+
+                self.SentenceTransformer = SentenceTransformer
+                self.embeddings_client: SentenceTransformer
+            except ModuleNotFoundError as e:
+                raise ModuleNotFoundError(
+                    "In order to use the local models from sentence-transformers as your embedding model, you need sentence-transformers package installed. You can install it with 'pip install sentence-transformers'"
+                ) from e
 
         self._check_connection()
 
@@ -131,6 +141,16 @@ class HTTPDBClient(DBClient):
         """
         if self.db_init_params["embeddings"] == "ollama":
             self.embeddings_client.initialize()
+        else:
+            try:
+                self.embeddings_client = self.SentenceTransformer(
+                    self.db_init_params["checkpoint"]
+                )
+            except Exception as e:
+                self.logger.error(
+                    f"Failed to load model local checkpoint {self.db_init_params['checkpoint']} from sentence_transformers. Please ensure that checkpoint name is correct. Got the following error: {e}"
+                )
+                raise
 
     def _get_or_create_collection(
         self,
@@ -202,7 +222,7 @@ class HTTPDBClient(DBClient):
             )
 
             # Create embeddings
-            if not (embeddings := self._embed(db_input["documents"])):
+            if (embeddings := self._embed(db_input["documents"])) is None:
                 return
 
             add_payload = {
@@ -237,7 +257,7 @@ class HTTPDBClient(DBClient):
         )
 
         # Create embeddings
-        if not (embeddings := self._embed(db_input["documents"])):
+        if (embeddings := self._embed(db_input["documents"])) is None:
             return
 
         upsert_payload = {
@@ -323,7 +343,7 @@ class HTTPDBClient(DBClient):
             )
 
             # Create embeddings
-            if not (query_embeddings := self._embed(db_input["query"])):
+            if (query_embeddings := self._embed(db_input["query"])) is None:
                 return
 
             query_payload = {
@@ -356,10 +376,16 @@ class HTTPDBClient(DBClient):
         # Create embeddings
         if self.db_init_params["embeddings"] == "ollama":
             embeddings = self.embeddings_client._embed(input)
-            if not embeddings:
-                self.logger.error("Could not create embeddings using ollama client")
-                return
         else:
-            embeddings = None
+            if isinstance(
+                input, str
+            ):  # ChromaDB requires a list even for one embedding
+                input = [input]
+            embeddings = self.embeddings_client.encode(input).tolist()
+        if embeddings is None:
+            self.logger.error(
+                f"Could not create embeddings using {self.db_init_params['embeddings']}"
+            )
+            return
 
         return embeddings
