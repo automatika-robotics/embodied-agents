@@ -1,5 +1,5 @@
 from types import GeneratorType
-from typing import Any, Optional, Dict, Union
+from typing import Any, Optional, Dict, Union, List
 
 import httpx
 
@@ -34,7 +34,7 @@ class OllamaClient(ModelClient):
 
         if not isinstance(model, LLM):
             raise TypeError(
-                "OllamaClient can only be used with LLM and MLLM components"
+                "OllamaClient can only be used with an LLM, MLLM or an OllamaModel"
             )
 
         model._set_ollama_checkpoint()
@@ -74,9 +74,14 @@ class OllamaClient(ModelClient):
                     f"Could not pull model {self.model_init_params['checkpoint']}"
                 )
             # load model in memory with empty request
-            self.client.generate(
-                model=self.model_init_params["checkpoint"], keep_alive=10
-            )
+            if self.model_name == "embed":  # Internal embeddings model name
+                self.client.embed(
+                    model=self.model_init_params["checkpoint"], keep_alive=10
+                )
+            else:
+                self.client.generate(
+                    model=self.model_init_params["checkpoint"], keep_alive=10
+                )
             self.logger.info(f"{self.model_name} model initialized")
         except Exception as e:
             self.logger.error(str(e))
@@ -137,6 +142,36 @@ class OllamaClient(ModelClient):
 
             # no output or tool calls
             self.logger.debug("Output not received")
+
+    def _embed(
+        self, input: Union[str, List[str]], truncate: bool = False
+    ) -> Optional[List[List]]:
+        # create input
+        embedding_input = {
+            "model": self.model_init_params["checkpoint"],
+            "input": input,
+            "truncate": truncate,
+        }
+
+        # call embedding method
+        try:
+            # set timeout on underlying httpx client
+            self.client._client.timeout = self.inference_timeout
+            ollama_result = self.client.embed(**embedding_input)
+        except Exception as e:
+            self.logger.error(str(e))
+            return
+
+        self.logger.debug(
+            f"Created embeddings of length: {len(ollama_result['embeddings'])}"
+        )
+
+        # make result part of the input
+        if not (result := ollama_result.get("embeddings")) or not result:
+            self.logger.error("Embeddings not generated")
+            return
+
+        return ollama_result["embeddings"]
 
     def _deinitialize(self):
         """Deinitialize the model on the platform"""

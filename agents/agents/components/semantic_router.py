@@ -62,7 +62,7 @@ class SemanticRouter(Component):
         ],
     )
     config = SemanticRouterConfig(router_name="my_router")
-    db_client = DBClient(db=ChromaDB("database_name"))
+    db_client = HTTPDBClient(db=ChromaDB(host='localhost', port=8080))
     semantic_router = SemanticRouter(
         inputs=[input_text],
         routes=[route1, route2],

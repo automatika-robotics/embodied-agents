@@ -8,7 +8,6 @@ from attrs import define, field
 from .ros import BaseAttrs, base_validators
 
 __all__ = [
-    "Encoder",
     "Llama3",
     "Llama3_1",
     "OllamaModel",
@@ -46,21 +45,6 @@ class Model(BaseAttrs):
     def _get_init_params(self) -> Dict:
         """Get init params for model initialization."""
         return {"checkpoint": self.checkpoint}
-
-
-@define(kw_only=True)
-class Encoder(Model):
-    """A text encoder model that can be used with vector DBs.
-
-    :param name: An arbitrary name given to the model.
-    :type name: str
-    :param checkpoint: The name of the pre-trained model's checkpoint. Default is "BAAI/bge-small-en".
-    :type checkpoint: str
-    :param init_timeout: The timeout in seconds for the initialization process. Defaults to None.
-    :type init_timeout: int, optional
-    """
-
-    checkpoint: str = field(default="BAAI/bge-small-en")
 
 
 @define(kw_only=True)

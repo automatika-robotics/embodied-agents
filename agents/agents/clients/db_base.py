@@ -35,22 +35,20 @@ class DBClient(ABC):
         """
         if isinstance(db, DB):
             self.db_type = db.__class__.__name__
-            self.db_name = db.name
             self.init_timeout = db.init_timeout
             self.db_init_params = db._get_init_params()
 
         else:
             self.db_type = db["db_type"]
-            self.db_name = db["db_name"]
             self.init_timeout = db["init_timeout"]
             self.db_init_params = db["db_init_params"]
 
         self.host = host
         self.port = port
         self.init_on_activation = init_on_activation
-        self.logger = logging.get_logger(self.db_name)
+        self.logger = logging.get_logger(self.db_type)
         logging.set_logger_level(
-            self.db_name, logging.get_logging_severity_from_string(logging_level)
+            self.db_type, logging.get_logging_severity_from_string(logging_level)
         )
         self.response_timeout = response_timeout
 
@@ -59,7 +57,6 @@ class DBClient(ABC):
         :rtype: Dict
         """
         db = {
-            "db_name": self.db_name,
             "db_type": self.db_type,
             "init_timeout": self.init_timeout,
             "db_init_params": self.db_init_params,
@@ -123,9 +120,8 @@ class DBClient(ABC):
     def deinitialize(self) -> None:
         """deinitialize."""
         # TODO: Add check for db initialization by keeping db
-        # state in client
-        if self.init_on_activation:
-            self._deinitialize()
+        # state in client. Currently always deinitialize db client
+        self._deinitialize()
 
     @abstractmethod
     def _check_connection(self) -> None:

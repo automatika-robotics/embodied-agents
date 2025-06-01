@@ -4,9 +4,9 @@ The following vector DB specification classes are meant to define a comman inter
 
 from typing import Optional, Dict
 
+from agents.ros import base_validators
 from attrs import define, field
 from .ros import BaseAttrs
-from .models import Encoder
 
 __all__ = ["ChromaDB"]
 
@@ -15,14 +15,10 @@ __all__ = ["ChromaDB"]
 class DB(BaseAttrs):
     """This class describes a database initialization configuration."""
 
-    name: str
     db_location: str = field(default="./data")
     username: Optional[str] = field(default=None)
     password: Optional[str] = field(default=None)
-    encoder: Optional[Encoder] = field(default=None)
     init_timeout: int = field(default=600)  # 10 minutes
-    host: str = field(default="127.0.0.1")
-    port: Optional[int] = field(default=None)
 
     def _get_init_params(self) -> Dict:
         params = {
@@ -30,8 +26,6 @@ class DB(BaseAttrs):
             "password": self.password,
             "db_location": self.db_location,
         }
-        if self.encoder:
-            params["encoder"] = self.encoder._get_init_params()
         return params
 
 
@@ -39,30 +33,63 @@ class DB(BaseAttrs):
 class ChromaDB(DB):
     """[Chroma](https://www.trychroma.com/) is the open-source AI application database. It provides embeddings, vector search, document storage, full-text search, metadata filtering, and multi-modal retreival support.
 
-    :param name: An arbitrary name given to the database.
-    :type name: str
     :param db_location: The on-disk location where the database will be initialized. Defaults to "./data".
     :type db_location: str, optional
     :param username: The username for authentication. Defaults to None.
     :type username: Optional[str], optional
     :param password: The password for authentication. Defaults to None.
     :type password: Optional[str], optional
-    :param encoder: An optional encoder model to use for text encoding. Defaults to None.
-    :type encoder: Optional[Encoder], optional
+    :param embeddings: Embedding backend to use. Choose from "ollama" or "sentence-transformers".
+    :type embeddings: str, optional
+    :param checkpoint: The model checkpoint to use for embeddings. For example, "bge-large:latest".
+    :type checkpoint: str, optional
+    :param ollama_host: Host address for the Ollama service (used if embeddings="ollama").
+    :type ollama_host: str, optional
+    :param ollama_port: Port number for the Ollama service.
+    :type ollama_port: int, optional
     :param init_timeout: The timeout in seconds for the initialization process. Defaults to 10 minutes (600 seconds).
     :type init_timeout: int, optional
-    :param host: The hostname or IP address of the database server. Defaults to "127.0.0.1".
-    :type host: str, optional
-    :param port: The port number to connect to the database server. Defaults to None.
-    :type port: Optional[int], optional
 
-    Example usage:
+    To use ChromaDB with the supported embedding backends, install the following Python packages:
+
+    ```bash
+    pip install ollama  # if using ollama (requires separate Ollama runtime)
+    pip install sentence-transformers  # if using sentence-transformers
+    ```
+
+    If using the Ollama backend, make sure the Ollama server is running and accessible at the specified host and port.
+
+    Example Usage:
+
     ```python
-    from agents.models import Encoder
-    db_config = DB(name='my_database', username='user123', password='pass123')
-    db_config.db_location = '/path/to/new/location'
-    db_config.encoder = Encoder(checkpoint="BAAI/bge-small-en")
+    from agents.vectordbs import ChromaDB
+
+    chroma_config = ChromaDB(
+        db_location='/path/to/db',
+        embeddings='ollama',
+        checkpoint='bge-large:latest',
+        ollama_host='localhost',
+        ollama_port=11434
+    )
     ```
     """
 
-    pass
+    embeddings: str = field(
+        default="ollama",
+        validator=base_validators.in_(["ollama", "sentence-transformers"]),
+    )
+    checkpoint: str = field(default="bge-large:latest")
+    ollama_host: str = field(default="127.0.0.1")
+    ollama_port: int = field(default=11434)
+
+    def _get_init_params(self) -> Dict:
+        params = {
+            "username": self.username,
+            "password": self.password,
+            "db_location": self.db_location,
+            "embeddings": self.embeddings,
+            "checkpoint": self.checkpoint,
+            "ollama_host": self.ollama_host,
+            "ollama_port": self.ollama_port,
+        }
+        return params

@@ -18,7 +18,7 @@ Some clients might need additional dependacies, which are provided in the follow
 
 * - **RoboML**
   - [WebSocketClient](agents.clients.roboml.WebSocketClient)
-  - A websocket based client for persistent interaction with ML models served on RoboML. Specially useful for low latency streaming of audio or text data.
+  - A websocket based client for persistent interaction with ML models served on RoboML. Specially useful for low latency streaming of audio or text data. **Note:** If you get import errors while using this client, please install dependancies with `pip install msgpack msgpack-numpy`
 
 * - **RoboML**
   - [RESPModelClient](agents.clients.roboml.RESPModelClient)
@@ -28,16 +28,18 @@ Some clients might need additional dependacies, which are provided in the follow
   - [OllamaClient](agents.clients.ollama.OllamaClient)
   - An HTTP client for interaction with ML models served on Ollama. **Note:** In order to use this client, please install dependancies with `pip install ollama`
 
+* - **ChromaDB**
+  - [HTTPDBClient](agents.clients.chroma.HTTPDBClient)
+  - An HTTP client for interaction with a ChromaDB instance running as a server. Before using this client, make sure an instance of ChromaDB is running on the given host and port by executing `chroma run --path /db_path`
 """
 
 from .ollama import OllamaClient
 from .roboml import (
-    HTTPDBClient,
     HTTPModelClient,
-    RESPDBClient,
     RESPModelClient,
     WebSocketClient,
 )
+from .chroma import HTTPDBClient
 
 
 __all__ = [
@@ -45,6 +47,5 @@ __all__ = [
     "HTTPDBClient",
     "HTTPModelClient",
     "WebSocketClient",
-    "RESPDBClient",
     "RESPModelClient",
 ]

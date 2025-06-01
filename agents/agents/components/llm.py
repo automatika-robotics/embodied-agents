@@ -366,7 +366,7 @@ class LLM(ModelComponent):
 
         return input
 
-    def __handle_websocket_streaming(self, inference_input: Dict) -> Optional[List]:
+    def __handle_websocket_streaming(self) -> Optional[List]:
         """Handle streaming output from a websocket client"""
         result_partial = []
         result_complete = []
@@ -460,7 +460,7 @@ class LLM(ModelComponent):
         if isinstance(self.model_client, WebSocketClient):
             self.req_queue.put_nowait(inference_input)
             if self.config.stream:
-                self.__handle_websocket_streaming(inference_input)
+                self.__handle_websocket_streaming()
                 return
             else:
                 result = {}
