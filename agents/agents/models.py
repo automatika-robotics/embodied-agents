@@ -280,27 +280,28 @@ class Whisper(Model):
 
     :param name: An arbitrary name given to the model.
     :type name: str
-    :param checkpoint: The name of the pre-trained model's checkpoint. Default is "openai/whisper-small.en". For available checkpoints, consult [Whisper checkpoints on HuggingFace](https://huggingface.co/collections/openai/whisper-release-6501bba2cf999715fd953013).
+    :param checkpoint: Size of the model to use (tiny, tiny.en, base, base.en, small, small.en, distil-small.en, medium, medium.en, distil-medium.en, large-v1, large-v2, large-v3, large, distil-large-v2, distil-large-v3, large-v3-turbo, or turbo). For more information check [here](https://github.com/SYSTRAN/faster-whisper/blob/d3bfd0a305eb9d97c08047c82149c1998cc90fcb/faster_whisper/transcribe.py#L606)
     :type checkpoint: str
-    :param quantization: The quantization scheme used by the model. Can be one of "4bit", "8bit" or None (default is "4bit").
-    :type quantization: str or None
+    :param compute_type: The compute type used by the model. Can be one of "int8", "fp16", "fp32", None (default is "int8").
+    :type compute_type: str or None
     :param init_timeout: The timeout in seconds for the initialization process. Defaults to None.
     :type init_timeout: int, optional
 
     Example usage:
     ```python
-    whisper = Whisper(name='s2t', checkpoint="openai/whisper-medium") # Initialize with a different checkpoint
+    whisper = Whisper(name='s2t', checkpoint="small") # Initialize with a different checkpoint
     ```
     """
 
-    checkpoint: str = field(default="openai/whisper-small.en")
-    quantization: Optional[str] = field(
-        default="4bit", validator=base_validators.in_(["4bit", "8bit", None])
+    checkpoint: str = field(default="small.en")
+    compute_type: Optional[str] = field(
+        default="int8",
+        validator=base_validators.in_(["int8", "float16", "float32", None]),
     )
 
     def get_init_params(self) -> Dict:
         """Get init params for model initialization."""
-        return {"checkpoint": self.checkpoint, "quantization": self.quantization}
+        return {"checkpoint": self.checkpoint, "compute_type": self.compute_type}
 
 
 @define(kw_only=True)

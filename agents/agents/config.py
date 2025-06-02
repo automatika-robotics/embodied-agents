@@ -243,11 +243,11 @@ class SpeechToTextConfig(ModelComponentConfig):
     :type vad_threshold: float
     :param wakeword_threshold: Minimum threshold for detecting the wake word phrase. Only effective if `enable_wakeword` is set to true. Defaults to 0.6 (60%).
     :type wakeword_threshold: float
-    :param min_silence_duration_ms: Minimum duration of silence in milliseconds before considering it as a speaker pause. Only effective if `enable_vad` is set to true. Defaults to 1000 ms.
+    :param min_silence_duration_ms: Minimum duration of silence in milliseconds before considering it as a speaker pause. Only effective if `enable_vad` is set to true. Defaults to 500 ms.
     :type min_silence_duration_ms: int
     :param speech_pad_ms: Duration in milliseconds to pad silence at the start and end of detected speech regions. Only effective if `enable_vad` is set to true. Defaults to 30 ms.
     :type speech_pad_ms: int
-    :param speech_buffer_max_len: Maximum length of the speech buffer in milliseconds. Defaults to 8000ms. Only effective if `enable_vad` is set to true.
+    :param speech_buffer_max_len: Maximum length of the speech buffer in milliseconds. Defaults to 30,000ms (30 seconds). Only effective if `enable_vad` is set to true.
     :type speech_buffer_max_len: int
     :param device_vad: Device type for VAD processing ('cpu' or 'gpu'). Only effective if `enable_vad` is set to true. Defaults to 'cpu'.
     :type device_vad: str
@@ -289,9 +289,9 @@ class SpeechToTextConfig(ModelComponentConfig):
     wakeword_threshold: float = field(
         default=0.6, validator=base_validators.in_range(min_value=0.0, max_value=1.0)
     )
-    min_silence_duration_ms: int = field(default=1000)
+    min_silence_duration_ms: int = field(default=500)
     speech_pad_ms: int = field(default=30)
-    speech_buffer_max_len: int = field(default=8000)
+    speech_buffer_max_len: int = field(default=30000)
     device_vad: str = field(
         default="cpu", validator=base_validators.in_(["cpu", "gpu"])
     )

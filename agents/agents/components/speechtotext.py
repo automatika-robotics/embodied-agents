@@ -169,7 +169,11 @@ class SpeechToText(ModelComponent):
             if query is None or len(query) == 0:
                 return None
 
-        return {"query": query, **self.config._get_inference_params()}
+        return {
+            "query": query,
+            "vad_filter": (not self.config.enable_vad),  # vad filtering on server
+            **self.config._get_inference_params(),
+        }
 
     def _stream_callback(
         self, indata: bytes, frames: int, _, status
@@ -202,10 +206,14 @@ class SpeechToText(ModelComponent):
             # create audio embeddings for wakeword classifier
             self.audio_features(np_frames)
             if self.wake_word_triggered:
-                self.speech_buffer.append(indata)
+                self.speech_buffer.append(
+                    np_frames / 32768
+                )  # To correct for conversion between int16 and float32
         # otherwise store speech when vad is triggered
         elif self.vad_iterator.triggered:
-            self.speech_buffer.append(indata)
+            self.speech_buffer.append(
+                np_frames / 32768
+            )  # To correct for conversion between int16 and float32
 
         # add vad status outputs to queue
         if vad_output:
@@ -282,7 +290,7 @@ class SpeechToText(ModelComponent):
             self.get_logger().debug(
                 f"Received speech from speech thread: {len(kwargs['speech'])}"
             )
-            kwargs["speech"] = b"".join(kwargs["speech"])
+            kwargs["speech"] = np.concatenate(kwargs["speech"])
         elif self.run_type is ComponentRunType.EVENT:
             trigger = kwargs.get("topic")
             if not trigger:
