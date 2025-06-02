@@ -9,7 +9,7 @@ from typing import Any, Optional, Sequence, Union, List, Dict, Type
 from ..clients.model_base import ModelClient
 from ..clients.roboml import WebSocketClient
 from ..config import ModelComponentConfig
-from ..ros import FixedInput, Topic, SupportedType
+from ..ros import FixedInput, Topic, SupportedType, MutuallyExclusiveCallbackGroup
 from .component_base import Component
 
 
@@ -23,7 +23,6 @@ class ModelComponent(Component):
         model_client: Optional[ModelClient] = None,
         config: Optional[ModelComponentConfig] = None,
         trigger: Union[Topic, List[Topic], float] = 1.0,
-        callback_group=None,
         component_name: str = "model_component",
         **kwargs,
     ):
@@ -41,7 +40,6 @@ class ModelComponent(Component):
             outputs,
             config,
             trigger,
-            callback_group,
             component_name,
             **kwargs,
         )
@@ -61,7 +59,7 @@ class ModelComponent(Component):
             self.model_client.check_connection()
             self.model_client.initialize()
             if isinstance(self.model_client, WebSocketClient):
-                # create queues and threads
+                # create queues and threads for the websocket client
                 self.req_queue = queue.Queue()
                 self.resp_queue = queue.Queue()
                 self.client_stop_event = threading.Event()
@@ -74,6 +72,19 @@ class ModelComponent(Component):
                     daemon=True,
                 )
                 self.client_thread.start()
+
+                # Create a fast timer for publishing websocket client outputs
+                # asynchronously in case of streaming. The callback is implemented
+                # in child components and gets executed in a blocking manner
+                if hasattr(self.config, "stream") and self.config.stream:
+                    self.create_timer(
+                        timer_period_sec=0.001,
+                        callback=self._handle_websocket_streaming,
+                        callback_group=MutuallyExclusiveCallbackGroup(),
+                    )
+                    self.get_logger().debug(
+                        "Started timer for handling websocket streaming"
+                    )
             else:
                 if self.config.warmup:
                     try:
@@ -163,6 +174,17 @@ class ModelComponent(Component):
         """
         raise NotImplementedError(
             "_warmup method needs to be implemented by child components."
+        )
+
+    @abstractmethod
+    def _handle_websocket_streaming(self) -> Optional[Any]:
+        """__handle_websocket_streaming.
+
+        :param args:
+        :param kwargs:
+        """
+        raise NotImplementedError(
+            "__handle_websocket_streaming method needs to be implemented by child components."
         )
 
     def _update_cmd_args_list(self):

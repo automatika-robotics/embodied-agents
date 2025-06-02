@@ -42,11 +42,7 @@ class LLM(ModelComponent):
     :param trigger: The trigger value or topic for the LLM component.
         This can be a single Topic object, a list of Topic objects, or a float value for a timed component. Defaults to 1.
     :type trigger: Union[Topic, list[Topic], float]
-    :param callback_group: An optional callback group for the LLM component.
-        If provided, this should be a string. Otherwise, it defaults to None.
-    :type callback_group: str
-    :param component_name: The name of the LLM component.
-        This should be a string and defaults to "llm_component".
+    :param component_name: The name of the LLM component. This should be a string.
     :type component_name: str
     :param kwargs: Additional keyword arguments for the LLM.
 
@@ -76,7 +72,6 @@ class LLM(ModelComponent):
         db_client: Optional[DBClient] = None,
         trigger: Union[Topic, List[Topic], float] = 1.0,
         component_name: str,
-        callback_group=None,
         **kwargs,
     ):
         self.config: LLMConfig = config or LLMConfig()
@@ -98,6 +93,7 @@ class LLM(ModelComponent):
             else None
         )
 
+        # Initialize a messages buffer
         self.messages: List[Dict] = (
             [{"role": "system", "content": self.config._system_prompt}]
             if self.config._system_prompt
@@ -110,7 +106,6 @@ class LLM(ModelComponent):
             model_client,
             self.config,
             trigger,
-            callback_group,
             component_name,
             **kwargs,
         )
@@ -142,6 +137,11 @@ class LLM(ModelComponent):
         if self.db_client:
             self.db_client.check_connection()
             self.db_client.initialize()
+
+        # initialize response buffers used for streaming
+        if self.config.stream:
+            self.result_partial: List = []
+            self.result_complete: List = []
 
     def custom_on_deactivate(self):
         # deactivate db client
@@ -366,35 +366,32 @@ class LLM(ModelComponent):
 
         return input
 
-    def __handle_websocket_streaming(self) -> Optional[List]:
+    def _handle_websocket_streaming(self) -> Optional[List]:
         """Handle streaming output from a websocket client"""
-        result_partial = []
-        result_complete = []
         try:
-            while True:
-                token = self.resp_queue.get(block=True)
-                if token:
-                    if token == self.config.response_terminator:
-                        break
+            token = self.resp_queue.get(block=True)
+            if token:
+                if not token == self.config.response_terminator:
                     if self.config.break_character:
-                        result_partial.append(token)
+                        self.result_partial.append(token)
                         if self.config.break_character in token:
-                            result_complete += result_partial
-                            self._publish({"output": "".join(result_partial)})
-                            result_partial = []
-                            continue
+                            self.result_complete += self.result_partial
+                            self._publish({"output": "".join(self.result_partial)})
+                            self.result_partial = []
+                            return
                     else:
-                        result_complete.append(token)
+                        self.result_complete.append(token)
                         self._publish({"output": token})
-                        result_partial = []
-            # Send remaining result after break character or termination if any
-            if result_partial:
-                result_complete += result_partial
-                self._publish({"output": "".join(result_partial)})
-            self.messages.append({
-                "role": "assistant",
-                "content": "".join(result_complete),
-            })
+                        self.result_partial = []
+                else:
+                    # Send remaining result after break character or termination if any
+                    if self.result_partial:
+                        self.result_complete += self.result_partial
+                        self._publish({"output": "".join(self.result_partial)})
+                    self.messages.append({
+                        "role": "assistant",
+                        "content": "".join(self.result_complete),
+                    })
         except Exception as e:
             self.get_logger().error(str(e))
             # raise a fallback trigger via health status
@@ -402,31 +399,29 @@ class LLM(ModelComponent):
 
     def __handle_streaming_generator(self, result: Dict) -> Optional[List]:
         """Handle streaming output"""
-        result_partial = []
-        result_complete = []
         try:
             for token in result["output"]:
                 # Handle ollama client streaming format
                 if isinstance(self.model_client, OllamaClient):
                     token = token["message"]["content"]
                 if self.config.break_character:
-                    result_partial.append(token)
+                    self.result_partial.append(token)
                     if self.config.break_character in token:
-                        result_complete += result_partial
-                        self._publish({"output": "".join(result_partial)})
-                        result_partial = []
+                        self.result_complete += self.result_partial
+                        self._publish({"output": "".join(self.result_partial)})
+                        self.result_partial = []
                         continue
                 else:
-                    result_complete.append(token)
+                    self.result_complete.append(token)
                     self._publish({"output": token})
-                    result_partial = []
+                    self.result_partial = []
             # Send remaining result after break character if any
-            if result_partial:
-                result_complete += result_partial
-                self._publish({"output": "".join(result_partial)})
+            if self.result_partial:
+                self.result_complete += self.result_partial
+                self._publish({"output": "".join(self.result_partial)})
             self.messages.append({
                 "role": "assistant",
-                "content": "".join(result_complete),
+                "content": "".join(self.result_complete),
             })
         except Exception as e:
             self.get_logger().error(str(e))
@@ -460,7 +455,6 @@ class LLM(ModelComponent):
         if isinstance(self.model_client, WebSocketClient):
             self.req_queue.put_nowait(inference_input)
             if self.config.stream:
-                self.__handle_websocket_streaming()
                 return
             else:
                 result = {}

@@ -27,6 +27,7 @@ from ros_sugar.config import (
     base_validators,
 )
 from ros_sugar.core import BaseComponent
+from ros_sugar.core.component import MutuallyExclusiveCallbackGroup
 from ros_sugar import Launcher
 from ros_sugar.utils import component_action
 
