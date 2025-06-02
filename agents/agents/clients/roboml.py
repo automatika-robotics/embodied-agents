@@ -4,14 +4,20 @@ import queue
 import threading
 from enum import Enum
 from typing import Any, Optional, Dict, Union
-
 import websockets
+
 import httpx
+import msgpack
+import msgpack_numpy as m_pack
 
 from .. import models
 from ..models import Model, OllamaModel, TransformersLLM, TransformersMLLM
 from ..utils import encode_arr_base64
 from .model_base import ModelClient
+
+# patch msgpack for numpy arrays
+m_pack.patch()
+
 
 __all__ = ["HTTPModelClient", "WebSocketClient", "RESPModelClient"]
 
@@ -207,17 +213,6 @@ class WebSocketClient(HTTPModelClient):
             raise TypeError(
                 "An ollama model cannot be passed to a RoboML client. Please use the OllamaClient"
             )
-        try:
-            import msgpack
-            import msgpack_numpy as m_pack
-
-            # patch msgpack for numpy arrays
-            m_pack.patch()
-            self.packer = msgpack.packb
-        except ModuleNotFoundError as e:
-            raise ModuleNotFoundError(
-                "In order to use the WebSocketClient, you need msgpack packages installed. You can install it with 'pip install msgpack msgpack-numpy'"
-            ) from e
         super().__init__(
             model=model,
             host=host,
@@ -278,7 +273,7 @@ class WebSocketClient(HTTPModelClient):
                                 encode_arr_base64(img) for img in images
                             ]
                         if websocket.close_code is None:
-                            await websocket.send(self.packer(inference_input))
+                            await websocket.send(msgpack.packb(inference_input))
                             self.logger.debug("Sent input to server")
                             self.request_queue.task_done()
                         else:
@@ -390,21 +385,13 @@ class RESPModelClient(ModelClient):
             **kwargs,
         )
         try:
-            import msgpack
-            import msgpack_numpy as m_pack
-
-            # patch msgpack for numpy arrays
-            m_pack.patch()
             from redis import Redis
 
             # TODO: handle timeout
             self.redis = Redis(self.host, port=self.port)
-            self.packer = msgpack.packb
-            self.unpacker = msgpack.unpackb
-
         except ModuleNotFoundError as e:
             raise ModuleNotFoundError(
-                "In order to use the RESP clients, you need redis and msgpack packages installed. You can install it with 'pip install redis[hiredis] msgpack msgpack-numpy'"
+                "In order to use the RESP clients, you need redis client package installed. You can install it with 'pip install redis[hiredis]'"
             ) from e
         self._check_connection()
 
@@ -433,15 +420,15 @@ class RESPModelClient(ModelClient):
             model_type = self.model_type
         start_params = {"node_name": self.model_name, "node_model": model_type}
         try:
-            start_params_b = self.packer(start_params)
+            start_params_b = msgpack.packb(start_params)
             node_init_result = self.redis.execute_command("add_node", start_params_b)
             if node_init_result:
-                self.logger.debug(str(self.unpacker(node_init_result)))
+                self.logger.debug(str(msgpack.unpackb(node_init_result)))
             self.logger.info(f"Initializing {self.model_name} on RoboML remote")
             # make initialization params
             model_dict = self.model_init_params
             # initialize model
-            init_b = self.packer(model_dict)
+            init_b = msgpack.packb(model_dict)
             self.redis.execute_command(f"{self.model_name}.initialize", init_b)
         except Exception as e:
             self.__handle_exceptions(e)
@@ -465,12 +452,12 @@ class RESPModelClient(ModelClient):
     def _inference(self, inference_input: Dict[str, Any]) -> Optional[Dict]:
         """Call inference on the model using data and inference parameters from the component"""
         try:
-            data_b = self.packer(inference_input)
+            data_b = msgpack.packb(inference_input)
             # call inference method
             result_b = self.redis.execute_command(
                 f"{self.model_name}.inference", data_b
             )
-            result = self.unpacker(result_b)
+            result = msgpack.unpackb(result_b)
         except Exception as e:
             return self.__handle_exceptions(e)
 
@@ -484,7 +471,7 @@ class RESPModelClient(ModelClient):
         self.logger.error(f"Deinitializing {self.model_name} on RoboML remote")
         stop_params = {"node_name": self.model_name}
         try:
-            stop_params_b = self.packer(stop_params)
+            stop_params_b = msgpack.packb(stop_params)
             self.redis.execute_command("remove_node", stop_params_b)
         except Exception as e:
             self.__handle_exceptions(e)
@@ -495,7 +482,7 @@ class RESPModelClient(ModelClient):
         """
         try:
             status_b = self.redis.execute_command(f"{self.model_name}.get_status")
-            status = self.unpacker(status_b)
+            status = msgpack.unpackb(status_b)
         except Exception as e:
             return self.__handle_exceptions(e)
 
