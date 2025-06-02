@@ -6,13 +6,14 @@ from enum import Enum
 from typing import Any, Optional, Dict, Union
 import websockets
 
+import numpy as np
 import httpx
 import msgpack
 import msgpack_numpy as m_pack
 
 from .. import models
 from ..models import Model, OllamaModel, TransformersLLM, TransformersMLLM
-from ..utils import encode_arr_base64
+from ..utils import encode_img_base64
 from .model_base import ModelClient
 
 # patch msgpack for numpy arrays
@@ -100,7 +101,7 @@ class HTTPModelClient(ModelClient):
             # get initialization params and initiale model
             self.client.post(
                 f"/{self.model_name}/initialize",
-                params=self.model_init_params,
+                json=self.model_init_params,
                 timeout=self.init_timeout,
             ).raise_for_status()
         except Exception as e:
@@ -111,12 +112,17 @@ class HTTPModelClient(ModelClient):
     def _inference(self, inference_input: Dict[str, Any]) -> Optional[Dict]:
         """Call inference on the model using data and inference parameters from the component"""
         # encode any byte or numpy array data
-        if inference_input.get("query") and isinstance(inference_input["query"], bytes):
-            inference_input["query"] = base64.b64encode(
-                inference_input["query"]
-            ).decode("utf-8")
+        if "query" in inference_input.keys():
+            if isinstance(inference_input["query"], bytes):
+                inference_input["query"] = base64.b64encode(
+                    inference_input["query"]
+                ).decode("utf-8")
+            if isinstance(inference_input["query"], np.ndarray):
+                inference_input["query"] = base64.b64encode(
+                    inference_input["query"].tobytes()
+                ).decode("utf-8")
         if images := inference_input.get("images"):
-            inference_input["images"] = [encode_arr_base64(img) for img in images]
+            inference_input["images"] = [encode_img_base64(img) for img in images]
 
         # if stream is set to true, then return a generator
         if inference_input.get("stream"):
@@ -270,7 +276,7 @@ class WebSocketClient(HTTPModelClient):
                             ).decode("utf-8")
                         if images := inference_input.get("images"):
                             inference_input["images"] = [
-                                encode_arr_base64(img) for img in images
+                                encode_img_base64(img) for img in images
                             ]
                         if websocket.close_code is None:
                             await websocket.send(msgpack.packb(inference_input))

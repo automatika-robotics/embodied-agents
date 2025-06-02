@@ -4,7 +4,7 @@ from typing import Any, Optional, Dict, Union, List
 import httpx
 
 from ..models import LLM
-from ..utils import encode_arr_base64
+from ..utils import encode_img_base64
 from .model_base import ModelClient
 
 __all__ = ["OllamaClient"]
@@ -100,7 +100,7 @@ class OllamaClient(ModelClient):
 
         # make images part of the latest message in message list
         if images := inference_input.get("images"):
-            input["messages"][-1]["images"] = [encode_arr_base64(img) for img in images]
+            input["messages"][-1]["images"] = [encode_img_base64(img) for img in images]
             inference_input.pop("images")
 
         # Add tools as part of input, if available

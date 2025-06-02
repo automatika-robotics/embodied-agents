@@ -188,7 +188,7 @@ def validate_func_args(func):
     return wrapper
 
 
-def encode_arr_base64(img: np.ndarray) -> str:
+def encode_img_base64(img: np.ndarray) -> str:
     """Encode a numpy array to a base64 str.
     :param img:
     :type img: np.ndarray
