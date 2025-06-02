@@ -28,11 +28,8 @@ class VideoMessageMaker(Component):
     :param trigger: The trigger value or topic for the object detection.
         This can be a single Topic object or a list of Topic objects.
     :type trigger: Union[Topic, list[Topic]]
-    :param callback_group: An optional callback group for the video message generation.
-        If provided, this should be a string. Otherwise, it defaults to None.
-    :type callback_group: str
     :param component_name: The name of the video message generation component.
-        This should be a string and defaults to "video_maker_component".
+        This should be a string.
     :type component_name: str
 
     Example usage:
@@ -58,7 +55,6 @@ class VideoMessageMaker(Component):
         config: Optional[VideoMessageMakerConfig] = None,
         trigger: Union[Topic, List[Topic]],
         component_name: str,
-        callback_group=None,
         **kwargs,
     ):
         if isinstance(trigger, float):
@@ -75,7 +71,6 @@ class VideoMessageMaker(Component):
             outputs,
             self.config,
             trigger,
-            callback_group,
             component_name,
             **kwargs,
         )

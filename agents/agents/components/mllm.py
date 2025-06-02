@@ -27,9 +27,6 @@ class MLLM(LLM):
     :param trigger: The trigger value or topic for the MLLM component.
         This can be a single Topic object, a list of Topic objects, or a float value for a timed component. Defaults to 1.
     :type trigger: Union[Topic, list[Topic], float]
-    :param callback_group: An optional callback group for the MLLM component.
-        If provided, this should be a string. Otherwise, it defaults to None.
-    :type callback_group: str
     :param component_name: The name of the MLLM component.
         This should be a string and defaults to "mllm_component".
     :type component_name: str
@@ -61,7 +58,6 @@ class MLLM(LLM):
         db_client: Optional[DBClient] = None,
         trigger: Union[Topic, List[Topic], float] = 1.0,
         component_name: str,
-        callback_group=None,
         **kwargs,
     ):
         self.allowed_inputs = {"Required": [String, Image], "Optional": [Detections]}
@@ -75,7 +71,6 @@ class MLLM(LLM):
             config=config,
             db_client=db_client,
             trigger=trigger,
-            callback_group=callback_group,
             component_name=component_name,
             allowed_inputs=self.allowed_inputs,
             **kwargs,

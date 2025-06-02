@@ -31,11 +31,7 @@ class SpeechToText(ModelComponent):
     :param trigger: The trigger value or topic for the STT.
         This can be a single Topic object, a list of Topic objects.
     :type trigger: Union[Topic, list[Topic], float]
-    :param callback_group: An optional callback group for the STT.
-        If provided, this should be a string. Otherwise, it defaults to None.
-    :type callback_group: str
-    :param component_name: The name of the STT component.
-        This should be a string and defaults to "speechtotext_component".
+    :param component_name: The name of the STT component. This should be a string.
     :type component_name: str
 
     Example usage:
@@ -65,7 +61,6 @@ class SpeechToText(ModelComponent):
         config: Optional[SpeechToTextConfig] = None,
         trigger: Union[Topic, List[Topic]],
         component_name: str,
-        callback_group=None,
         **kwargs,
     ):
         self.config: SpeechToTextConfig = config or SpeechToTextConfig()
@@ -85,7 +80,6 @@ class SpeechToText(ModelComponent):
             model_client,
             self.config,
             trigger,
-            callback_group,
             component_name,
             **kwargs,
         )

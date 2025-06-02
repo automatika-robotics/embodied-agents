@@ -32,11 +32,7 @@ class TextToSpeech(ModelComponent):
     :param trigger: The trigger value or topic for the TTS.
         This can be a single Topic object or a list of Topic objects.
     :type trigger: Union[Topic, list[Topic]
-    :param callback_group: An optional callback group for the TTS.
-        If provided, this should be a string. Otherwise, it defaults to None.
-    :type callback_group: str
-    :param component_name: The name of the TTS component.
-        This should be a string and defaults to "texttospeech_component".
+    :param component_name: The name of the TTS component. This should be a string.
     :type component_name: str
 
     Example usage:
@@ -65,7 +61,6 @@ class TextToSpeech(ModelComponent):
         config: Optional[TextToSpeechConfig] = None,
         trigger: Union[Topic, List[Topic]],
         component_name: str,
-        callback_group=None,
         **kwargs,
     ):
         self.config: TextToSpeechConfig = config or TextToSpeechConfig()
@@ -84,7 +79,6 @@ class TextToSpeech(ModelComponent):
             model_client,
             self.config,
             trigger,
-            callback_group,
             component_name,
             **kwargs,
         )

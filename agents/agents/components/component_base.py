@@ -17,7 +17,6 @@ class Component(BaseComponent):
         outputs: Optional[Sequence[Topic]] = None,
         config: Optional[BaseComponentConfig] = None,
         trigger: Union[Topic, List[Topic], float] = 1.0,
-        callback_group=None,
         component_name: str = "agents_component",
         **kwargs,
     ):
@@ -53,7 +52,7 @@ class Component(BaseComponent):
             inputs=inputs,
             outputs=outputs,
             config=self.config,
-            callback_group=callback_group,
+            callback_group=None,
             enable_health_broadcast=False,
             **kwargs,
         )

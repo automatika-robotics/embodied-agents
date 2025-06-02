@@ -35,7 +35,9 @@ class MapEncoding(Component):
     :type db_client: DBClient
     :param trigger: An optional trigger value or topic that triggers the map encoding process.
     :type trigger: Union[Topic, list[Topic], float]
-    :param callback_group: An optional callback group for the map encoding component.
+    :param component_name: The name of the MapEncoding component.
+        This should be a string.
+    :type component_name: str
     :param kwargs: Additional keyword arguments.
 
     Example usage:
@@ -68,7 +70,6 @@ class MapEncoding(Component):
         db_client: DBClient,
         trigger: Union[Topic, List[Topic], float] = 10.0,
         component_name: str,
-        callback_group=None,
         **kwargs,
     ):
         self.config: MapConfig = config
@@ -87,7 +88,6 @@ class MapEncoding(Component):
             None,
             self.config,
             trigger,
-            callback_group,
             component_name,
             **kwargs,
         )

@@ -40,9 +40,6 @@ class Vision(ModelComponent):
     :param trigger: The trigger value or topic for the vision component.
         This can be a single Topic object, a list of Topic objects, or a float value for timed components.
     :type trigger: Union[Topic, list[Topic], float]
-    :param callback_group: An optional callback group for the vision component.
-        If provided, this should be a string. Otherwise, it defaults to None.
-    :type callback_group: str
     :param component_name: The name of the vision component.
         This should be a string and defaults to "vision_component".
     :type component_name: str
@@ -73,7 +70,6 @@ class Vision(ModelComponent):
         config: Optional[VisionConfig] = None,
         trigger: Union[Topic, List[Topic], float] = 1.0,
         component_name: str,
-        callback_group=None,
         **kwargs,
     ):
         self.config: VisionConfig = config or VisionConfig()
@@ -88,7 +84,6 @@ class Vision(ModelComponent):
             model_client,
             self.config,
             trigger,
-            callback_group,
             component_name,
             **kwargs,
         )
