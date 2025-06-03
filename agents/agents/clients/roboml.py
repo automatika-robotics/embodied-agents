@@ -268,18 +268,6 @@ class WebSocketClient(HTTPModelClient):
                         inference_input = (
                             self.request_queue.get_nowait()
                         )  # Non-blocking
-                        if isinstance(inference_input["query"], bytes):
-                            inference_input["query"] = base64.b64encode(
-                                inference_input["query"]
-                            ).decode("utf-8")
-                        if isinstance(inference_input["query"], np.ndarray):
-                            inference_input["query"] = base64.b64encode(
-                                inference_input["query"].tobytes()
-                            ).decode("utf-8")
-                        if images := inference_input.get("images"):
-                            inference_input["images"] = [
-                                encode_img_base64(img) for img in images
-                            ]
                         if websocket.close_code is None:
                             await websocket.send(msgpack.packb(inference_input))
                             self.logger.debug("Sent input to server")
