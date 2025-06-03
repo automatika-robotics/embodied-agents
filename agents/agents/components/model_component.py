@@ -85,12 +85,20 @@ class ModelComponent(Component):
                     self.get_logger().debug(
                         "Started timer for handling websocket streaming"
                     )
+                if self.config.warmup:
+                    # TODO: warmup with websockets
+                    self.get_logger().warning(
+                        "Warmup cannot not be called with websocket client."
+                    )
             else:
                 if self.config.warmup:
                     try:
                         self._warmup()
                     except Exception as e:
                         self.get_logger().error(f"Error encountered in warmup: {e}")
+
+            # get inference params
+            self.inference_params = self.config.get_inference_params()
 
     def custom_on_deactivate(self):
         """

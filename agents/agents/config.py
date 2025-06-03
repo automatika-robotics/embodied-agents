@@ -22,6 +22,15 @@ __all__ = [
 class ModelComponentConfig(BaseComponentConfig):
     warmup: Optional[bool] = field(default=False)
 
+    def get_inference_params(self) -> Dict:
+        """Get inference params from model components"""
+        return self._get_inference_params()
+
+    def _get_inference_params(self) -> Dict:
+        raise NotImplementedError(
+            "This method needs to be implemented by model config classes"
+        )
+
 
 @define(kw_only=True)
 class LLMConfig(ModelComponentConfig):

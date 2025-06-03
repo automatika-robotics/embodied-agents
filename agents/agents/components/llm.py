@@ -357,7 +357,7 @@ class LLM(ModelComponent):
 
         input = {
             "query": self.messages,
-            **self.config._get_inference_params(),
+            **self.inference_params,
         }
 
         # Add any tools, if registered
@@ -657,7 +657,7 @@ class LLM(ModelComponent):
         import time
 
         message = {"role": "user", "content": "Hello robot."}
-        inference_input = {"query": [message], **self.config._get_inference_params()}
+        inference_input = {"query": [message], **self.inference_params}
 
         # Run inference once to warm up and once to measure time
         self.model_client.inference(inference_input)

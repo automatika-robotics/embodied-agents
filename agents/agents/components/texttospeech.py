@@ -118,7 +118,7 @@ class TextToSpeech(ModelComponent):
         if not query:
             return None
 
-        return {"query": query, **self.config._get_inference_params()}
+        return {"query": query, **self.inference_params}
 
     def _stream_callback(self, outdata: np.ndarray, frames: int, _, status) -> None:
         """Stream callback function for playing audio on device
@@ -267,7 +267,7 @@ class TextToSpeech(ModelComponent):
 
         inference_input = {
             "query": "Add the sum to the product of these three.",
-            **self.config._get_inference_params(),
+            **self.inference_params,
         }
 
         # Run inference once to warm up and once to measure time

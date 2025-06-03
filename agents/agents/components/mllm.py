@@ -137,7 +137,7 @@ class MLLM(LLM):
         input = {
             "query": self.messages,
             "images": images,
-            **self.config._get_inference_params(),
+            **self.inference_params,
         }
 
         # Add any tools, if registered
@@ -158,7 +158,7 @@ class MLLM(LLM):
         inference_input = {
             "query": [message],
             "images": [image],
-            **self.config._get_inference_params(),
+            **self.inference_params,
         }
 
         # Run inference once to warm up and once to measure time

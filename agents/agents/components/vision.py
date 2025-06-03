@@ -190,7 +190,7 @@ class Vision(ModelComponent):
         if not images:
             return None
 
-        return {"images": images, **self.config._get_inference_params()}
+        return {"images": images, **self.inference_params}
 
     def _execution_step(self, *args, **kwargs):
         """_execution_step.
@@ -253,7 +253,7 @@ class Vision(ModelComponent):
                 str(Path(__file__).parents[1] / Path("resources/test.jpeg"))
             )
 
-        inference_input = {"images": [image], **self.config._get_inference_params()}
+        inference_input = {"images": [image], **self.inference_params}
 
         # Run inference once to warm up and once to measure time
         self.model_client.inference(inference_input)
