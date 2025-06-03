@@ -68,7 +68,7 @@ class LLMConfig(ModelComponentConfig):
     :param break_character: A string character marking that the output thus far received in a stream should be published. This parameter only takes effect when stream is set to True. As stream output is received token by token, it is useful to publish full sentences instead of individual tokens as the components output (for example, for downstream text to speech conversion). This value can be set to an empty string to publish output token by token.
         Default is '.' (period)
     :type break_character: str
-    :param response_terminator: A string token marking that the end of a single response from the model. This token is only used in case of a persistent clients, such as a websocket client and it is not published. This value cannot be an empty string.
+    :param response_terminator: A string token marking that the end of a single response from the model. This token is only used in case of a persistent clients, such as a websocket client and when stream is set to True. It is not published. This value cannot be an empty string.
         Default is '<<Response Ended>>'
     :type response_terminator: str
 
@@ -141,15 +141,30 @@ class MLLMConfig(LLMConfig):
     :param distance_func: The distance metric used for nearest neighbor search for RAG.
         Supported values are "l2", "ip", and "cosine".
     :type distance_func: str
-    :param n_results: The maximum number of results to return for RAG.
+    :param n_results: The maximum number of results to return for RAG. Defaults to 1.
+        For numbers greater than 1, results will be concatenated together in a single string.
     :type n_results: int
-    :param chat_history: Whether to include chat history in the MLLM's prompt.
+    :param chat_history: Whether to include chat history in the LLM's prompt.
     :type chat_history: bool
+    :param history_reset_phrase: Phrase to reset chat history. Defaults to 'chat reset'
+    :type history_reset_phrase: str
+    :param history_size: Number of user messages to keep in chat history. Defaults to 10
+    :type history_size: int
     :param temperature: Temperature used for sampling tokens during generation.
-        Default is 0.7 and must be greater than 0.0.
+        Default is 0.8 and must be greater than 0.0.
     :type temperature: float
     :param max_new_tokens: The maximum number of new tokens to generate.
         Default is 100 and must be greater than 0.
+    :type max_new_tokens: int
+    :param stream: Publish the llm output as a stream of tokens, useful when sending llm output to a user facing client or to a TTS component. Cannot be used in conjunction with tool calling.
+        Default is false
+    :type stream: bool
+    :param break_character: A string character marking that the output thus far received in a stream should be published. This parameter only takes effect when stream is set to True. As stream output is received token by token, it is useful to publish full sentences instead of individual tokens as the components output (for example, for downstream text to speech conversion). This value can be set to an empty string to publish output token by token.
+        Default is '.' (period)
+    :type break_character: str
+    :param response_terminator: A string token marking that the end of a single response from the model. This token is only used in case of a persistent clients, such as a websocket client and when stream is set to True. It is not published. This value cannot be an empty string.
+        Default is '<<Response Ended>>'
+    :type response_terminator: str
 
     Example of usage:
     ```python
@@ -252,12 +267,21 @@ class SpeechToTextConfig(ModelComponentConfig):
     :type vad_threshold: float
     :param wakeword_threshold: Minimum threshold for detecting the wake word phrase. Only effective if `enable_wakeword` is set to true. Defaults to 0.6 (60%).
     :type wakeword_threshold: float
-    :param min_silence_duration_ms: Minimum duration of silence in milliseconds before considering it as a speaker pause. Only effective if `enable_vad` is set to true. Defaults to 500 ms.
+    :param min_silence_duration_ms: Minimum duration of silence in milliseconds before considering it as a speaker pause. Only effective if `enable_vad` is set to true. Defaults to 300 ms.
     :type min_silence_duration_ms: int
     :param speech_pad_ms: Duration in milliseconds to pad silence at the start and end of detected speech regions. Only effective if `enable_vad` is set to true. Defaults to 30 ms.
     :type speech_pad_ms: int
     :param speech_buffer_max_len: Maximum length of the speech buffer in milliseconds. Defaults to 30,000ms (30 seconds). Only effective if `enable_vad` is set to true.
     :type speech_buffer_max_len: int
+    :param stream: Send audio input as a stream to a persistent client like websockets client. This parameters can only be used when enable_vad is set to True. It is useful for near real time audio transcription for longer spoken sentences.
+        Default is false
+    :type stream: bool
+    :param chunk_size: The size of audio chunk in milliseconds to send for transcription. This parameters can only be used when stream is set to True. It can not be set lower than 100 milliseconds.
+        Default is 2000
+    :type chunk_size: int
+    :param response_terminator: A string token marking that the end of a single response from the model. This token is only used in case of a persistent clients, such as a websocket client and when stream is set to True. It is not published. This value cannot be an empty string.
+        Default is '<<Response Ended>>'
+    :type response_terminator: str
     :param device_vad: Device type for VAD processing ('cpu' or 'gpu'). Only effective if `enable_vad` is set to true. Defaults to 'cpu'.
     :type device_vad: str
     :param device_wakeword: Device type for Wakeword detection ('cpu' or 'gpu'). Only effective if `enable_wakeword` is set to true. Defaults to 'cpu'.
@@ -298,9 +322,12 @@ class SpeechToTextConfig(ModelComponentConfig):
     wakeword_threshold: float = field(
         default=0.6, validator=base_validators.in_range(min_value=0.0, max_value=1.0)
     )
-    min_silence_duration_ms: int = field(default=500)
+    min_silence_duration_ms: int = field(default=300)
     speech_pad_ms: int = field(default=30)
     speech_buffer_max_len: int = field(default=30000)
+    stream: bool = field(default=False)
+    min_chunk_size: int = field(default=2000, validator=base_validators.gt(100))
+    response_terminator: str = field(default="<<Response Ended>>")
     device_vad: str = field(
         default="cpu", validator=base_validators.in_(["cpu", "gpu"])
     )
@@ -328,8 +355,20 @@ class SpeechToTextConfig(ModelComponentConfig):
     def check_wakeword(self, _, value):
         if value and not self.enable_vad:
             raise ValueError(
-                "enable_vad (voice activity detection) must be set to True when enable_wakeword is True"
+                "enable_vad (voice activity detection) must be set to True when enable_wakeword is set to True"
             )
+
+    @stream.validator
+    def check_stream(self, _, value):
+        if value and not self.enable_vad:
+            raise ValueError(
+                "enable_vad (voice activity detection) must be set to True when stream is set to True"
+            )
+
+    @response_terminator.validator
+    def not_empty(self, _, value):
+        if not value:
+            raise ValueError("response_terminator must not be an empty string")
 
     def _get_inference_params(self) -> Dict:
         """get_inference_params.

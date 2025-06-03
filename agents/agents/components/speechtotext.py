@@ -5,6 +5,7 @@ import numpy as np
 from collections import deque
 
 from ..clients.model_base import ModelClient
+from ..clients import WebSocketClient
 from ..config import SpeechToTextConfig
 from ..ros import Audio, String, Topic
 from ..utils import validate_func_args, VADStatus, WakeWordStatus, load_model
@@ -70,6 +71,11 @@ class SpeechToText(ModelComponent):
         if isinstance(trigger, float):
             raise TypeError(
                 "SpeechToText component cannot be started as a timed component"
+            )
+
+        if self.config.stream and not isinstance(model_client, WebSocketClient):
+            raise TypeError(
+                "SpeechToText component can only stream audio to the server when using a WebSocketClient. Please set stream to False in config or use a different client."
             )
 
         self.model_client = model_client
@@ -141,6 +147,15 @@ class SpeechToText(ModelComponent):
                 target=self._process_audio, daemon=True
             ).start()
 
+        # initialize response buffer used for output when streaming input
+        if self.config.stream:
+            self.result_partial: List = []
+            self.min_chunk_size = int(
+                self.config._sample_rate
+                * self.config.min_chunk_size
+                / (1000 * self.config._block_size)
+            )
+
     def custom_on_deactivate(self):
         # If VAD is enabled, stop the listening stream thread
         if self.config.enable_vad:
@@ -159,7 +174,7 @@ class SpeechToText(ModelComponent):
         """
 
         if self.config.enable_vad and kwargs.get("speech") is not None:
-            query = kwargs["speech"]
+            query = b"".join(kwargs["speech"])
         else:
             # set query as trigger
             trigger = kwargs.get("topic")
@@ -172,7 +187,7 @@ class SpeechToText(ModelComponent):
         return {
             "query": query,
             "vad_filter": (not self.config.enable_vad),  # vad filtering on server
-            **self.config._get_inference_params(),
+            **self.inference_params,
         }
 
     def _stream_callback(
@@ -206,14 +221,24 @@ class SpeechToText(ModelComponent):
             # create audio embeddings for wakeword classifier
             self.audio_features(np_frames)
             if self.wake_word_triggered:
-                self.speech_buffer.append(
-                    np_frames / 32768
-                )  # To correct for conversion between int16 and float32
+                self.speech_buffer.append(indata)
+
+                # Send input if streaming enabled
+                if (
+                    self.config.stream
+                    and len(self.speech_buffer) >= self.min_chunk_size
+                ):
+                    self._execution_step(speech=self.speech_buffer)
+                    self.speech_buffer.clear()
+
         # otherwise store speech when vad is triggered
         elif self.vad_iterator.triggered:
-            self.speech_buffer.append(
-                np_frames / 32768
-            )  # To correct for conversion between int16 and float32
+            self.speech_buffer.append(indata)
+
+            # Send input if streaming enabled
+            if self.config.stream and len(self.speech_buffer) >= self.min_chunk_size:
+                self._execution_step(speech=self.speech_buffer)
+                self.speech_buffer.clear()
 
         # add vad status outputs to queue
         if vad_output:
@@ -279,6 +304,21 @@ class SpeechToText(ModelComponent):
                 break
         self.event.wait()
 
+    def _handle_websocket_streaming(self) -> Optional[List]:
+        """Handle streaming output from a websocket client"""
+        try:
+            token = self.resp_queue.get(block=True)
+            self.get_logger().info(str(token))
+            if token:
+                if not token == self.config.response_terminator:
+                    self.result_partial.append(token)
+                else:
+                    self._publish({"output": "".join(self.result_partial)})
+        except Exception as e:
+            self.get_logger().error(str(e))
+            # raise a fallback trigger via health status
+            self.health_status.set_failure()
+
     def _execution_step(self, *args, **kwargs):
         """_execution_step.
 
@@ -290,32 +330,49 @@ class SpeechToText(ModelComponent):
             self.get_logger().debug(
                 f"Received speech from speech thread: {len(kwargs['speech'])}"
             )
-            kwargs["speech"] = np.concatenate(kwargs["speech"])
         elif self.run_type is ComponentRunType.EVENT:
             trigger = kwargs.get("topic")
             if not trigger:
                 return
             self.get_logger().debug(f"Received trigger on topic {trigger.name}")
-        else:
-            time_stamp = self.get_ros_time().sec
-            self.get_logger().debug(f"Sending at {time_stamp}")
 
         # create inference input
         inference_input = self._create_input(*args, **kwargs)
-        # call model inference
         if not inference_input:
             self.get_logger().warning("Input not received, not calling model inference")
             return
 
-        # conduct inference
-        result = self.model_client.inference(inference_input)
+        # call model inference
+        if isinstance(self.model_client, WebSocketClient):
+            self.req_queue.put_nowait(inference_input)
+            if self.config.stream:
+                return
+            else:
+                result = {}
+                try:
+                    result["output"] = self.resp_queue.get(
+                        block=True, timeout=self.model_client.inference_timeout
+                    )
+                except queue.Empty:
+                    result = None
+        else:
+            result = self.model_client.inference(inference_input)
         if result:
             # publish inference result
-            for publisher in self.publishers_dict.values():
-                publisher.publish(**result)
+            self._publish(result)
         else:
             # raise a fallback trigger via health status
             self.health_status.set_failure()
+
+    def _publish(self, result: Dict) -> None:
+        """
+        Publishes the given result to all registered publishers.
+
+        :param result: A dictionary containing the data to be published.
+        :type result: dict
+        """
+        for publisher in self.publishers_dict.values():
+            publisher.publish(**result)
 
     def _warmup(self):
         """Warm up and stat check"""
@@ -327,7 +384,7 @@ class SpeechToText(ModelComponent):
         ) as file:
             file_bytes = file.read()
 
-        inference_input = {"query": file_bytes, **self.config._get_inference_params()}
+        inference_input = {"query": file_bytes, **self.inference_params}
 
         # Run inference once to warm up and once to measure time
         self.model_client.inference(inference_input)
