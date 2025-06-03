@@ -268,11 +268,13 @@ class WebSocketClient(HTTPModelClient):
                         inference_input = (
                             self.request_queue.get_nowait()
                         )  # Non-blocking
-                        if inference_input.get("query") and isinstance(
-                            inference_input["query"], bytes
-                        ):
+                        if isinstance(inference_input["query"], bytes):
                             inference_input["query"] = base64.b64encode(
                                 inference_input["query"]
+                            ).decode("utf-8")
+                        if isinstance(inference_input["query"], np.ndarray):
+                            inference_input["query"] = base64.b64encode(
+                                inference_input["query"].tobytes()
                             ).decode("utf-8")
                         if images := inference_input.get("images"):
                             inference_input["images"] = [
