@@ -4,7 +4,7 @@ from pathlib import Path
 from attrs import define, field, Factory
 
 from .ros import base_validators, BaseComponentConfig, Topic, Route
-from .utils import validate_kwargs
+from .utils import validate_kwargs, _LANGUAGE_CODES
 
 __all__ = [
     "LLMConfig",
@@ -253,53 +253,131 @@ class SpeechToTextConfig(ModelComponentConfig):
     """
     Configuration for a Speech-To-Text component.
 
-    This class defines the configuration options for a Speech-To-Text component.
+    This class defines the configuration options for speech transcription, voice activity detection,
+    wakeword detection, and audio streaming.
 
-    :param enable_vad: Enable Voice Activity Detection (VAD) to identify when speech is present in continuous input stream from an input audio device. Uses silero-vad model and requires onnxruntime to be installed.
+    --------------------
+    Transcription
+    --------------------
+    :param initial_prompt: Optional initial prompt to guide transcription (e.g. speaker name or topic).
+                           Defaults to None.
+    :type initial_prompt: str or None
+
+    :param language: Language code for transcription (e.g. "en", "zh"). Must be one of the supported language codes.
+                     Defaults to "en".
+    :type language: str
+
+    :param max_new_tokens: Maximum number of tokens to generate. If None, no limit is applied.
+                           Defaults to None.
+    :type max_new_tokens: int or None
+
+    --------------------
+    Voice Activity Detection (VAD)
+    --------------------
+    :param enable_vad: Enable VAD to detect when speech is present in audio input.
+                       Requires onnxruntime and silero-vad model.
                        Defaults to False.
     :type enable_vad: bool
-    :param enable_wakeword: Enable Wakeword Detection to identify a specific key phrase in the audio stream, e.g 'Hey Jarvis'.
+
+    :param device_audio: Audio input device ID. Only used if `enable_vad` is True.
+                         Defaults to 0.
+    :type device_audio: int
+
+    :param vad_threshold: Threshold above which speech is considered present.
+                          Only used if `enable_vad` is True. Range: 0.0–1.0.
+                          Defaults to 0.5.
+    :type vad_threshold: float
+
+    :param min_silence_duration_ms: Minimum silence duration (ms) before it's treated as a pause.
+                                    Only used if `enable_vad` is True.
+                                    Defaults to 300.
+    :type min_silence_duration_ms: int
+
+    :param speech_pad_ms: Silence padding (ms) added to start and end of detected speech regions.
+                          Only used if `enable_vad` is True.
+                          Defaults to 30.
+    :type speech_pad_ms: int
+
+    :param speech_buffer_max_len: Max length of speech buffer in ms.
+                                  Only used if `enable_vad` is True.
+                                  Defaults to 30000.
+    :type speech_buffer_max_len: int
+
+    :param device_vad: Device for VAD ('cpu' or 'gpu').
+                       Only used if `enable_vad` is True.
+                       Defaults to 'cpu'.
+    :type device_vad: str
+
+    :param ncpu_vad: Number of CPU cores to use for VAD (if `device_vad` is 'cpu').
+                     Defaults to 1.
+    :type ncpu_vad: int
+
+    --------------------
+    Wakeword Detection
+    --------------------
+    :param enable_wakeword: Enable detection of a wakeword phrase (e.g. 'Hey Jarvis').
+                            Requires `enable_vad` to be True.
                             Defaults to False.
     :type enable_wakeword: bool
-    :param device_audio: Device id (int) to use for audio input. Only effective if `enable_vad` is set to true. Defaults to 0.
-    :type device_audio: int
-    :param vad_threshold: Minimum threshold above which speech is considered present. Only effective if `enable_vad` is set to true. Defaults to 0.5 (50%).
-    :type vad_threshold: float
-    :param wakeword_threshold: Minimum threshold for detecting the wake word phrase. Only effective if `enable_wakeword` is set to true. Defaults to 0.6 (60%).
+
+    :param wakeword_threshold: Minimum confidence score to trigger wakeword detection.
+                               Only used if `enable_wakeword` is True.
+                               Defaults to 0.6.
     :type wakeword_threshold: float
-    :param min_silence_duration_ms: Minimum duration of silence in milliseconds before considering it as a speaker pause. Only effective if `enable_vad` is set to true. Defaults to 300 ms.
-    :type min_silence_duration_ms: int
-    :param speech_pad_ms: Duration in milliseconds to pad silence at the start and end of detected speech regions. Only effective if `enable_vad` is set to true. Defaults to 30 ms.
-    :type speech_pad_ms: int
-    :param speech_buffer_max_len: Maximum length of the speech buffer in milliseconds. Defaults to 30,000ms (30 seconds). Only effective if `enable_vad` is set to true.
-    :type speech_buffer_max_len: int
-    :param stream: Send audio input as a stream to a persistent client like websockets client. This parameters can only be used when enable_vad is set to True. It is useful for near real time audio transcription for longer spoken sentences.
-        Default is false
-    :type stream: bool
-    :param chunk_size: The size of audio chunk in milliseconds to send for transcription. This parameters can only be used when stream is set to True. It can not be set lower than 100 milliseconds.
-        Default is 2000
-    :type chunk_size: int
-    :param response_terminator: A string token marking that the end of a single response from the model. This token is only used in case of a persistent clients, such as a websocket client and when stream is set to True. It is not published. This value cannot be an empty string.
-        Default is '<<Response Ended>>'
-    :type response_terminator: str
-    :param device_vad: Device type for VAD processing ('cpu' or 'gpu'). Only effective if `enable_vad` is set to true. Defaults to 'cpu'.
-    :type device_vad: str
-    :param device_wakeword: Device type for Wakeword detection ('cpu' or 'gpu'). Only effective if `enable_wakeword` is set to true. Defaults to 'cpu'.
+
+    :param device_wakeword: Device for Wakeword Detection ('cpu' or 'gpu').
+                             Only used if `enable_wakeword` is True.
+                             Defaults to 'cpu'.
     :type device_wakeword: str
-    :param ncpu_vad: Number of CPU cores to use for VAD processing. Only effective if `device_vad` is 'cpu'. Defaults to 1.
-    :type ncpu_vad: int
-    :param ncpu_wakeword: Number of CPU cores to use for Wakeword detection. Only effective if `device_wakeword` is 'cpu'. Defaults to 1.
+
+    :param ncpu_wakeword: Number of CPU cores for Wakeword Detection (if `device_wakeword` is 'cpu').
+                          Defaults to 1.
     :type ncpu_wakeword: int
-    :param vad_model_path: File path or URL to the VAD model file. Defaults to the URL for Silero VAD ONNX model.
+
+    --------------------
+    Streaming
+    --------------------
+    :param stream: Send audio as a stream to a persistent client (e.g., websockets).
+                   Requires `enable_vad` to be True.
+                   Useful for real-time transcription.
+                   Defaults to False.
+    :type stream: bool
+
+    :param min_chunk_size: Audio chunk size in ms to send when streaming.
+                       Requires `stream` to be True. Must be > 100 ms.
+                       Defaults to 2000.
+    :type min_chunk_size: int
+
+    :param response_terminator: Token marking the end of a model response (used in persistent clients).
+                                Cannot be an empty string.
+                                Defaults to '<<Response Ended>>'.
+    :type response_terminator: str
+
+    --------------------
+    Model Paths
+    --------------------
+    :param vad_model_path: Path or URL to VAD ONNX model.
+                           Defaults to the Silero VAD model URL.
     :type vad_model_path: str
-    :param melspectrogram_model_path: File path or URL to the melspectrogram model file used by the Wakeword detection. Defaults to the URL for melspectrogram ONNX model provided by openWakeWord.
+
+    :param melspectrogram_model_path: Path or URL to melspectrogram model used in wakeword detection.
+                                      Defaults to openWakeWord model URL.
     :type melspectrogram_model_path: str
-    :param embedding_model_path: File path or URL to the audio embedding model file used by the Wakeword detection. Defaults to the URL for embedding ONNX model provided by openWakeWord, which is a reimplmentation of audio embeddings model provided by Google. License Apache-2.0.
+
+    :param embedding_model_path: Path or URL to audio embedding model for wakeword detection.
+                                 Defaults to openWakeWord model URL.
     :type embedding_model_path: str
-    :param wakeword_model_path: File path or URL to the Wakeword model file. Defaults to the URL for pretrained 'Hey Jarvis' wakeword ONNX model provided by openWakeWord. To train your custom wakeword model, follow the [tutorial](https://github.com/dscripka/openWakeWord/blob/main/notebooks/automatic_model_training.ipynb) provided by openWakeWord.
+
+    :param wakeword_model_path: Path or URL to wakeword ONNX model (e.g. 'Hey Jarvis').
+                                Defaults to a pretrained openWakeWord model.
+                                For custom models, see:
+                                https://github.com/dscripka/openWakeWord/blob/main/notebooks/automatic_model_training.ipynb
     :type wakeword_model_path: str
 
-    Example of usage:
+    --------------------
+    Example
+    --------------------
+    Example usage:
     ```python
     config = SpeechToTextConfig(
         enable_vad=True,
@@ -311,8 +389,15 @@ class SpeechToTextConfig(ModelComponentConfig):
         speech_pad_ms=30,
         speech_buffer_max_len=8000,
     )
+    ```
     """
 
+    initial_prompt: str = field(default=None)
+    language: str = field(
+        default="en",
+        validator=base_validators.in_(_LANGUAGE_CODES),
+    )
+    max_new_tokens: Optional[int] = field(default=None)
     enable_vad: bool = field(default=False)
     enable_wakeword: bool = field(default=False)
     device_audio: int = field(default=0)
@@ -350,9 +435,12 @@ class SpeechToTextConfig(ModelComponentConfig):
     )
     _sample_rate: int = field(default=16000)
     _block_size: int = field(default=1280)
+    _vad_filter: bool = field(init=False)
+    _word_timestamps: bool = field(init=False)
 
     @enable_wakeword.validator
     def check_wakeword(self, _, value):
+        """Wakeword validator"""
         if value and not self.enable_vad:
             raise ValueError(
                 "enable_vad (voice activity detection) must be set to True when enable_wakeword is set to True"
@@ -360,6 +448,7 @@ class SpeechToTextConfig(ModelComponentConfig):
 
     @stream.validator
     def check_stream(self, _, value):
+        """Stream validator"""
         if value and not self.enable_vad:
             raise ValueError(
                 "enable_vad (voice activity detection) must be set to True when stream is set to True"
@@ -367,14 +456,26 @@ class SpeechToTextConfig(ModelComponentConfig):
 
     @response_terminator.validator
     def not_empty(self, _, value):
+        """response terminator validator"""
         if not value:
             raise ValueError("response_terminator must not be an empty string")
+
+    def __attrs_post_init__(self):
+        """Set values of undefined privates"""
+        self._word_timestamps = self.stream
+        self._vad_filter = not self.enable_vad
 
     def _get_inference_params(self) -> Dict:
         """get_inference_params.
         :rtype: dict
         """
-        return {}
+        return {
+            "language": self.language,
+            "initial_prompt": self.initial_prompt,
+            "max_new_tokens": self.max_new_tokens,
+            "word_timestamps": self._word_timestamps,
+            "vad_filter": self._vad_filter,
+        }
 
 
 def _get_optional_topic(topic: Union[Topic, Dict]) -> Optional[Topic]:

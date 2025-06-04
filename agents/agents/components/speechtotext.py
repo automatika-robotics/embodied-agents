@@ -4,6 +4,7 @@ import threading
 import numpy as np
 from collections import deque
 
+import msgpack
 from ..clients.model_base import ModelClient
 from ..clients import WebSocketClient
 from ..config import SpeechToTextConfig
@@ -186,7 +187,6 @@ class SpeechToText(ModelComponent):
 
         return {
             "query": query,
-            "vad_filter": (not self.config.enable_vad),  # vad filtering on server
             **self.inference_params,
         }
 
@@ -307,11 +307,12 @@ class SpeechToText(ModelComponent):
     def _handle_websocket_streaming(self) -> Optional[List]:
         """Handle streaming output from a websocket client"""
         try:
-            token = self.resp_queue.get(block=True)
-            self.get_logger().info(str(token))
-            if token:
-                if not token == self.config.response_terminator:
-                    self.result_partial.append(token)
+            message = self.resp_queue.get(block=True)
+            tokens = msgpack.unpackb(message)
+            self.get_logger().info(str(tokens))
+            if tokens:
+                if not tokens == self.config.response_terminator:
+                    self.result_partial.append(tokens)
                 else:
                     self._publish({"output": "".join(self.result_partial)})
         except Exception as e:

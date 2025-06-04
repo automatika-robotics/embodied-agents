@@ -9,9 +9,11 @@ from .utils import (
     WakeWordStatus,
     load_model,
     flatten,
+    _LANGUAGE_CODES,
 )
 
 __all__ = [
+    "_LANGUAGE_CODES",
     "flatten",
     "create_detection_context",
     "validate_kwargs",
