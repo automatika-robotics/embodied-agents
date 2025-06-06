@@ -269,3 +269,77 @@ class WakeWord:
                 return WakeWordStatus.END
             else:
                 return WakeWordStatus.ONGOING
+
+
+class HypothesisBuffer:
+    """A simplified Hypothesis buffer for collection output from a streaming speech to text model based on [whisper_stream](https://github.com/ufal/whisper_streaming). Implements LocalAgreement-n policy as used in CUNI-KIT at IWSLT 2022 etc. before.
+        @inproceedings{machacek-etal-2023-turning,
+        title = "Turning Whisper into Real-Time Transcription System",
+        author = "Mach{\'a}{\v{c}}ek, Dominik  and
+          Dabre, Raj  and
+          Bojar, Ond{\v{r}}ej",
+        editor = "Saha, Sriparna  and
+          Sujaini, Herry",
+        booktitle = "Proceedings of the 13th International Joint Conference on Natural Language Processing and the 3rd Conference of the Asia-Pacific Chapter of the Association for Computational Linguistics: System Demonstrations",
+        month = nov,
+        year = "2023",
+        address = "Bali, Indonesia",
+        publisher = "Association for Computational Linguistics",
+        url = "https://aclanthology.org/2023.ijcnlp-demo.3",
+        pages = "17--24",
+    }
+    """
+
+    def __init__(self):
+        self.commited_in_buffer = []
+        self.buffer = []
+        self.new = []
+        self.last_commited_time = 0
+
+    def reset(self):
+        self.commited_in_buffer = []
+        self.buffer = []
+        self.new = []
+        self.last_commited_time = 0
+
+    def insert(self, new):
+        # Add new words
+        self.new = [(a, b, t) for a, b, t in new if a > self.last_commited_time - 0.1]
+
+        # Remove up to 5 duplicates if they exist in previously commited
+        if self.new and self.commited_in_buffer:
+            cn = len(self.commited_in_buffer)
+            nn = len(self.new)
+            for i in range(1, min(min(cn, nn), 5) + 1):
+                c = " ".join(
+                    [self.commited_in_buffer[-j][2] for j in range(1, i + 1)][::-1]
+                )
+                tail = " ".join(self.new[j - 1][2] for j in range(1, i + 1))
+                if c == tail:
+                    [repr(self.new.pop(0)) for _ in range(i)]
+                    break
+
+    def flush(self):
+        commit = []
+        # loop to confirm words in transcript received in previous step
+        while self.new:
+            if not self.buffer:
+                break
+            na, nb, nt = self.new[0]
+            if nt == self.buffer[0][2] and abs(na - self.buffer[0][0]) < 0.2:
+                commit.append((na, nb, nt))
+                self.last_commited_time = nb
+                self.buffer.pop(0)
+                self.new.pop(0)
+            else:
+                break
+
+        self.buffer = self.new
+        self.new = []
+        # commit confirmed words
+        self.commited_in_buffer.extend(commit)
+        return commit
+
+    def complete(self):
+        # send any remaining words in buffer
+        return self.buffer

@@ -280,8 +280,8 @@ class SpeechToTextConfig(ModelComponentConfig):
     :type enable_vad: bool
 
     :param device_audio: Audio input device ID. Only used if `enable_vad` is True.
-                         Defaults to 0.
-    :type device_audio: int
+                         Defaults to None.
+    :type device_audio: Optional[int]
 
     :param vad_threshold: Threshold above which speech is considered present.
                           Only used if `enable_vad` is True. Range: 0.0–1.0.
@@ -348,11 +348,6 @@ class SpeechToTextConfig(ModelComponentConfig):
                        Defaults to 2000.
     :type min_chunk_size: int
 
-    :param response_terminator: Token marking the end of a model response (used in persistent clients).
-                                Cannot be an empty string.
-                                Defaults to '<<Response Ended>>'.
-    :type response_terminator: str
-
     --------------------
     Model Paths
     --------------------
@@ -382,7 +377,6 @@ class SpeechToTextConfig(ModelComponentConfig):
     config = SpeechToTextConfig(
         enable_vad=True,
         enable_wakeword=True,
-        device_audio=1,
         vad_threshold=0.5,
         wakeword_threshold=0.6,
         min_silence_duration_ms=1000,
@@ -400,19 +394,18 @@ class SpeechToTextConfig(ModelComponentConfig):
     max_new_tokens: Optional[int] = field(default=None)
     enable_vad: bool = field(default=False)
     enable_wakeword: bool = field(default=False)
-    device_audio: int = field(default=0)
+    device_audio: Optional[int] = field(default=None)
     vad_threshold: float = field(
         default=0.5, validator=base_validators.in_range(min_value=0.0, max_value=1.0)
     )
     wakeword_threshold: float = field(
         default=0.6, validator=base_validators.in_range(min_value=0.0, max_value=1.0)
     )
-    min_silence_duration_ms: int = field(default=300)
+    min_silence_duration_ms: int = field(default=500)
     speech_pad_ms: int = field(default=30)
     speech_buffer_max_len: int = field(default=30000)
     stream: bool = field(default=False)
-    min_chunk_size: int = field(default=2000, validator=base_validators.gt(100))
-    response_terminator: str = field(default="<<Response Ended>>")
+    min_chunk_size: int = field(default=2000, validator=base_validators.gt(500))
     device_vad: str = field(
         default="cpu", validator=base_validators.in_(["cpu", "gpu"])
     )
@@ -453,12 +446,6 @@ class SpeechToTextConfig(ModelComponentConfig):
             raise ValueError(
                 "enable_vad (voice activity detection) must be set to True when stream is set to True"
             )
-
-    @response_terminator.validator
-    def not_empty(self, _, value):
-        """response terminator validator"""
-        if not value:
-            raise ValueError("response_terminator must not be an empty string")
 
     def __attrs_post_init__(self):
         """Set values of undefined privates"""

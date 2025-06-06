@@ -144,18 +144,23 @@ class SpeechToText(ModelComponent):
                     device=self.config.device_wakeword,
                 )
                 self.wake_word_triggered = False
+
+            # initialize response buffer used for output when streaming input
+            if self.config.stream:
+                from ..utils.voice import HypothesisBuffer
+
+                self.transcript_buffer: HypothesisBuffer = HypothesisBuffer()
+                self.result_partial: List = []
+                self.min_chunk_size = int(
+                    self.config._sample_rate
+                    * self.config.min_chunk_size
+                    / (1000 * self.config._block_size)
+                )
+
+            # start listening thread
             self.listening_thread = threading.Thread(
                 target=self._process_audio, daemon=True
             ).start()
-
-        # initialize response buffer used for output when streaming input
-        if self.config.stream:
-            self.result_partial: List = []
-            self.min_chunk_size = int(
-                self.config._sample_rate
-                * self.config.min_chunk_size
-                / (1000 * self.config._block_size)
-            )
 
     def custom_on_deactivate(self):
         # If VAD is enabled, stop the listening stream thread
@@ -229,7 +234,6 @@ class SpeechToText(ModelComponent):
                     and len(self.speech_buffer) >= self.min_chunk_size
                 ):
                     self._execution_step(speech=self.speech_buffer)
-                    self.speech_buffer.clear()
 
         # otherwise store speech when vad is triggered
         elif self.vad_iterator.triggered:
@@ -238,7 +242,6 @@ class SpeechToText(ModelComponent):
             # Send input if streaming enabled
             if self.config.stream and len(self.speech_buffer) >= self.min_chunk_size:
                 self._execution_step(speech=self.speech_buffer)
-                self.speech_buffer.clear()
 
         # add vad status outputs to queue
         if vad_output:
@@ -269,34 +272,13 @@ class SpeechToText(ModelComponent):
             frames_per_buffer=self.config._block_size,
             input=True,
             start=True,
+            input_device_index=self.config.device_audio,
             stream_callback=self._stream_callback,  # type: ignore
         )
 
         while True:
             vad_output = self.queue.get()
-            if vad_output is VADStatus.START:
-                # When someone starts speaking, check for wakeword if enabled
-                self.get_logger().debug("Speech started")
-                if self.config.enable_wakeword:
-                    self.wake_word(
-                        self.audio_features.get_embeddings(self.wake_word.model_input)
-                    )
-            elif vad_output is VADStatus.ONGOING:
-                self.get_logger().debug("Speech ongoing")
-                if self.config.enable_wakeword:
-                    wake_status = self.wake_word(
-                        self.audio_features.get_embeddings(self.wake_word.model_input)
-                    )
-                    if wake_status is WakeWordStatus.END:
-                        self.get_logger().debug("Wakeword ended")
-                        self.wake_word_triggered = True
-            elif vad_output is VADStatus.END:
-                # Send audio when speech finishes
-                self.get_logger().debug("Speech ended")
-                if self.config.enable_wakeword:
-                    self.wake_word_triggered = False
-                self._execution_step(speech=self.speech_buffer)
-                self.speech_buffer.clear()
+            self.__process_vad_output(vad_output)
             if self.event.is_set():
                 stream.stop_stream()
                 stream.close()
@@ -304,17 +286,62 @@ class SpeechToText(ModelComponent):
                 break
         self.event.wait()
 
+    def __process_vad_output(self, vad_output: VADStatus):
+        """Process VAD Status"""
+        if vad_output is VADStatus.START:
+            # When someone starts speaking, check for wakeword if enabled
+            self.get_logger().debug("Speech started")
+            if self.config.enable_wakeword:
+                self.wake_word(
+                    self.audio_features.get_embeddings(self.wake_word.model_input)
+                )
+        elif vad_output is VADStatus.ONGOING:
+            self.get_logger().debug("Speech ongoing")
+            if self.config.enable_wakeword:
+                wake_status = self.wake_word(
+                    self.audio_features.get_embeddings(self.wake_word.model_input)
+                )
+                if wake_status is WakeWordStatus.END:
+                    self.get_logger().debug("Wakeword ended")
+                    self.wake_word_triggered = True
+        elif vad_output is VADStatus.END:
+            # Send audio when speech finishes
+            self.get_logger().debug("Speech ended")
+            if self.config.enable_wakeword:
+                self.wake_word_triggered = False
+            if self.config.stream:
+                # Send again in case last segment was shorter than min_chunk_size
+                self._execution_step(speech=self.speech_buffer)
+                # Send termination token
+                self._execution_step(speech=[b"\r\n"])
+            else:
+                self._execution_step(speech=self.speech_buffer)
+            self.speech_buffer.clear()
+
     def _handle_websocket_streaming(self) -> Optional[List]:
         """Handle streaming output from a websocket client"""
         try:
             message = self.resp_queue.get(block=True)
             tokens = msgpack.unpackb(message)
-            self.get_logger().info(str(tokens))
-            if tokens:
-                if not tokens == self.config.response_terminator:
-                    self.result_partial.append(tokens)
-                else:
-                    self._publish({"output": "".join(self.result_partial)})
+
+            # if termination token is not received then add to hypothesis
+            if not tokens == b"\r\n":
+                self.transcript_buffer.insert(tokens)
+                if newly_committed_words := self.transcript_buffer.flush():
+                    self.result_partial.extend(newly_committed_words)
+
+            # publish output when termination token resceived
+            else:
+                # Get any last words not currently confirmed in hypothesis
+                if remaining_words := self.transcript_buffer.complete():
+                    self.result_partial.extend(remaining_words)
+                complete_transcript = " ".join(i[2] for i in self.result_partial)
+                self.get_logger().debug(complete_transcript)
+                self._publish({"output": complete_transcript})
+                # reset buffers
+                self.result_partial = []
+                self.transcript_buffer.reset()
+
         except Exception as e:
             self.get_logger().error(str(e))
             # raise a fallback trigger via health status
