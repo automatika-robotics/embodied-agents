@@ -97,8 +97,8 @@ class ModelComponent(Component):
                     except Exception as e:
                         self.get_logger().error(f"Error encountered in warmup: {e}")
 
-            # get inference params
-            self.inference_params = self.config.get_inference_params()
+        # get inference params
+        self.inference_params = self.config.get_inference_params()
 
     def custom_on_deactivate(self):
         """

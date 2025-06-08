@@ -5,6 +5,7 @@ from attrs import define, field, Factory
 
 from .ros import base_validators, BaseComponentConfig, Topic, Route
 from .utils import validate_kwargs, _LANGUAGE_CODES
+from .utils.vision import _MS_COCO_LABELS
 
 __all__ = [
     "LLMConfig",
@@ -179,27 +180,54 @@ class MLLMConfig(LLMConfig):
 class VisionConfig(ModelComponentConfig):
     """Configuration for a detection component.
 
-    The config allows you to customize the detection and/or tracking process.
+       The config allows you to customize the detection and/or tracking process.
 
-    :param threshold: The confidence threshold for object detection, ranging from 0.1 to 1.0 (default: 0.5).
-    :type threshold: float
-    :param get_data_labels: Whether to return data labels along with detections (default: True).
-    :type get_data_labels: bool
-    :param labels_to_track: A list of specific labels to track, when the model is used as a tracker (default: None).
-    :type labels_to_track: Optional[list]
+       :param threshold: The confidence threshold for object detection, ranging from 0.1 to 1.0 (default: 0.5).
+       :type threshold: float
+       :param get_dataset_labels: Whether to return data labels along with detections (default: True).
+       :type get_dataset_labels: bool
+       :param labels_to_track: A list of specific labels to track, when the model is used as a tracker (default: None).
+       :type labels_to_track: Optional[list]
+    :param enable_visualization: Whether to enable visualization of detections (default: False). Useful for testing vision component output.
+       :type enable_visualization: Optional[bool]
+       :param enable_local_classifier: Whether to enable a local classifier model for detections (default: False). If a model client is given to the component, than this has no effect.
+       :type enable_local_classifier: bool
+       :param input_height: Height of the input to local classifier model in pixels (default: 640). This parameter is only effective when enable_local_classifier is set to True.
+       :type input_height: int
+       :param input_width: Width of the input to local classifier in pixels (default: 640). This parameter is only effective when enable_local_classifier is set to True.
+       :type input_width: int
+       :param dataset_labels: A dictionary mapping label indices to names, used to interpret model outputs (default: COCO labels). This parameter is only effective when enable_local_classifier is set to True.
+       :type dataset_labels: Dict
+       :param device_local_classifier: Device to run the local classifier on, either "cpu" or "gpu" (default: "gpu"). This parameter is only effective when enable_local_classifier is set to True.
+       :type device_local_classifier: str
+       :param ncpu_local_classifier: Number of CPU cores to allocate to the local classifier when using CPU (default: 1). This parameter is only effective when enable_local_classifier is set to True.
+       :type ncpu_local_classifier: int
+       :param local_classifier_model_path: Path or URL to the ONNX model used by the local classifier (default: DEIM, Huang et al. CVPR 2025). Other models based on [DEIM](https://github.com/ShihuaHuang95/DEIM?tab=readme-ov-file#deim-d-fine) can be checked [here](https://github.com/automatika-robotics/ros-agents/releases/tag/0.3.3). This parameter is only effective when enable_local_classifier is set to True.
+       :type local_classifier_model_path: str
 
-    Example of usage:
-    ```python
-    config = DetectionConfig(threshold=0.3)
-    ```
+       Example of usage:
+       ```python
+       config = DetectionConfig(threshold=0.3)
+       ```
     """
 
     threshold: float = field(
         default=0.5, validator=base_validators.in_range(min_value=0.1, max_value=1.0)
     )
-    get_data_labels: bool = field(default=True)
+    get_dataset_labels: bool = field(default=True)
     labels_to_track: Optional[List[str]] = field(default=None)
     enable_visualization: Optional[bool] = field(default=False)
+    enable_local_classifier: bool = field(default=False)
+    input_height: int = field(default=640)
+    input_width: int = field(default=640)
+    dataset_labels: Dict = field(default=_MS_COCO_LABELS)
+    device_local_classifier: str = field(
+        default="gpu", validator=base_validators.in_(["cpu", "gpu"])
+    )
+    ncpu_local_classifier: int = field(default=1)
+    local_classifier_model_path: str = field(
+        default="https://github.com/automatika-robotics/ros-agents/releases/download/0.3.3/deim_dfine_hgnetv2_n_coco_160e.onnx"
+    )
 
     def _get_inference_params(self) -> Dict:
         """get_inference_params.
@@ -207,7 +235,7 @@ class VisionConfig(ModelComponentConfig):
         """
         return {
             "threshold": self.threshold,
-            "get_data_labels": self.get_data_labels,
+            "get_dataset_labels": self.get_dataset_labels,
             "labels_to_track": self.labels_to_track,
         }
 

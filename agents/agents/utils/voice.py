@@ -7,7 +7,7 @@ try:
     import onnxruntime as ort
 except ModuleNotFoundError as e:
     raise ModuleNotFoundError(
-        "VAD in SpeechToText components requires onnxruntime to be installed. Please install them with `pip install onnxruntime` or `pip install onnxruntime-gpu` for cpu or gpu based deployment."
+        "enable_vad and enable_wakeword in SpeechToText component requires onnxruntime to be installed. Please install them with `pip install onnxruntime` or `pip install onnxruntime-gpu` for cpu or gpu based deployment."
     ) from e
 
 
@@ -147,7 +147,7 @@ class AudioFeatures:
             import logging
 
             logging.getLogger("melspectrogram").warning(
-                "CUDAExecutionProvider is not available for VAD, ensure you have the correct CUDA and cuDNN versions installed and install onnx runtime with `pip install onnxruntime-gpu`. Switching to CPU runtime."
+                "CUDAExecutionProvider is not available for WakeWord, ensure you have the correct CUDA and cuDNN versions installed and install onnx runtime with `pip install onnxruntime-gpu`. Switching to CPU runtime."
             )
             providers = ["CPUExecutionProvider"]
         else:
@@ -263,7 +263,7 @@ class WakeWord:
             import logging
 
             logging.getLogger("wakeword").warning(
-                "CUDAExecutionProvider is not available for VAD, ensure you have the correct CUDA and cuDNN versions installed and install onnx runtime with `pip install onnxruntime-gpu`. Switching to CPU runtime."
+                "CUDAExecutionProvider is not available for WakeWord, ensure you have the correct CUDA and cuDNN versions installed and install onnx runtime with `pip install onnxruntime-gpu`. Switching to CPU runtime."
             )
             providers = ["CPUExecutionProvider"]
         else:
