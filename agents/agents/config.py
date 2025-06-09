@@ -248,14 +248,12 @@ class TextToSpeechConfig(ModelComponentConfig):
 
     :param play_on_device: Whether to play the audio on available audio device (default: False).
     :type play_on_device: bool
-    :param device: Device id (int) or name (sub-string) for playing the audio. Only effective if play_on_device is True (default: 'default').
+    :param device: Optional device id (int) for playing the audio. Only effective if play_on_device is True (default: None).
     :type play_on_device: bool
     :param buffer_size: Size of the buffer for playing audio on device. Only effective if play_on_device is True (default: 20).
     :type buffer_size: int
     :param block_size: Size of the audio block to be read for playing audio on device. Only effective if play_on_device is True (default: 1024).
     :type block_size: int
-    :param get_bytes: Whether the model should return the speech data as bytes instead of base64 encoded string(default: False).
-    :type get_bytes: bool
 
     Example of usage:
     ```python
@@ -264,16 +262,16 @@ class TextToSpeechConfig(ModelComponentConfig):
     """
 
     play_on_device: bool = field(default=False)
-    device: Union[int, str] = field(default="default")
+    device: Optional[int] = field(default=None)
     buffer_size: int = field(default=20)
     block_size: int = field(default=1024)
-    get_bytes: bool = field(default=False)
+    _get_bytes: bool = field(default=False)
 
     def _get_inference_params(self) -> Dict:
         """get_inference_params.
         :rtype: dict
         """
-        return {"get_bytes": self.get_bytes}
+        return {"get_bytes": self._get_bytes}
 
 
 @define(kw_only=True)

@@ -242,7 +242,8 @@ class WakeWord:
     """
     A wakeword model classification class that uses pre-trained wakeword models adapted for models presented in [openWakeWord project](https://github.com/dscripka/openWakeWord/).
     This class consumed audio embeddings and gives out the probability of detecting a wakeword.
-    Simple models like 2 layer RNNs work fairly well as wakeword classification models. Pre-trained models from openWakeWord are available [here](https://github.com/dscripka/openWakeWord/tree/main?tab=readme-ov-file#pre-trained-models). To train a custom model, follow this simple [tutorial](https://github.com/dscripka/openWakeWord/blob/main/notebooks/automatic_model_training.ipynb) provided by openWakeWord. Please check [licensing information](https://github.com/dscripka/openWakeWord/tree/main?tab=readme-ov-file#license) for pre-trained models, before utilizing them.
+    Simple models like 2 layer RNNs work fairly well as wakeword classification models. Pre-trained models from openWakeWord are available [here](https://github.com/dscripka/openWakeWord/tree/main?tab=readme-ov-file#pre-trained-models).
+    To train a custom model, follow this simple [tutorial](https://github.com/dscripka/openWakeWord/blob/main/notebooks/automatic_model_training.ipynb) provided by openWakeWord. Please check [licensing information](https://github.com/dscripka/openWakeWord/tree/main?tab=readme-ov-file#license) for pre-trained models, before utilizing them.
     """
 
     def __init__(

@@ -1,9 +1,10 @@
 import queue
 import threading
 from io import BytesIO
-from typing import Any, Union, Optional, List, Dict
+from typing import Any, Union, Optional, List, Dict, Tuple
 import numpy as np
 import base64
+import time
 
 from ..clients.model_base import ModelClient
 from ..config import TextToSpeechConfig
@@ -120,69 +121,131 @@ class TextToSpeech(ModelComponent):
 
         return {"query": query, **self.inference_params}
 
-    def _stream_callback(self, outdata: np.ndarray, frames: int, _, status) -> None:
-        """Stream callback function for playing audio on device
-
-        :param outdata:
-        :type outdata: np.ndarray
-        :param frames:
-        :type frames: int
-        :param _:
-        :param status:
-        :type status: sd.CallbackFlags
-        :rtype: None
+    def _stream_callback(
+        self, _: bytes, frames: int, time_info: Dict, status: int
+    ) -> Tuple[bytes, int]:
+        """
+        Stream callback for PyAudio, consuming NumPy arrays from the queue.
         """
         try:
-            from sounddevice import CallbackStop
+            import pyaudio
         except ModuleNotFoundError as e:
             raise ModuleNotFoundError(
-                "play_on_device device configuration for TextToSpeech component requires soundfile and sounddevice modules to be installed. Please install them with `pip install soundfile sounddevice`"
+                "play_on_device device configuration for TextToSpeech component requires soundfile and pyaudio modules to be installed. Please install them with `pip install soundfile pyaudio`"
             ) from e
+
         assert frames == self.config.block_size
-        if status.output_underflow:
-            self.get_logger().warn(
-                "Output underflow: Try to increase the blocksize. Default is 1024"
-            )
+        if status:
+            if pyaudio.paOutputUnderflow:
+                self.get_logger().warn(
+                    "Output underflow: Try to increase the blocksize. Default is 1024"
+                )
+            else:
+                self.get_logger().warn(f"PyAudio stream status flags: {status}")
+
+        # Bytes PyAudio expects = requested_frames * channels * bytes_per_sample
+        expected_bytes_len = (
+            frames * self._current_channels * 4  # float32 is 4 bytes per sample
+        )
         try:
+            # get numpy chunk from soundfile
             data = self.queue.get_nowait()
-        except queue.Empty as e:
+        except queue.Empty:
             self.get_logger().warn(
                 "Buffer is empty: If playback was not completed then try to increase the buffersize. Default is 20 (blocks)"
             )
-            raise CallbackStop from e
-        if len(data) < len(outdata):
-            outdata[: len(data)] = data
-            outdata[len(data) :].fill(0)
-            raise CallbackStop
-        else:
-            outdata[:] = data
+            self.event.set()
+            return (b"\x00" * expected_bytes_len, pyaudio.paComplete)
 
-    def _playback_audio(self, output: Union[bytes, str]) -> None:
+        # If last chunk is smaller than the full block then pad
+        if data.shape[0] < frames:
+            # create padding array of zeros
+            padding_frames = frames - data.shape[0]
+            padding_np = np.zeros(
+                (padding_frames, self._current_channels), dtype=data.dtype
+            )
+            # concatenate the actual data with padding
+            final_data_np = np.concatenate((data, padding_np), axis=0)
+            out_data_bytes = final_data_np.tobytes()
+            self.event.set()  # signal that we've processed the true end of data.
+            return out_data_bytes, pyaudio.paComplete
+        else:
+            out_data_bytes = data.tobytes()
+            return out_data_bytes, pyaudio.paContinue
+
+    def __feed_data(self, stream, blocks, timeout: int):
+        """Feed blocks to playback stream"""
+        for data in blocks:
+            try:
+                self.queue.put(data, timeout=timeout)
+            except queue.Full:
+                self.get_logger().warn(
+                    "Queue full while feeding stream. Playback might be choppy."
+                )
+                if stream and stream.is_active():
+                    time.sleep(timeout / 10)
+                else:
+                    break
+            if self.event.is_set():
+                self.get_logger().debug("Event set, stopping data feed.")
+                break
+
+        # Wait until playback is finished after last chunck
+        wait_start_time = time.monotonic()
+        estimated_remaining_blocks = self.queue.qsize() + 10
+        max_wait_timeout = estimated_remaining_blocks * (
+            self.config.block_size / self._current_framerate
+        )
+        max_wait_timeout = max(max_wait_timeout, 2.0)
+        max_wait_timeout = min(max_wait_timeout, 60.0)  # Cap timeout
+
+        while stream and stream.is_active():
+            if self.event.is_set():
+                break
+            if time.monotonic() - wait_start_time > max_wait_timeout:
+                self.get_logger().warn(
+                    f"Timeout ({max_wait_timeout:.2f}s) waiting for stream to finish."
+                )
+                self.event.set()
+                break
+            time.sleep(0.05)
+
+    def _playback_audio(self, output: Union[bytes, str]):
         """Creates a stream to play audio on device
 
         :param output:
         :type output: bytes
-        :rtype: None
         """
         # import packages
         try:
             from soundfile import SoundFile
-            from sounddevice import OutputStream
+            import pyaudio
         except ModuleNotFoundError as e:
             raise ModuleNotFoundError(
-                "play_on_device device configuration for TextToSpeech component requires soundfile and sounddevice modules to be installed. Please install them with `pip install soundfile sounddevice`"
+                "play_on_device device configuration for TextToSpeech component requires soundfile and pyaudio modules to be installed. Please install them with `pip install soundfile pyaudio`"
             ) from e
 
         # change str to bytes if output is str
         if isinstance(output, str):
-            output = base64.b64decode(output)
+            try:
+                output_bytes = base64.b64decode(output)
+            except Exception as e:
+                output_bytes = b""
+                self.get_logger().error(f"Failed to decode base64 string: {e}")
+                self.event.set()
+        else:
+            output_bytes = output
 
         # clear any set event
         self.event.clear()
 
-        with SoundFile(BytesIO(output)) as f:
+        with SoundFile(BytesIO(output_bytes)) as f:
+            self._current_channels = f.channels
+            self._current_framerate = f.samplerate
+
             # make chunk generator
-            blocks = f.blocks(self.config.block_size, always_2d=True)
+            # request float32 from sound, pyAudio paFloat32 corresponds to this
+            blocks = f.blocks(self.config.block_size, dtype="float32", always_2d=True)
 
             # pre-fill queue
             for _ in range(self.config.buffer_size):
@@ -194,28 +257,40 @@ class TextToSpeech(ModelComponent):
                     break
                 self.queue.put_nowait(data)
 
-            # create an output stream
-            stream = OutputStream(
-                samplerate=f.samplerate,
-                blocksize=self.config.block_size,
-                device=self.config.device,
-                channels=f.channels,
-                callback=self._stream_callback,
-                finished_callback=self.event.set,
-            )
-
-            # invoke stream callback
-            with stream:
+            # initialize pyaudi stream
+            audio_interface = pyaudio.PyAudio()
+            try:
+                stream = audio_interface.open(
+                    format=pyaudio.paFloat32,
+                    channels=self._current_channels,
+                    rate=self._current_framerate,
+                    output=True,
+                    frames_per_buffer=self.config.block_size,
+                    stream_callback=self._stream_callback,  # type: ignore
+                    output_device_index=self.config.device,
+                )
+                stream.start_stream()
+                self.get_logger().debug(
+                    "PyAudio stream started. Feeding data using SoundFile blocks..."
+                )
                 timeout = (
                     self.config.block_size * self.config.buffer_size / f.samplerate
                 )
-                for data in blocks:
-                    self.queue.put(data, timeout=timeout)
-                    # Stop playback if event is set
-                    if self.event.is_set():
-                        break
-                # Wait until playback is finished after last chunck
-                self.event.wait()
+
+                # Feed data to the device stream
+                self.__feed_data(stream, blocks, timeout)
+
+                # Stop stream
+                if stream:
+                    stream.stop_stream()
+                    stream.close()
+                    audio_interface.terminate()
+
+            except Exception as e:
+                self.get_logger().error(f"PyAudio stream failed: {e}")
+                audio_interface.terminate()
+                self.event.set()
+                return
 
     def _execution_step(self, *args, **kwargs):
         """_execution_step.
@@ -254,6 +329,7 @@ class TextToSpeech(ModelComponent):
                     args=(result.get("output"),),
                     daemon=True,
                 ).start()
+
             # publish inference result
             for publisher in self.publishers_dict.values():
                 publisher.publish(**result)
