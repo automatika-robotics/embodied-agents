@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, List
 import numpy as np
 from .utils import VADStatus, WakeWordStatus
 from typing import Callable
@@ -7,8 +7,38 @@ try:
     import onnxruntime as ort
 except ModuleNotFoundError as e:
     raise ModuleNotFoundError(
-        "enable_vad and enable_wakeword in SpeechToText component requires onnxruntime to be installed. Please install them with `pip install onnxruntime` or `pip install onnxruntime-gpu` for cpu or gpu based deployment."
+        """enable_vad and enable_wakeword in SpeechToText component requires onnxruntime to be installed. Please install them with `pip install onnxruntime` or `pip install onnxruntime-gpu` for cpu or gpu based deployment.
+
+        For Jetson devices you can download the pre-built ONNX runtime wheels corresponding to your Jetpack version at https://elinux.org/Jetson_Zoo#ONNX_Runtime"""
     ) from e
+
+
+def _get_onnx_providers(device: str, model: str) -> List[str]:
+    """Check for available providers"""
+    import logging
+
+    available = ort.get_available_providers()
+    logger = logging.getLogger(model)
+
+    if device == "cuda":
+        if "CUDAExecutionProvider" not in available:
+            logger.warning(
+                f"CUDA is not available for {model}. Ensure the correct CUDA/cuDNN versions are installed and install ONNX Runtime with `pip install onnxruntime-gpu`. Switching to CPU runtime."
+            )
+        return ["CUDAExecutionProvider", "CPUExecutionProvider"]
+
+    if device == "tensorrt":
+        if "TensorrtExecutionProvider" not in available:
+            logger.warning(
+                f"Tensorrt is not available for {model}. Ensure the correct CUDA/cuDNN versions are installed and install ONNX Runtime with TensorRT support. Switching to CPU runtime."
+            )
+        return [
+            "TensorrtExecutionProvider",
+            "CUDAExecutionProvider",
+            "CPUExecutionProvider",
+        ]
+
+    return ["CPUExecutionProvider"]
 
 
 class VADIterator:
@@ -47,19 +77,7 @@ class VADIterator:
         sessionOptions.inter_op_num_threads = ncpu
         sessionOptions.intra_op_num_threads = ncpu
 
-        if (
-            device == "gpu"
-            and "CUDAExecutionProvider" not in ort.get_available_providers()
-        ):
-            import logging
-
-            logging.getLogger("vad").warning(
-                "CUDAExecutionProvider is not available for VAD, ensure you have the correct CUDA and cuDNN versions installed and install onnx runtime with `pip install onnxruntime-gpu`. Switching to CPU runtime."
-            )
-            providers = ["CPUExecutionProvider"]
-        else:
-            providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
-
+        providers = _get_onnx_providers(device, "VAD")
         self.model = ort.InferenceSession(
             model_path, sess_options=sessionOptions, providers=providers
         )
@@ -140,19 +158,7 @@ class AudioFeatures:
         sessionOptions.inter_op_num_threads = ncpu
         sessionOptions.intra_op_num_threads = ncpu
 
-        if (
-            device == "gpu"
-            and "CUDAExecutionProvider" not in ort.get_available_providers()
-        ):
-            import logging
-
-            logging.getLogger("melspectrogram").warning(
-                "CUDAExecutionProvider is not available for WakeWord, ensure you have the correct CUDA and cuDNN versions installed and install onnx runtime with `pip install onnxruntime-gpu`. Switching to CPU runtime."
-            )
-            providers = ["CPUExecutionProvider"]
-        else:
-            providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
-
+        providers = _get_onnx_providers(device, "WakeWord")
         # Initialize melspectrogram model
         self.melspec_model = ort.InferenceSession(
             melspectogram_model_path, sess_options=sessionOptions, providers=providers
@@ -164,11 +170,7 @@ class AudioFeatures:
 
         # Initialize audio embedding model
         self.embedding_model = ort.InferenceSession(
-            embedding_model_path,
-            sess_options=sessionOptions,
-            providers=["CUDAExecutionProvider"]
-            if device == "gpu"
-            else ["CPUExecutionProvider"],
+            embedding_model_path, sess_options=sessionOptions, providers=providers
         )
 
         self.embedding_model_predict = lambda x: self.embedding_model.run(
@@ -257,19 +259,7 @@ class WakeWord:
         sessionOptions.inter_op_num_threads = ncpu
         sessionOptions.intra_op_num_threads = ncpu
 
-        if (
-            device == "gpu"
-            and "CUDAExecutionProvider" not in ort.get_available_providers()
-        ):
-            import logging
-
-            logging.getLogger("wakeword").warning(
-                "CUDAExecutionProvider is not available for WakeWord, ensure you have the correct CUDA and cuDNN versions installed and install onnx runtime with `pip install onnxruntime-gpu`. Switching to CPU runtime."
-            )
-            providers = ["CPUExecutionProvider"]
-        else:
-            providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
-
+        providers = _get_onnx_providers(device, "WakeWord")
         # Create inference session
         self.model = ort.InferenceSession(
             model_path, sess_options=sessionOptions, providers=providers

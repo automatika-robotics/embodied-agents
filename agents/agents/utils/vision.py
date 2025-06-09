@@ -6,8 +6,12 @@ try:
     import onnxruntime as ort
 except ModuleNotFoundError as e:
     raise ModuleNotFoundError(
-        "enable_local_classifier in Vision component requires onnxruntime to be installed. Please install them with `pip install onnxruntime` or `pip install onnxruntime-gpu` for cpu or gpu based deployment."
+        """enable_local_classifier in Vision component requires onnxruntime to be installed. Please install them with `pip install onnxruntime` or `pip install onnxruntime-gpu` for cpu or gpu based deployment.
+
+        For Jetson devices you can download the pre-built ONNX runtime wheels corresponding to your Jetpack version at https://elinux.org/Jetson_Zoo#ONNX_Runtime"""
     ) from e
+
+from .voice import _get_onnx_providers
 
 
 class LocalVisionModel:
@@ -31,19 +35,7 @@ class LocalVisionModel:
         sessionOptions.inter_op_num_threads = ncpu
         sessionOptions.intra_op_num_threads = ncpu
 
-        if (
-            device == "gpu"
-            and "CUDAExecutionProvider" not in ort.get_available_providers()
-        ):
-            import logging
-
-            logging.getLogger("local_classifier").warning(
-                "CUDAExecutionProvider is not available for local_classifier, ensure you have the correct CUDA and cuDNN versions installed and install onnx runtime with `pip install onnxruntime-gpu`. Switching to CPU runtime."
-            )
-            providers = ["CPUExecutionProvider"]
-        else:
-            providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
-
+        providers = _get_onnx_providers(device, "local_classifier")
         self.model = ort.InferenceSession(
             model_path, sess_options=sessionOptions, providers=providers
         )

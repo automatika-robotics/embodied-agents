@@ -222,7 +222,7 @@ class VisionConfig(ModelComponentConfig):
     input_width: int = field(default=640)
     dataset_labels: Dict = field(default=_MS_COCO_LABELS)
     device_local_classifier: str = field(
-        default="gpu", validator=base_validators.in_(["cpu", "gpu"])
+        default="cuda", validator=base_validators.in_(["cpu", "cuda", "tensorrt"])
     )
     ncpu_local_classifier: int = field(default=1)
     local_classifier_model_path: str = field(
@@ -433,10 +433,10 @@ class SpeechToTextConfig(ModelComponentConfig):
     stream: bool = field(default=False)
     min_chunk_size: int = field(default=2000, validator=base_validators.gt(500))
     device_vad: str = field(
-        default="cpu", validator=base_validators.in_(["cpu", "gpu"])
+        default="cpu", validator=base_validators.in_(["cpu", "cuda", "tensorrt"])
     )
     device_wakeword: str = field(
-        default="cpu", validator=base_validators.in_(["cpu", "gpu"])
+        default="cpu", validator=base_validators.in_(["cpu", "cuda", "tensorrt"])
     )
     ncpu_vad: int = field(default=1)
     ncpu_wakeword: int = field(default=1)
