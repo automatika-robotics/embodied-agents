@@ -5,8 +5,10 @@ from typing import Any, Union, Optional, List, Dict, Tuple
 import numpy as np
 import base64
 import time
+import msgpack
 
 from ..clients.model_base import ModelClient
+from ..clients import WebSocketClient, RESPModelClient
 from ..config import TextToSpeechConfig
 from ..ros import Audio, String, Topic
 from ..utils import validate_func_args
@@ -93,6 +95,10 @@ class TextToSpeech(ModelComponent):
             self.queue = queue.Queue(maxsize=self.config.buffer_size)
             self.event = threading.Event()
 
+        # Get bytes as output from server if using appropriate client
+        if isinstance(self.model_client, (WebSocketClient, RESPModelClient)):
+            self.inference_params["get_bytes"] = True
+
     def custom_on_deactivate(self):
         if self.config.play_on_device:
             # If play_on_device is enabled, stop the playing stream thread
@@ -121,7 +127,7 @@ class TextToSpeech(ModelComponent):
 
         return {"query": query, **self.inference_params}
 
-    def _stream_callback(
+    def __stream_callback(
         self, _: bytes, frames: int, time_info: Dict, status: int
     ) -> Tuple[bytes, int]:
         """
@@ -266,7 +272,7 @@ class TextToSpeech(ModelComponent):
                     rate=self._current_framerate,
                     output=True,
                     frames_per_buffer=self.config.block_size,
-                    stream_callback=self._stream_callback,  # type: ignore
+                    stream_callback=self.__stream_callback,  # type: ignore
                     output_device_index=self.config.device,
                 )
                 stream.start_stream()
@@ -316,7 +322,17 @@ class TextToSpeech(ModelComponent):
             return
 
         # conduct inference
-        result = self.model_client.inference(inference_input)
+        if isinstance(self.model_client, WebSocketClient):
+            self.req_queue.put_nowait(inference_input)
+            result = {}
+            try:
+                result["output"] = self.resp_queue.get(
+                    block=True, timeout=self.model_client.inference_timeout
+                )
+            except queue.Empty:
+                result = None
+        else:
+            result = self.model_client.inference(inference_input)
         if result:
             if self.config.play_on_device:
                 # Stop any previous playback by setting event and clearing queue

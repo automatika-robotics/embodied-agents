@@ -195,7 +195,7 @@ class SpeechToText(ModelComponent):
             **self.inference_params,
         }
 
-    def _stream_callback(
+    def __stream_callback(
         self, indata: bytes, frames: int, _, status
     ) -> Tuple[bytes, int]:
         """Stream callback function for processing audio
@@ -273,7 +273,7 @@ class SpeechToText(ModelComponent):
             input=True,
             start=True,
             input_device_index=self.config.device_audio,
-            stream_callback=self._stream_callback,  # type: ignore
+            stream_callback=self.__stream_callback,  # type: ignore
         )
 
         while True:

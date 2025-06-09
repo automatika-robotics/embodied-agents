@@ -76,7 +76,7 @@ class ModelComponent(Component):
                 # Create a fast timer for publishing websocket client outputs
                 # asynchronously in case of streaming. The callback is implemented
                 # in child components and gets executed in a blocking manner
-                if hasattr(self.config, "stream") and self.config.stream:
+                if getattr(self.config, "stream", None):
                     self.create_timer(
                         timer_period_sec=0.001,
                         callback=self._handle_websocket_streaming,
