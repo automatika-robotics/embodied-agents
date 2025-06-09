@@ -58,6 +58,7 @@ __all__ = [
     "component_action",
     "MapLayer",
     "Route",
+    "MutuallyExclusiveCallbackGroup",
 ]
 
 

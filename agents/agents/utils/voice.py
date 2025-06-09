@@ -1,7 +1,9 @@
 from typing import Optional, List
+from typing import Callable
+import logging
+
 import numpy as np
 from .utils import VADStatus, WakeWordStatus
-from typing import Callable
 
 try:
     import onnxruntime as ort
@@ -15,8 +17,6 @@ except ModuleNotFoundError as e:
 
 def _get_onnx_providers(device: str, model: str) -> List[str]:
     """Check for available providers"""
-    import logging
-
     available = ort.get_available_providers()
     logger = logging.getLogger(model)
 

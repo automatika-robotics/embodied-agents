@@ -1,6 +1,7 @@
 import cv2
 from typing import Dict
 import numpy as np
+import logging
 
 try:
     import onnxruntime as ort
@@ -96,21 +97,18 @@ class LocalVisionModel:
         results = []
 
         try:
-            detection = self.model.run(
+            detections = self.model.run(
                 output_names=None,
                 input_feed={"images": im_data_np, "orig_target_sizes": orig_size_np},
             )
 
             # format results
-            labels, boxes, scores = detection
+            labels, boxes, scores = detections
             result = {}
-            if boxes.size == 0:
-                scores = detection.pred_instances.scores.cpu().numpy()
-                labels = detection.pred_instances.labels.cpu().numpy()
-                bboxes = detection.pred_instances.bboxes.cpu().numpy()
+            if boxes.size != 0:
                 # filter for threshold
                 mask = scores >= inference_input["threshold"]
-                scores, labels, bboxes = scores[mask], labels[mask], bboxes[mask]
+                scores, labels, boxes = scores[mask], labels[mask], boxes[mask]
                 # Check if predictions survived thresholding
                 if not (scores.size == 0):
                     # if labels are requested in text
@@ -121,7 +119,7 @@ class LocalVisionModel:
                         )(labels)
 
                 result = {
-                    "bboxes": bboxes.tolist(),
+                    "bboxes": boxes.tolist(),
                     "labels": labels.tolist(),
                     "scores": scores.tolist(),
                 }
@@ -130,8 +128,6 @@ class LocalVisionModel:
                 results.append(result)
 
         except Exception as e:
-            import logging
-
             logging.getLogger("local_classifier").error(e)
 
         return {"output": results}
