@@ -198,7 +198,7 @@ class Vision(ModelComponent):
         self._images = []
         # set one image topic as query for event based trigger
         if trigger := kwargs.get("topic"):
-            images = [self.trig_callbacks[trigger.name].get_output()]
+            images = [self.trig_callbacks[trigger.name].get_output(clear_last=True)]
             if msg := kwargs.get("msg"):
                 self._images.append(msg)
         else:
