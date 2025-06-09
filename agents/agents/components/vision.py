@@ -198,14 +198,14 @@ class Vision(ModelComponent):
         self._images = []
         # set one image topic as query for event based trigger
         if trigger := kwargs.get("topic"):
-            images = [self.trig_callbacks[trigger.name].get_output(clear_last=True)]
+            images = [self.trig_callbacks[trigger.name].get_output()]
             if msg := kwargs.get("msg"):
                 self._images.append(msg)
         else:
             images = []
 
             for i in self.callbacks.values():
-                if (item := i.get_output()) is not None:
+                if (item := i.get_output(clear_last=True)) is not None:
                     images.append(item)
                     if i.msg:
                         self._images.append(i.msg)  # Collect all images for publishing
