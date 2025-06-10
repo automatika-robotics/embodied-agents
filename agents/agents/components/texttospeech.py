@@ -5,7 +5,6 @@ from typing import Any, Union, Optional, List, Dict, Tuple
 import numpy as np
 import base64
 import time
-import msgpack
 
 from ..clients.model_base import ModelClient
 from ..clients import WebSocketClient, RESPModelClient
@@ -92,8 +91,11 @@ class TextToSpeech(ModelComponent):
 
         # If play_on_device is enabled, start a playing stream on a separate thread
         if self.config.play_on_device:
-            self.queue = queue.Queue(maxsize=self.config.buffer_size)
-            self.event = threading.Event()
+            self._stream_queue = queue.Queue(maxsize=self.config.buffer_size)
+            self._incoming_queue = queue.Queue()
+            self._stop_event = threading.Event()
+            self._playback_thread: Optional[threading.Thread] = None
+            self._thread_lock = threading.Lock()
 
         # Get bytes as output from server if using appropriate client
         if isinstance(self.model_client, (WebSocketClient, RESPModelClient)):
@@ -102,7 +104,7 @@ class TextToSpeech(ModelComponent):
     def custom_on_deactivate(self):
         if self.config.play_on_device:
             # If play_on_device is enabled, stop the playing stream thread
-            self.event.set()
+            self._stop_event.set()
 
         # Deactivate component
         super().custom_on_deactivate()
@@ -155,15 +157,12 @@ class TextToSpeech(ModelComponent):
         )
         try:
             # get numpy chunk from soundfile
-            data = self.queue.get_nowait()
+            data = self._stream_queue.get_nowait()
         except queue.Empty:
-            self.get_logger().warn(
-                "Buffer is empty: If playback was not completed then try to increase the buffersize. Default is 20 (blocks)"
-            )
-            self.event.set()
-            return (b"\x00" * expected_bytes_len, pyaudio.paComplete)
+            # Send silence until new data is received
+            return (b"\x00" * expected_bytes_len, pyaudio.paContinue)
 
-        # If last chunk is smaller than the full block then pad
+        # If chunk is smaller than the full block then pad
         if data.shape[0] < frames:
             # create padding array of zeros
             padding_frames = frames - data.shape[0]
@@ -173,50 +172,103 @@ class TextToSpeech(ModelComponent):
             # concatenate the actual data with padding
             final_data_np = np.concatenate((data, padding_np), axis=0)
             out_data_bytes = final_data_np.tobytes()
-            self.event.set()  # signal that we've processed the true end of data.
-            return out_data_bytes, pyaudio.paComplete
+            return out_data_bytes, pyaudio.paContinue
         else:
             out_data_bytes = data.tobytes()
             return out_data_bytes, pyaudio.paContinue
 
-    def __feed_data(self, stream, blocks, timeout: int):
+    def __get_stream(
+        self, stream, audio_interface, new_framerate: int, new_channels: int
+    ):
+        """If the stream doesn't exist or if the audio format has changed close the old stream and create a new one"""
+        if (
+            stream is None
+            or new_framerate != self._current_framerate
+            or new_channels != self._current_channels
+        ):
+            if stream is not None:
+                self.get_logger().debug("Audio format changed. Re-creating stream.")
+                stream.stop_stream()
+                stream.close()
+
+            # create stream
+            stream = audio_interface.open(
+                format=self._pyaudio_format,
+                channels=new_channels,
+                rate=new_framerate,
+                output=True,
+                frames_per_buffer=self.config.block_size,
+                stream_callback=self.__stream_callback,  # type: ignore[attr-defined]
+                output_device_index=self.config.device,
+            )
+            stream.start_stream()
+            self._current_framerate = new_framerate
+            self._current_channels = new_channels
+            self.get_logger().debug(
+                "PyAudio stream started. Feeding data using SoundFile blocks..."
+            )
+
+        return stream
+
+    def __pre_fill_stream_queue(self, blocks):
+        """Pre-fill stream queue to buffer length"""
+        for _ in range(self.config.buffer_size):
+            try:
+                data = next(blocks)
+                if not len(data):
+                    return
+                self._stream_queue.put_nowait(data)
+            except queue.Full:
+                self.get_logger().warn("Queue already full, skipping prefill.")
+                break
+            except Exception:
+                break
+
+    def __feed_data(self, stream, blocks, timeout: float):
         """Feed blocks to playback stream"""
         for data in blocks:
             try:
-                self.queue.put(data, timeout=timeout)
+                self._stream_queue.put(data, block=True, timeout=timeout)
             except queue.Full:
                 self.get_logger().warn(
-                    "Queue full while feeding stream. Playback might be choppy."
+                    f"Queue full while feeding stream. Timeout was set to {timeout:2.f}. Try to increate the buffer_size in config. Default is 20 (blocks)"
                 )
-                if stream and stream.is_active():
-                    time.sleep(timeout / 10)
-                else:
-                    break
-            if self.event.is_set():
+                continue
+            if self._stop_event.is_set():
                 self.get_logger().debug("Event set, stopping data feed.")
-                break
+                return
 
         # Wait until playback is finished after last chunck
         wait_start_time = time.monotonic()
-        estimated_remaining_blocks = self.queue.qsize() + 10
+        estimated_remaining_blocks = self._stream_queue.qsize()
         max_wait_timeout = estimated_remaining_blocks * (
             self.config.block_size / self._current_framerate
         )
-        max_wait_timeout = max(max_wait_timeout, 2.0)
-        max_wait_timeout = min(max_wait_timeout, 60.0)  # Cap timeout
+        max_wait_timeout = max(max_wait_timeout, 0.5)
+        max_wait_timeout = min(max_wait_timeout, 2)  # Cap timeout
 
         while stream and stream.is_active():
-            if self.event.is_set():
-                break
+            if self._stop_event.is_set():
+                return
             if time.monotonic() - wait_start_time > max_wait_timeout:
-                self.get_logger().warn(
+                self.get_logger().debug(
                     f"Timeout ({max_wait_timeout:.2f}s) waiting for stream to finish."
                 )
-                self.event.set()
-                break
+                return
             time.sleep(0.05)
 
-    def _playback_audio(self, output: Union[bytes, str]):
+    def __get_audio_bytes(self, chunk: Union[bytes, str]) -> bytes:
+        """Get audio bytes"""
+        if isinstance(chunk, str):
+            try:
+                return base64.b64decode(chunk)
+            except Exception as e:
+                self.get_logger().error(f"Failed to decode base64 string: {e}")
+                return b""
+        else:
+            return chunk
+
+    def _playback_audio(self):
         """Creates a stream to play audio on device
 
         :param output:
@@ -231,72 +283,138 @@ class TextToSpeech(ModelComponent):
                 "play_on_device device configuration for TextToSpeech component requires soundfile and pyaudio modules to be installed. Please install them with `pip install soundfile pyaudio`"
             ) from e
 
-        # change str to bytes if output is str
-        if isinstance(output, str):
-            try:
-                output_bytes = base64.b64decode(output)
-            except Exception as e:
-                output_bytes = b""
-                self.get_logger().error(f"Failed to decode base64 string: {e}")
-                self.event.set()
-        else:
-            output_bytes = output
+        # Create pyaudio interface and define stream params
+        audio_interface = pyaudio.PyAudio()
+        stream: Optional[pyaudio.Stream] = None
+        self._current_framerate: int = 0
+        self._current_channels: int = 0
+        self._pyaudio_format = (
+            pyaudio.paFloat32  # Use float32 format for SoundFile compatibility
+        )
 
-        # clear any set event
-        self.event.clear()
-
-        with SoundFile(BytesIO(output_bytes)) as f:
-            self._current_channels = f.channels
-            self._current_framerate = f.samplerate
-
-            # make chunk generator
-            # request float32 from sound, pyAudio paFloat32 corresponds to this
-            blocks = f.blocks(self.config.block_size, dtype="float32", always_2d=True)
-
-            # pre-fill queue
-            for _ in range(self.config.buffer_size):
+        try:
+            while not self._stop_event.is_set():
                 try:
-                    data = next(blocks)
-                except Exception:
-                    break
-                if not len(data):
-                    break
-                self.queue.put_nowait(data)
+                    # Wait for a new chunk with a timeout.
+                    chunk = self._incoming_queue.get(
+                        timeout=self.config.thread_shutdown_timeout
+                    )
+                    # None in the queue is a sentinel to tell the thread to stop.
+                    if chunk is None:
+                        break
+                except queue.Empty:
+                    # Queue was empty for the duration of the timeout.
+                    self.get_logger().debug(
+                        f"No new audio for {self.config.thread_shutdown_timeout}s. "
+                        "Gracefully shutting down playback thread."
+                    )
+                    break  # Exit the loop
 
-            # initialize pyaudi stream
-            audio_interface = pyaudio.PyAudio()
-            try:
-                stream = audio_interface.open(
-                    format=pyaudio.paFloat32,
-                    channels=self._current_channels,
-                    rate=self._current_framerate,
-                    output=True,
-                    frames_per_buffer=self.config.block_size,
-                    stream_callback=self.__stream_callback,  # type: ignore
-                    output_device_index=self.config.device,
-                )
-                stream.start_stream()
-                self.get_logger().debug(
-                    "PyAudio stream started. Feeding data using SoundFile blocks..."
-                )
-                timeout = (
-                    self.config.block_size * self.config.buffer_size / f.samplerate
-                )
+                # change str to bytes if output is str
+                output_bytes = self.__get_audio_bytes(chunk)
 
-                # Feed data to the device stream
-                self.__feed_data(stream, blocks, timeout)
+                try:
+                    with SoundFile(BytesIO(output_bytes)) as f:
+                        new_framerate = f.samplerate
+                        new_channels = f.channels
 
-                # Stop stream
-                if stream:
+                        # make chunk generator
+                        # request float32 from soundfile, as we have pyAudio paFloat32
+                        blocks = f.blocks(
+                            self.config.block_size, dtype="float32", always_2d=True
+                        )
+                        # calculate timeout
+                        timeout = (
+                            self.config.block_size
+                            * self.config.buffer_size
+                            / f.samplerate
+                        )
+
+                        # pre-fill queue if empty
+                        if not stream or not stream.is_active():
+                            self.__pre_fill_stream_queue(blocks)
+
+                        # Get stream
+                        stream = self.__get_stream(
+                            stream, audio_interface, new_framerate, new_channels
+                        )
+                        # Feed data to the device stream
+                        self.__feed_data(stream, blocks, timeout)
+
+                except Exception as e:
+                    self.get_logger().error(f"Error processing audio chunk: {e}")
+                    # Continue to the next chunk
+                    continue
+        finally:
+            # Cleanup: This block will run when the loop exits for any reason.
+            self.get_logger().debug("Cleaning up playback resources.")
+            if stream:
+                try:
                     stream.stop_stream()
                     stream.close()
+                except Exception as e:
+                    self.get_logger().error(f"Error closing PyAudio stream: {e}")
+            if audio_interface:
+                try:
                     audio_interface.terminate()
+                except Exception as e:
+                    self.get_logger().error(f"Error terminating PyAudio instance: {e}")
+            # Clear streaming queue
+            with self._stream_queue.mutex:
+                self._stream_queue.queue.clear()
 
-            except Exception as e:
-                self.get_logger().error(f"PyAudio stream failed: {e}")
-                audio_interface.terminate()
-                self.event.set()
-                return
+            stream = None
+            audio_interface = None
+            self.get_logger().debug("Playback thread has finished.")
+
+    def _play(self, audio_chunk: Union[bytes, str]):
+        """
+        Adds a chunk of audio data to the playback queue. If the playback thread is not running, it will be started automatically.
+        """
+        self._incoming_queue.put(audio_chunk)
+
+        # If the playback thread doesnt exist or isn't alive, start it.
+        with self._thread_lock:
+            if self._playback_thread is None or not self._playback_thread.is_alive():
+                self.get_logger().debug(
+                    "Playback thread is not active. Starting a new one."
+                )
+                self._stop_event.clear()
+                self._playback_thread = threading.Thread(
+                    target=self._playback_audio, daemon=True
+                )
+                self._playback_thread.start()
+
+    def stop_playback(self, wait_for_thread: bool = True):
+        """
+        Stops the playback thread and clears any pending audio.
+        Can be used to interrupt the audio playback through an event.
+        """
+        self.get_logger().info("Stop requested. Signaling thread and clearing queue.")
+        self._stop_event.set()
+
+        # Clear the queue to ensure the thread doesn't process more items
+        with self._incoming_queue.mutex:
+            self._incoming_queue.queue.clear()
+
+        # Add a sentinel value to unblock a waiting queue.get()
+        self._incoming_queue.put(None)
+
+        if wait_for_thread and self._playback_thread:
+            self.get_logger().debug("Waiting for playback thread to terminate...")
+            self._playback_thread.join()
+            self.get_logger().debug("Thread terminated.")
+
+    def _handle_websocket_streaming(self) -> Optional[List]:
+        """Handle streaming output from a websocket client"""
+        try:
+            tokens = self.resp_queue.get(block=True)
+            self._play(tokens)
+            self._publish({"output": tokens})
+        except Exception as e:
+            self.get_logger().error(str(e))
+            # raise a fallback trigger via health status
+            self.health_status.set_failure()
 
     def _execution_step(self, *args, **kwargs):
         """_execution_step.
@@ -322,36 +440,45 @@ class TextToSpeech(ModelComponent):
             return
 
         # conduct inference
-        if isinstance(self.model_client, WebSocketClient):
-            self.req_queue.put_nowait(inference_input)
-            result = {}
-            try:
-                result["output"] = self.resp_queue.get(
-                    block=True, timeout=self.model_client.inference_timeout
-                )
-            except queue.Empty:
-                result = None
-        else:
-            result = self.model_client.inference(inference_input)
+        result = self._call_inference(inference_input)
         if result:
             if self.config.play_on_device:
-                # Stop any previous playback by setting event and clearing queue
-                self.event.set()
-                with self.queue.mutex:
-                    self.queue.queue.clear()
-                # Start a new playback thread
-                threading.Thread(
-                    target=self._playback_audio,
-                    args=(result.get("output"),),
-                    daemon=True,
-                ).start()
+                self._play(result["output"])
 
-            # publish inference result
-            for publisher in self.publishers_dict.values():
-                publisher.publish(**result)
+            # publish result
+            self._publish(result)
+
         else:
             # raise a fallback trigger via health status
             self.health_status.set_failure()
+
+    def _call_inference(self, inference_input: Dict) -> Optional[Dict]:
+        # conduct inference
+        if isinstance(self.model_client, WebSocketClient):
+            self.req_queue.put_nowait(inference_input)
+            if self.config.stream:
+                return
+            else:
+                result = {}
+                try:
+                    result["output"] = self.resp_queue.get(
+                        block=True, timeout=self.model_client.inference_timeout
+                    )
+                    return result
+                except queue.Empty:
+                    return None
+        else:
+            return self.model_client.inference(inference_input)
+
+    def _publish(self, result: Dict) -> None:
+        """
+        Publishes the given result to all registered publishers.
+
+        :param result: A dictionary containing the data to be published.
+        :type result: dict
+        """
+        for publisher in self.publishers_dict.values():
+            publisher.publish(**result)
 
     def _warmup(self):
         """Warm up and stat check"""

@@ -254,6 +254,11 @@ class TextToSpeechConfig(ModelComponentConfig):
     :type buffer_size: int
     :param block_size: Size of the audio block to be read for playing audio on device. Only effective if play_on_device is True (default: 1024).
     :type block_size: int
+    :param thread_shutdown_timeout: Timeout to shutdown a playback thread, if data is not received for more than a certain number of seconds. Only effective if play_on_device is True (default: 5 seconds).
+    :type thread_shutdown_timeout: int
+    :param stream: Stram output when used with WebSocketClient. Useful when model output is large and broken into chunks by the server. (default: True).
+    :type thread_shutdown_timeout: int
+
 
     Example of usage:
     ```python
@@ -265,6 +270,8 @@ class TextToSpeechConfig(ModelComponentConfig):
     device: Optional[int] = field(default=None)
     buffer_size: int = field(default=20)
     block_size: int = field(default=1024)
+    thread_shutdown_timeout: int = field(default=5)
+    stream: bool = field(default=True)
     _get_bytes: bool = field(default=False)
 
     def _get_inference_params(self) -> Dict:

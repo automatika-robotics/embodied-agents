@@ -116,7 +116,8 @@ class Vision(ModelComponent):
         if self.config.enable_visualization:
             self.queue = queue.Queue()
             self.stop_event = threading.Event()
-            self.visualization_thread = threading.Thread(target=self._visualize).start()
+            self.visualization_thread = threading.Thread(target=self._visualize)
+            self.visualization_thread.start()
 
         # deploy local model if enabled
         if not self.model_client and self.config.enable_local_classifier:
