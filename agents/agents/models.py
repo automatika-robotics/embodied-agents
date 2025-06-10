@@ -8,29 +8,14 @@ from attrs import define, field
 from .ros import BaseAttrs, base_validators
 
 __all__ = [
-    "Llama3",
-    "Llama3_1",
+    "TransformersLLM",
+    "TransformersMLLM",
     "OllamaModel",
-    "Idefics2",
-    "Llava",
     "Whisper",
-    "InstructBlip",
     "SpeechT5",
     "Bark",
+    "MeloTTS",
     "VisionModel",
-]
-
-# ollama models map to model:latest tag
-_ollama_mapping = [
-    "llava",
-    "llama3",
-    "llama3_1",
-    "phi3",
-    "qwen2",
-    "aya",
-    "mistral",
-    "mixtral",
-    "gemma2",
 ]
 
 
@@ -53,7 +38,6 @@ class LLM(Model):
 
     :param name: An arbitrary name given to the model.
     :type name: str
-    :param system_prompt: The system prompt used to initialize the model. If not provided, defaults to None.
     :type quantization: str or None
     :param init_timeout: The timeout in seconds for the initialization process. Defaults to None.
     :type init_timeout: int, optional
@@ -62,17 +46,6 @@ class LLM(Model):
     quantization: Optional[str] = field(
         default="4bit", validator=base_validators.in_(["4bit", "8bit", None])
     )
-
-    def _set_ollama_checkpoint(self):
-        """Get ollama compatible checkpoint name."""
-        # TODO: Extend model name with quantization
-        if self.__class__.__name__ == "OllamaModel":
-            return
-        if self.__class__.__name__.lower() not in _ollama_mapping:
-            raise ValueError(
-                f"Could not load {self.__class__.__name__} to be used with OllamaClient. Try passing an OllamaModel to the client, by setting model.checkpoint to an Ollama tag. Check available tags on 'ollama.com/library'"
-            )
-        self.checkpoint = f"{self.__class__.__name__.lower().replace('_', '.')}"
 
     def _get_init_params(self) -> Dict:
         """Get init params for model initialization."""
@@ -92,8 +65,6 @@ class OllamaModel(LLM):
     :type checkpoint: str
     :param quantization: The quantization scheme used by the model. Can be one of "4bit", "8bit" or None (default is "4bit").
     :type quantization: str or None
-    :param system_prompt: The system prompt used to initialize the model. If not provided, defaults to None.
-    :type system_prompt: str or None
     :param init_timeout: The timeout in seconds for the initialization process. Defaults to None.
     :type init_timeout: int, optional
 
@@ -152,126 +123,6 @@ class TransformersMLLM(LLM):
     """
 
     checkpoint: str = field(default="HuggingFaceM4/idefics2-8b")
-
-
-@define(kw_only=True)
-class Llama3(TransformersLLM):
-    """A pre-trained language model from MetaAI for tasks such as text generation, question answering, and more. [Details](https://llama.meta.com)
-
-    :param name: An arbitrary name given to the model.
-    :type name: str
-    :param checkpoint: The name of the pre-trained model's checkpoint. Default is "meta-llama/Meta-Llama-3-8B-Instruct". For available checkpoints, consult [LLama3 checkpoints on HuggingFace](https://huggingface.co/models?search="llama3").
-    :type checkpoint: str
-    :param quantization: The quantization scheme used by the model. Can be one of "4bit", "8bit" or None (default is "4bit").
-    :type quantization: str or None
-    :param system_prompt: The system prompt used to initialize the model. If not provided, defaults to None.
-    :type system_prompt: str or None
-    :param init_timeout: The timeout in seconds for the initialization process. Defaults to None.
-    :type init_timeout: int, optional
-
-    Example usage:
-    ```python
-    llama = Llama3(name='llama', checkpoint="other_checkpoint_name")  # Initialize with a custom checkpoint
-    ```
-    """
-
-    checkpoint: str = field(default="meta-llama/Meta-Llama-3-8B-Instruct")
-
-
-@define(kw_only=True)
-class Llama3_1(TransformersLLM):
-    """A pre-trained language model from MetaAI for tasks such as text generation, question answering, and more. [Details](https://llama.meta.com)
-
-    :param name: An arbitrary name given to the model.
-    :type name: str
-    :param checkpoint: The name of the pre-trained model's checkpoint. Default is "meta-llama/Meta-Llama-3.1-8B-Instruct". For available checkpoints, consult [LLama3 checkpoints on HuggingFace](https://huggingface.co/models?search="llama3").
-    :type checkpoint: str
-    :param quantization: The quantization scheme used by the model. Can be one of "4bit", "8bit" or None (default is "4bit").
-    :type quantization: str or None
-    :param system_prompt: The system prompt used to initialize the model. If not provided, defaults to None.
-    :type system_prompt: str or None
-    :param init_timeout: The timeout in seconds for the initialization process. Defaults to None.
-    :type init_timeout: int, optional
-
-    Example usage:
-    ```python
-    llama = Llama3_1(name='llama', checkpoint="other_checkpoint_name")  # Initialize with a custom checkpoint
-    ```
-    """
-
-    checkpoint: str = field(default="meta-llama/Meta-Llama-3.1-8B-Instruct")
-
-
-@define(kw_only=True)
-class Idefics2(TransformersMLLM):
-    """A pre-trained visual language model from HuggingFace for tasks such as visual question answering. [Details](https://huggingface.co/HuggingFaceM4/idefics2-8b)
-
-    :param name: An arbitrary name given to the model.
-    :type name: str
-    :param checkpoint: The name of the pre-trained model's checkpoint. Default is "HuggingFaceM4/idefics2-8b". For available checkpoints, consult [Idefics2 checkpoints on HuggingFace](https://huggingface.co/HuggingFaceM4/idefics2-8b).
-    :type checkpoint: str
-    :param system_prompt: The system prompt used to initialize the model. If not provided, defaults to None.
-    :type system_prompt: str or None
-    :param quantization: The quantization scheme used by the model. Can be one of "4bit", "8bit" or None (default is "4bit").
-    :type quantization: str or None
-    :param init_timeout: The timeout in seconds for the initialization process. Defaults to None.
-    :type init_timeout: int, optional
-
-    Example usage:
-    ```python
-    idefics = Idefics2(name='mllm1', quantization="8bit")  # Initialize with a custom checkpoint
-    ```
-    """
-
-    checkpoint: str = field(default="HuggingFaceM4/idefics2-8b")
-
-
-@define(kw_only=True)
-class Llava(TransformersMLLM):
-    """LLaVA is an open-source chatbot trained by fine-tuning LLM on multimodal instruction-following data. It is an auto-regressive language model, based on the transformer architecture. [Details](https://llava-vl.github.io/)
-
-    :param name: An arbitrary name given to the model.
-    :type name: str
-    :param checkpoint: The name of the pre-trained model's checkpoint. Default is "liuhaotian/llava-v1.6-mistral-7b". For available checkpoints, consult [Llava checkpoints on HuggingFace](https://huggingface.co/liuhaotian).
-    :type checkpoint: str
-    :param system_prompt: The system prompt used to initialize the model. If not provided, defaults to None.
-    :type system_prompt: str or None
-    :param quantization: The quantization scheme used by the model. Can be one of "4bit", "8bit" or None (default is "4bit").
-    :type quantization: str or None
-    :param init_timeout: The timeout in seconds for the initialization process. Defaults to None.
-    :type init_timeout: int, optional
-
-    Example usage:
-    ```python
-    llava = Llava(name='mllm2', quantization="4bit")
-    ```
-    """
-
-    checkpoint: str = field(default="liuhaotian/llava-v1.6-mistral-7b")
-
-
-@define(kw_only=True)
-class InstructBlip(TransformersMLLM):
-    """An open-source general purpose vision language model by SalesForce built using instruction-tuning. [Details](https://arxiv.org/abs/2305.06500)
-
-    :param name: An arbitrary name given to the model.
-    :type name: str
-    :param checkpoint: The name of the pre-trained model's checkpoint. Default is "Salesforce/instructblip-vicuna-7b". For available checkpoints, consult [InstructBlip checkpoints on HuggingFace](https://huggingface.co/models?search=instructblip).
-    :type checkpoint: str
-    :param history_reset_phrase: A phrase used to reset the conversation history. Defaults to "chat reset".
-    :type history_reset_phrase: str
-    :param quantization: The quantization scheme used by the model. Can be one of "4bit", "8bit" or None (default is "4bit").
-    :type quantization: str or None
-    :param init_timeout: The timeout in seconds for the initialization process. Defaults to None.
-    :type init_timeout: int, optional
-
-    Example usage:
-    ```python
-    blip = InstructBlip(name='mllm3', quantization="4bit")
-    ```
-    """
-
-    checkpoint: str = field(default="Salesforce/instructblip-vicuna-7b")
 
 
 @define(kw_only=True)
@@ -361,15 +212,43 @@ class Bark(Model):
     """
 
     checkpoint: str = field(default="suno/bark-small")
-    attn_implementation: Optional[str] = field(default="flash_attention_2")
     voice: str = field(default="v2/en_speaker_6")
 
     def get_init_params(self) -> Dict:
         """Get init params for model initialization."""
         return {
             "checkpoint": self.checkpoint,
-            "attn_implementation": self.attn_implementation,
             "voice": self.voice,
+        }
+
+
+@define(kw_only=True)
+class MeloTTS(Model):
+    """A model for text-to-speech synthesis developed by MyShell AI using the MeloTTS engine.
+
+    :param name: An arbitrary name given to the model.
+    :type name: str
+    :param language: The language for speech synthesis. Supported values: ["EN", "ES", "FR", "ZH", "JP", "KR"]. Default is "EN".
+    :type language: str
+    :param speaker_id: The speaker ID for the chosen language. Default is "EN-US". For details check [here](https://github.com/myshell-ai/MeloTTS/blob/main/docs/install.md#python-api)
+    :type speaker_id: str
+    :param init_timeout: The timeout in seconds for the initialization process. Defaults to None.
+    :type init_timeout: int, optional
+
+    Example usage:
+    ```python
+    melotts = MeloTTS(name='melo1', language='JP', speaker_id='JP-1')
+    ```
+    """
+
+    language: str = field(default="EN")
+    speaker_id: str = field(default="EN-US")
+
+    def get_init_params(self) -> Dict:
+        """Get init params for model initialization."""
+        return {
+            "language": self.language,
+            "speaker_id": self.speaker_id,
         }
 
 

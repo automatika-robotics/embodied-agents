@@ -3,7 +3,7 @@ from typing import Any, Optional, Dict, Union, List
 
 import httpx
 
-from ..models import LLM
+from ..models import OllamaModel
 from ..utils import encode_img_base64
 from .model_base import ModelClient
 
@@ -15,7 +15,7 @@ class OllamaClient(ModelClient):
 
     def __init__(
         self,
-        model: Union[LLM, Dict],
+        model: Union[OllamaModel, Dict],
         host: str = "127.0.0.1",
         port: int = 11434,
         inference_timeout: int = 30,
@@ -32,12 +32,8 @@ class OllamaClient(ModelClient):
                 "In order to use the OllamaClient, you need ollama-python package installed. You can install it with 'pip install ollama'"
             ) from e
 
-        if not isinstance(model, LLM):
-            raise TypeError(
-                "OllamaClient can only be used with an LLM, MLLM or an OllamaModel"
-            )
-
-        model._set_ollama_checkpoint()
+        if not isinstance(model, OllamaModel):
+            raise TypeError("OllamaClient can only be used with an OllamaModel")
 
         super().__init__(
             model=model,
