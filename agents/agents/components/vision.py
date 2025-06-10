@@ -3,9 +3,7 @@ import queue
 import threading
 import numpy as np
 import cv2
-import msgpack
 
-from ..clients import WebSocketClient
 from ..clients.model_base import ModelClient
 from ..config import VisionConfig
 from ..ros import (
@@ -223,8 +221,7 @@ class Vision(ModelComponent):
         :param kwargs:
         """
 
-        if self.run_type is ComponentRunType.EVENT:
-            trigger = kwargs.get("topic")
+        if self.run_type is ComponentRunType.EVENT and (trigger := kwargs.get("topic")):
             if not trigger:
                 return
             self.get_logger().debug(f"Received trigger on topic {trigger.name}")
@@ -241,19 +238,7 @@ class Vision(ModelComponent):
 
         # conduct inference
         if self.model_client:
-            if isinstance(self.model_client, WebSocketClient):
-                self.req_queue.put_nowait(inference_input)
-                result = {}
-                try:
-                    result["output"] = msgpack.unpackb(
-                        self.resp_queue.get(
-                            block=True, timeout=self.model_client.inference_timeout
-                        )
-                    )
-                except queue.Empty:
-                    result = None
-            else:
-                result = self.model_client.inference(inference_input)
+            result = self._call_inference(inference_input, unpack=True)
         elif self.config.enable_local_classifier:
             result = self.local_classifier(
                 inference_input,
@@ -269,12 +254,11 @@ class Vision(ModelComponent):
         # raise a fallback trigger via health status
         if result:
             # publish inference result
-            for publisher in self.publishers_dict.values():
-                publisher.publish(
-                    **result,
-                    images=self._images,
-                    time_stamp=self.get_ros_time(),
-                )
+            self._publish(
+                result,
+                images=self._images,
+                time_stamp=self.get_ros_time(),
+            )
             if self.config.enable_visualization:
                 result["images"] = inference_input["images"]
                 self.queue.put_nowait(result)

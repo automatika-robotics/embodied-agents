@@ -173,30 +173,6 @@ class SpeechToText(ModelComponent):
         # Deactivate component
         super().custom_on_deactivate()
 
-    def _create_input(self, *_, **kwargs) -> Optional[Dict[str, Any]]:
-        """Create inference input for SpeechToText models
-        :param args:
-        :param kwargs:
-        :rtype: dict[str, Any]
-        """
-
-        if self.config.enable_vad and (speech := kwargs.get("speech")) is not None:
-            query = b"".join(speech)
-        elif trigger := kwargs.get("topic"):
-            query = self.trig_callbacks[trigger.name].get_output()
-            if query is None or len(query) == 0:
-                return None
-        else:
-            self.get_logger().error(
-                "Trigger topic not found. SpeechToText component needs to be given a valid trigger topic."
-            )
-            return None
-
-        return {
-            "query": query,
-            **self.inference_params,
-        }
-
     def __stream_callback(
         self, indata: bytes, frames: int, _, status
     ) -> Tuple[bytes, int]:
@@ -349,6 +325,30 @@ class SpeechToText(ModelComponent):
             # raise a fallback trigger via health status
             self.health_status.set_failure()
 
+    def _create_input(self, *_, **kwargs) -> Optional[Dict[str, Any]]:
+        """Create inference input for SpeechToText models
+        :param args:
+        :param kwargs:
+        :rtype: dict[str, Any]
+        """
+
+        if self.config.enable_vad and (speech := kwargs.get("speech")) is not None:
+            query = b"".join(speech)
+        elif trigger := kwargs.get("topic"):
+            query = self.trig_callbacks[trigger.name].get_output()
+            if query is None or len(query) == 0:
+                return None
+        else:
+            self.get_logger().error(
+                "Trigger topic not found. SpeechToText component needs to be given a valid trigger topic."
+            )
+            return None
+
+        return {
+            "query": query,
+            **self.inference_params,
+        }
+
     def _execution_step(self, *args, **kwargs):
         """_execution_step.
 
@@ -356,15 +356,16 @@ class SpeechToText(ModelComponent):
         :param kwargs:
         """
         # Check for direct speech before checking for triggers
-        if self.config.enable_vad and kwargs.get("speech"):
+        if self.config.enable_vad and (speech := kwargs.get("speech")):
             self.get_logger().debug(
-                f"Received speech from speech thread: {len(kwargs['speech'])}"
+                f"Received speech from speech thread: {len(speech)}"
             )
-        elif self.run_type is ComponentRunType.EVENT:
-            trigger = kwargs.get("topic")
-            if not trigger:
-                return
+        elif self.run_type is ComponentRunType.EVENT and (
+            trigger := kwargs.get("topic")
+        ):
             self.get_logger().debug(f"Received trigger on topic {trigger.name}")
+        else:
+            return None
 
         # create inference input
         inference_input = self._create_input(*args, **kwargs)
@@ -373,36 +374,13 @@ class SpeechToText(ModelComponent):
             return
 
         # call model inference
-        if isinstance(self.model_client, WebSocketClient):
-            self.req_queue.put_nowait(inference_input)
-            if self.config.stream:
-                return
-            else:
-                result = {}
-                try:
-                    result["output"] = self.resp_queue.get(
-                        block=True, timeout=self.model_client.inference_timeout
-                    )
-                except queue.Empty:
-                    result = None
-        else:
-            result = self.model_client.inference(inference_input)
+        result = self._call_inference(inference_input)
         if result:
             # publish inference result
             self._publish(result)
         else:
             # raise a fallback trigger via health status
             self.health_status.set_failure()
-
-    def _publish(self, result: Dict) -> None:
-        """
-        Publishes the given result to all registered publishers.
-
-        :param result: A dictionary containing the data to be published.
-        :type result: dict
-        """
-        for publisher in self.publishers_dict.values():
-            publisher.publish(**result)
 
     def _warmup(self):
         """Warm up and stat check"""

@@ -1,4 +1,3 @@
-import queue
 import json
 from pathlib import Path
 from typing import Any, Optional, Union, Callable, List, Dict
@@ -7,7 +6,6 @@ import msgpack_numpy as m_pack
 
 from ..callbacks import TextCallback
 from ..clients.db_base import DBClient
-from ..clients import WebSocketClient
 from ..clients.model_base import ModelClient
 from ..clients import OllamaClient
 from ..config import LLMConfig
@@ -452,20 +450,7 @@ class LLM(ModelComponent):
             return
 
         # conduct inference
-        if isinstance(self.model_client, WebSocketClient):
-            self.req_queue.put_nowait(inference_input)
-            if self.config.stream:
-                return
-            else:
-                result = {}
-                try:
-                    result["output"] = self.resp_queue.get(
-                        block=True, timeout=self.model_client.inference_timeout
-                    )
-                except queue.Empty:
-                    result = None
-        else:
-            result = self.model_client.inference(inference_input)
+        result = self._call_inference(inference_input)
 
         if result:
             if self.config.stream:
@@ -484,22 +469,11 @@ class LLM(ModelComponent):
                 return
 
             # publish inference result
-            self.get_logger().info("Going to publish")
             self._publish(result)
 
         else:
             # raise a fallback trigger via health status
             self.health_status.set_failure()
-
-    def _publish(self, result: Dict) -> None:
-        """
-        Publishes the given result to all registered publishers.
-
-        :param result: A dictionary containing the data to be published.
-        :type result: dict
-        """
-        for publisher in self.publishers_dict.values():
-            publisher.publish(**result)
 
     def set_topic_prompt(self, input_topic: Topic, template: Union[str, Path]) -> None:
         """Set prompt template on any input topic of type string.

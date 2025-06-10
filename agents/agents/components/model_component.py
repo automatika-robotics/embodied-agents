@@ -4,6 +4,7 @@ import json
 import queue
 import threading
 from typing import Any, Optional, Sequence, Union, List, Dict, Type
+import msgpack
 
 
 from ..clients.model_base import ModelClient
@@ -194,6 +195,44 @@ class ModelComponent(Component):
         raise NotImplementedError(
             "__handle_websocket_streaming method needs to be implemented by child components."
         )
+
+    def _call_inference(
+        self, inference_input: Dict, unpack: bool = False
+    ) -> Optional[Dict]:
+        """Call model inference"""
+        if isinstance(self.model_client, WebSocketClient):
+            self.req_queue.put_nowait(inference_input)
+            if getattr(self.config, "stream", None):
+                return
+            else:
+                result = {}
+                try:
+                    if not unpack:
+                        result["output"] = self.resp_queue.get(
+                            block=True, timeout=self.model_client.inference_timeout
+                        )
+                    else:
+                        result["output"] = msgpack.unpackb(
+                            self.resp_queue.get(
+                                block=True, timeout=self.model_client.inference_timeout
+                            )
+                        )
+                    return result
+                except queue.Empty:
+                    return None
+        else:
+            if self.model_client:
+                return self.model_client.inference(inference_input)
+
+    def _publish(self, result: Dict, **kwargs) -> None:
+        """
+        Publishes the given result to all registered publishers.
+
+        :param result: A dictionary containing the data to be published.
+        :type result: dict
+        """
+        for publisher in self.publishers_dict.values():
+            publisher.publish(**result, **kwargs)
 
     def _update_cmd_args_list(self):
         """
