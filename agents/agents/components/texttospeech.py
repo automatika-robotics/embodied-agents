@@ -109,26 +109,6 @@ class TextToSpeech(ModelComponent):
         # Deactivate component
         super().custom_on_deactivate()
 
-    def _create_input(self, *_, **kwargs) -> Optional[Dict[str, Any]]:
-        """Create inference input for TextToSpeech models
-        :param args:
-        :param kwargs:
-        :rtype: dict[str, Any]
-        """
-
-        # set query as trigger
-        trigger = kwargs.get("topic")
-        if not trigger:
-            self.get_logger().error(
-                "Trigger topic not found. TextToSpeech component needs to be given a valid trigger topic."
-            )
-            return None
-        query = self.trig_callbacks[trigger.name].get_output()
-        if not query:
-            return None
-
-        return {"query": query, **self.inference_params}
-
     def __stream_callback(
         self, _: bytes, frames: int, time_info: Dict, status: int
     ) -> Tuple[bytes, int]:
@@ -405,6 +385,17 @@ class TextToSpeech(ModelComponent):
             self._playback_thread.join()
             self.get_logger().debug("Thread terminated.")
 
+    def say(self, text: str):
+        """
+        Say the input text.
+
+        This method plays converts the input text to speech and plays the speech on device if play_on_device is set to True and publishes to Audio topics if any publishers have been provided to the component. Any current playback is stopped.
+
+        The method can be invoked as an action consequence of an event. For example, the robot can say 'I am low on battery" when a low battery event gets triggered.
+        """
+        self.stop_playback()
+        self._execution_step(text=text)
+
     def _handle_websocket_streaming(self) -> Optional[List]:
         """Handle streaming output from a websocket client"""
         try:
@@ -416,21 +407,39 @@ class TextToSpeech(ModelComponent):
             # raise a fallback trigger via health status
             self.health_status.set_failure()
 
+    def _create_input(self, *_, **kwargs) -> Optional[Dict[str, Any]]:
+        """Create inference input for TextToSpeech models
+        :param args:
+        :param kwargs:
+        :rtype: dict[str, Any]
+        """
+
+        # set query as trigger
+        if trigger := kwargs.get("topic"):
+            query = self.trig_callbacks[trigger.name].get_output()
+            if not query:
+                return None
+        elif text := kwargs.get("text"):
+            query = text
+        else:
+            self.get_logger().error(
+                "Trigger topic not found. TextToSpeech component needs to be given a valid trigger topic."
+            )
+            return None
+        return {"query": query, **self.inference_params}
+
     def _execution_step(self, *args, **kwargs):
         """_execution_step.
 
         :param args:
         :param kwargs:
         """
-
-        if self.run_type is ComponentRunType.EVENT:
-            trigger = kwargs.get("topic")
-            if not trigger:
-                return
+        if self.run_type is ComponentRunType.EVENT and (trigger := kwargs.get("topic")):
             self.get_logger().debug(f"Received trigger on topic {trigger.name}")
+        elif text := kwargs.get("text"):
+            self.get_logger().debug(f"Received text: {text}")
         else:
-            time_stamp = self.get_ros_time().sec
-            self.get_logger().debug(f"Sending at {time_stamp}")
+            return None
 
         # create inference input
         inference_input = self._create_input(*args, **kwargs)
@@ -451,34 +460,6 @@ class TextToSpeech(ModelComponent):
         else:
             # raise a fallback trigger via health status
             self.health_status.set_failure()
-
-    def _call_inference(self, inference_input: Dict) -> Optional[Dict]:
-        # conduct inference
-        if isinstance(self.model_client, WebSocketClient):
-            self.req_queue.put_nowait(inference_input)
-            if self.config.stream:
-                return
-            else:
-                result = {}
-                try:
-                    result["output"] = self.resp_queue.get(
-                        block=True, timeout=self.model_client.inference_timeout
-                    )
-                    return result
-                except queue.Empty:
-                    return None
-        else:
-            return self.model_client.inference(inference_input)
-
-    def _publish(self, result: Dict) -> None:
-        """
-        Publishes the given result to all registered publishers.
-
-        :param result: A dictionary containing the data to be published.
-        :type result: dict
-        """
-        for publisher in self.publishers_dict.values():
-            publisher.publish(**result)
 
     def _warmup(self):
         """Warm up and stat check"""

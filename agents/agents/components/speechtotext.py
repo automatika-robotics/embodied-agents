@@ -180,16 +180,17 @@ class SpeechToText(ModelComponent):
         :rtype: dict[str, Any]
         """
 
-        if self.config.enable_vad and kwargs.get("speech") is not None:
-            query = b"".join(kwargs["speech"])
-        else:
-            # set query as trigger
-            trigger = kwargs.get("topic")
-            if not trigger:
-                return None
+        if self.config.enable_vad and (speech := kwargs.get("speech")) is not None:
+            query = b"".join(speech)
+        elif trigger := kwargs.get("topic"):
             query = self.trig_callbacks[trigger.name].get_output()
             if query is None or len(query) == 0:
                 return None
+        else:
+            self.get_logger().error(
+                "Trigger topic not found. SpeechToText component needs to be given a valid trigger topic."
+            )
+            return None
 
         return {
             "query": query,
