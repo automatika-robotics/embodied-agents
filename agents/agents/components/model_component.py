@@ -8,7 +8,7 @@ import msgpack
 
 
 from ..clients.model_base import ModelClient
-from ..clients.roboml import WebSocketClient
+from ..clients.roboml import RoboMLWSClient
 from ..config import ModelComponentConfig
 from ..ros import FixedInput, Topic, SupportedType, MutuallyExclusiveCallbackGroup
 from .component_base import Component
@@ -59,7 +59,7 @@ class ModelComponent(Component):
         if self.model_client:
             self.model_client.check_connection()
             self.model_client.initialize()
-            if isinstance(self.model_client, WebSocketClient):
+            if isinstance(self.model_client, RoboMLWSClient):
                 # create queues and threads for the websocket client
                 self.req_queue = queue.Queue()
                 self.resp_queue = queue.Queue()
@@ -109,7 +109,7 @@ class ModelComponent(Component):
         if self.model_client:
             self.model_client.check_connection()
             self.model_client.deinitialize()
-            if isinstance(self.model_client, WebSocketClient):
+            if isinstance(self.model_client, RoboMLWSClient):
                 # stop running thread
                 self.client_stop_event.set()
                 self.client_thread.join(timeout=10)
@@ -200,7 +200,7 @@ class ModelComponent(Component):
         self, inference_input: Dict, unpack: bool = False
     ) -> Optional[Dict]:
         """Call model inference"""
-        if isinstance(self.model_client, WebSocketClient):
+        if isinstance(self.model_client, RoboMLWSClient):
             self.req_queue.put_nowait(inference_input)
             if getattr(self.config, "stream", None):
                 return
@@ -219,6 +219,9 @@ class ModelComponent(Component):
                         )
                     return result
                 except queue.Empty:
+                    self.get_logger().error(
+                        "Did not recieve result in websocket response queue"
+                    )
                     return None
         else:
             if self.model_client:

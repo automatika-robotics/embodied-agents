@@ -6,7 +6,7 @@ from collections import deque
 
 import msgpack
 from ..clients.model_base import ModelClient
-from ..clients import WebSocketClient
+from agents.clients import RoboMLWSClient
 from ..config import SpeechToTextConfig
 from ..ros import Audio, String, Topic
 from ..utils import validate_func_args, VADStatus, WakeWordStatus, load_model
@@ -74,9 +74,9 @@ class SpeechToText(ModelComponent):
                 "SpeechToText component cannot be started as a timed component"
             )
 
-        if self.config.stream and not isinstance(model_client, WebSocketClient):
+        if self.config.stream and not isinstance(model_client, RoboMLWSClient):
             raise TypeError(
-                "SpeechToText component can only stream audio to the server when using a WebSocketClient. Please set stream to False in config or use a different client."
+                "SpeechToText component can only stream audio to the server when using RoboMLWebSocketClient. Please set stream to False in config or use a different client."
             )
 
         self.model_client = model_client

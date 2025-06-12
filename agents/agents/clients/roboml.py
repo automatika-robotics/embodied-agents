@@ -3,7 +3,7 @@ import base64
 import queue
 import threading
 from enum import Enum
-from typing import Any, Optional, Dict, Union
+from typing import Any, Optional, Dict, Union, Generator
 import websockets
 
 import numpy as np
@@ -20,7 +20,7 @@ from .model_base import ModelClient
 m_pack.patch()
 
 
-__all__ = ["HTTPModelClient", "WebSocketClient", "RESPModelClient"]
+__all__ = ["RoboMLHTTPClient", "RoboMLRESPClient", "RoboMLWSClient"]
 
 
 class Status(str, Enum):
@@ -38,7 +38,7 @@ class RoboMLError(Exception):
     pass
 
 
-class HTTPModelClient(ModelClient):
+class RoboMLHTTPClient(ModelClient):
     """An HTTP client for interaction with ML models served on RoboML"""
 
     def __init__(
@@ -109,7 +109,9 @@ class HTTPModelClient(ModelClient):
             raise
         self.logger.info(f"{self.model_name} initialized on remote")
 
-    def _inference(self, inference_input: Dict[str, Any]) -> Optional[Dict]:
+    def _inference(
+        self, inference_input: Dict[str, Any]
+    ) -> Optional[Dict[str, Union[str, Generator]]]:
         """Call inference on the model using data and inference parameters from the component"""
         # encode any byte or numpy array data
         if "query" in inference_input.keys():
@@ -167,6 +169,7 @@ class HTTPModelClient(ModelClient):
         stop_params = {"node_name": self.model_name}
         try:
             self.client.post("/remove_node", params=stop_params).raise_for_status()
+            self.client.close()
         except Exception as e:
             self.__handle_exceptions(e)
             if hasattr(self, "client") and self.client and not self.client.is_closed:
@@ -182,7 +185,7 @@ class HTTPModelClient(ModelClient):
         """
         if isinstance(excep, httpx.RequestError):
             self.logger.error(
-                f"{excep} RoboML server inaccessible. Might not be running. Make sure remote is correctly configured."
+                f"{excep}. RoboML server inaccessible. Might not be running. Make sure remote is correctly configured."
             )
         elif isinstance(excep, httpx.TimeoutException):
             self.logger.error(
@@ -202,7 +205,7 @@ class HTTPModelClient(ModelClient):
             self.logger.error(str(excep))
 
 
-class WebSocketClient(HTTPModelClient):
+class RoboMLWSClient(RoboMLHTTPClient):
     """An websocket client for interaction with ML models served on RoboML"""
 
     def __init__(
@@ -354,7 +357,7 @@ class WebSocketClient(HTTPModelClient):
             self.stop_event.set()  # Ensure main thread knows if client dies
 
 
-class RESPModelClient(ModelClient):
+class RoboMLRESPClient(ModelClient):
     """A Redis Serialization Protocol (RESP) based client for interaction with ML models served on RoboML"""
 
     def __init__(
@@ -448,6 +451,11 @@ class RESPModelClient(ModelClient):
     def _inference(self, inference_input: Dict[str, Any]) -> Optional[Dict]:
         """Call inference on the model using data and inference parameters from the component"""
         try:
+            if inference_input.get("stream"):
+                self.logger.warn(
+                    "RoboML RESPClient currently does not handle streaming. Set stream to False in component config to get rid of this warning."
+                )
+                inference_input.pop("stream")
             data_b = msgpack.packb(inference_input)
             # call inference method
             result_b = self.redis.execute_command(
@@ -469,6 +477,7 @@ class RESPModelClient(ModelClient):
         try:
             stop_params_b = msgpack.packb(stop_params)
             self.redis.execute_command("remove_node", stop_params_b)
+            self.redis.close()
         except Exception as e:
             self.__handle_exceptions(e)
 

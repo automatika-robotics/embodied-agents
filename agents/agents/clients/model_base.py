@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Optional, Dict, Union
+from typing import Any, Optional, Dict, Union, Generator
 
 from rclpy import logging
 
@@ -123,7 +123,9 @@ class ModelClient(ABC):
         )
 
     @abstractmethod
-    def _inference(self, inference_input: Dict[str, Any]) -> Optional[Dict]:
+    def _inference(
+        self, inference_input: Dict[str, Any]
+    ) -> Optional[Dict[str, Union[str, Generator]]]:
         """inference.
         :param inference_input:
         :type inference_input: dict[str, Any]

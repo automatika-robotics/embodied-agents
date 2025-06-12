@@ -7,7 +7,7 @@ import msgpack_numpy as m_pack
 from ..callbacks import TextCallback
 from ..clients.db_base import DBClient
 from ..clients.model_base import ModelClient
-from ..clients import OllamaClient
+from ..clients import OllamaClient, GenericHTTPClient
 from ..config import LLMConfig
 from ..ros import FixedInput, String, Topic, Detections
 from ..utils import get_prompt_template, validate_func_args
@@ -415,6 +415,8 @@ class LLM(ModelComponent):
                 # Handle ollama client streaming format
                 if isinstance(self.model_client, OllamaClient):
                     token = token["message"]["content"]
+                elif isinstance(self.model_client, GenericHTTPClient):
+                    token = token["choices"][0]["delta"]["content"]
                 self.__process_stream_token(token)
 
             # finalize stream after the generator is exhausted
@@ -431,8 +433,7 @@ class LLM(ModelComponent):
         :param kwargs:
         """
 
-        if self.run_type is ComponentRunType.EVENT:
-            trigger = kwargs.get("topic")
+        if self.run_type is ComponentRunType.EVENT and (trigger := kwargs.get("topic")):
             if not trigger:
                 return
             self.get_logger().debug(f"Received trigger on topic {trigger.name}")

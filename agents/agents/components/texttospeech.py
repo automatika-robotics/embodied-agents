@@ -7,7 +7,7 @@ import base64
 import time
 
 from ..clients.model_base import ModelClient
-from ..clients import WebSocketClient, RESPModelClient
+from ..clients import RoboMLWSClient, RoboMLRESPClient
 from ..config import TextToSpeechConfig
 from ..ros import Audio, String, Topic
 from ..utils import validate_func_args
@@ -98,7 +98,7 @@ class TextToSpeech(ModelComponent):
             self._thread_lock = threading.Lock()
 
         # Get bytes as output from server if using appropriate client
-        if isinstance(self.model_client, (WebSocketClient, RESPModelClient)):
+        if isinstance(self.model_client, (RoboMLWSClient, RoboMLRESPClient)):
             self.inference_params["get_bytes"] = True
 
     def custom_on_deactivate(self):

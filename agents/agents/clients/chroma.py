@@ -7,15 +7,15 @@ from ..models import OllamaModel
 from .db_base import DBClient
 from .ollama import OllamaClient
 
-__all__ = ["HTTPDBClient"]
+__all__ = ["ChromaClient"]
 
 # Define constants for default tenant and database in ChromaDB
 DEFAULT_TENANT = "default_tenant"
 DEFAULT_DATABASE = "default_database"
 
 
-class HTTPDBClient(DBClient):
-    """An async HTTP client for interaction with a ChromaDB instance running as a server."""
+class ChromaClient(DBClient):
+    """An HTTP client for interaction with a ChromaDB instance running as a server."""
 
     def __init__(
         self,

@@ -1,5 +1,4 @@
-from types import GeneratorType
-from typing import Any, Optional, Dict, Union, List
+from typing import Any, Optional, Dict, Union, List, Generator
 
 import httpx
 
@@ -85,7 +84,9 @@ class OllamaClient(ModelClient):
             raise
         self.logger.info(f"{self.model_name} model initialized")
 
-    def _inference(self, inference_input: Dict[str, Any]) -> Optional[Dict]:
+    def _inference(
+        self, inference_input: Dict[str, Any]
+    ) -> Optional[Dict[str, Union[str, Generator]]]:
         """Call inference on the model using data and inference parameters from the component"""
         # create input
         input = {
@@ -105,9 +106,9 @@ class OllamaClient(ModelClient):
             inference_input.pop("tools")
 
         # ollama uses num_predict for max_new_tokens
-        if max_new_tokens := inference_input.get("max_new_tokens"):
-            inference_input["num_predict"] = max_new_tokens
-            inference_input.pop("max_new_tokens")
+        inference_input["num_predict"] = inference_input.pop("max_new_tokens")
+
+        # merge any options specified during OllamaModel definition
         input["options"] = (
             {**self.model_init_params["options"], **inference_input}
             if self.model_init_params.get("options")
@@ -125,26 +126,22 @@ class OllamaClient(ModelClient):
             self.logger.error(str(e))
             return
 
-        if isinstance(ollama_result, GeneratorType):
+        if isinstance(ollama_result, Generator):
             input["output"] = ollama_result
             return input
 
-        # make result part of the input
-        if output := ollama_result["message"].get("content"):
-            input["output"] = output  # type: ignore
-            # if tool calls exist
-            if tool_calls := ollama_result["message"].get("tool_calls"):  # type: ignore
-                input["tool_calls"] = tool_calls
-            return input
-        else:
-            # if tool calls exist
-            if tool_calls := ollama_result["message"].get("tool_calls"):  # type: ignore
-                input["output"] = ""  # Add empty output for tool calls
-                input["tool_calls"] = tool_calls
-                return input
+        if not ollama_result.get("message"):
+            self.logger.debug(
+                f"Ollama Response does not contain any model output: {ollama_result}"
+            )
+            return
 
-            # no output or tool calls
-            self.logger.debug("Output not received")
+        # if tool calls exist
+        if tool_calls := ollama_result["message"].get("tool_calls"):  # type: ignore
+            input["tool_calls"] = tool_calls
+
+        input["output"] = ollama_result["message"].get("content", "")
+        return input
 
     def _embed(
         self, input: Union[str, List[str]], truncate: bool = False
