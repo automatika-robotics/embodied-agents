@@ -364,32 +364,45 @@ class LLM(ModelComponent):
 
         return input
 
+    def __process_stream_token(self, token: str):
+        """
+        Processes a single token from a stream based on the break_character config.
+        """
+        if self.config.break_character:
+            self.result_partial.append(token)
+            if self.config.break_character in token:
+                self.result_complete += self.result_partial
+                self._publish({"output": "".join(self.result_partial)})
+                self.result_partial = []
+        else:
+            self.result_complete.append(token)
+            self._publish({"output": token})
+            self.result_partial = []
+
+    def __finalize_stream(self):
+        """
+        Finalizes the stream by publishing any remaining partial results and
+        appending the complete message to the message history.
+        """
+        # Send remaining result after break character or termination if any
+        if self.result_partial:
+            self.result_complete += self.result_partial
+            self._publish({"output": "".join(self.result_partial)})
+            self.result_partial = []
+
+        self.messages.append({
+            "role": "assistant",
+            "content": "".join(self.result_complete),
+        })
+
     def _handle_websocket_streaming(self) -> Optional[List]:
         """Handle streaming output from a websocket client"""
         try:
             token = self.resp_queue.get(block=True)
-            if token:
-                if not token == self.config.response_terminator:
-                    if self.config.break_character:
-                        self.result_partial.append(token)
-                        if self.config.break_character in token:
-                            self.result_complete += self.result_partial
-                            self._publish({"output": "".join(self.result_partial)})
-                            self.result_partial = []
-                            return
-                    else:
-                        self.result_complete.append(token)
-                        self._publish({"output": token})
-                        self.result_partial = []
-                else:
-                    # Send remaining result after break character or termination if any
-                    if self.result_partial:
-                        self.result_complete += self.result_partial
-                        self._publish({"output": "".join(self.result_partial)})
-                    self.messages.append({
-                        "role": "assistant",
-                        "content": "".join(self.result_complete),
-                    })
+            if token and token != self.config.response_terminator:
+                self.__process_stream_token(token)
+            elif token:  # Token is the response_terminator, finalize stream
+                self.__finalize_stream()
         except Exception as e:
             self.get_logger().error(str(e))
             # raise a fallback trigger via health status
@@ -402,26 +415,10 @@ class LLM(ModelComponent):
                 # Handle ollama client streaming format
                 if isinstance(self.model_client, OllamaClient):
                     token = token["message"]["content"]
-                if self.config.break_character:
-                    self.result_partial.append(token)
-                    if self.config.break_character in token:
-                        self.result_complete += self.result_partial
-                        self._publish({"output": "".join(self.result_partial)})
-                        self.result_partial = []
-                        continue
-                else:
-                    self.result_complete.append(token)
-                    self._publish({"output": token})
-                    self.result_partial = []
-            # Send remaining result after break character if any
-            if self.result_partial:
-                self.result_complete += self.result_partial
-                self._publish({"output": "".join(self.result_partial)})
-                self.result_partial = []
-            self.messages.append({
-                "role": "assistant",
-                "content": "".join(self.result_complete),
-            })
+                self.__process_stream_token(token)
+
+            # finalize stream after the generator is exhausted
+            self.__finalize_stream()
         except Exception as e:
             self.get_logger().error(str(e))
             # raise a fallback trigger via health status
