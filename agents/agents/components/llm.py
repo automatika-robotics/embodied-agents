@@ -417,6 +417,7 @@ class LLM(ModelComponent):
             if self.result_partial:
                 self.result_complete += self.result_partial
                 self._publish({"output": "".join(self.result_partial)})
+                self.result_partial = []
             self.messages.append({
                 "role": "assistant",
                 "content": "".join(self.result_complete),
