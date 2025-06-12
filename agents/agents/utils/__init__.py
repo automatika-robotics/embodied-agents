@@ -1,6 +1,6 @@
 from .utils import (
     create_detection_context,
-    validate_kwargs,
+    validate_kwargs_from_default,
     validate_func_args,
     PDFReader,
     get_prompt_template,
@@ -16,7 +16,7 @@ __all__ = [
     "_LANGUAGE_CODES",
     "flatten",
     "create_detection_context",
-    "validate_kwargs",
+    "validate_kwargs_from_default",
     "validate_func_args",
     "PDFReader",
     "get_prompt_template",

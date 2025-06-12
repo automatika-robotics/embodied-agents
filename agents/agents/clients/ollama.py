@@ -108,7 +108,13 @@ class OllamaClient(ModelClient):
         if max_new_tokens := inference_input.get("max_new_tokens"):
             inference_input["num_predict"] = max_new_tokens
             inference_input.pop("max_new_tokens")
-        input["options"] = inference_input
+        input["options"] = (
+            {**self.model_init_params["options"], **inference_input}
+            if self.model_init_params.get("options")
+            else inference_input
+        )
+
+        self.logger.debug(f"Sending to ollama server: {input}")
 
         # call inference method
         try:
@@ -122,8 +128,6 @@ class OllamaClient(ModelClient):
         if isinstance(ollama_result, GeneratorType):
             input["output"] = ollama_result
             return input
-
-        self.logger.debug(str(ollama_result))
 
         # make result part of the input
         if output := ollama_result["message"].get("content"):

@@ -2,7 +2,7 @@
 The following model specification classes are meant to define a comman interface for initialization parameters for ML models across supported model serving platforms.
 """
 
-from typing import Optional, Dict
+from typing import Optional, Dict, Any
 
 from attrs import define, field
 from .ros import BaseAttrs, base_validators
@@ -63,18 +63,94 @@ class OllamaModel(LLM):
     :type name: str
     :param checkpoint: The name of the pre-trained model's checkpoint. For available checkpoints consult [Ollama Models](https://ollama.com/library)
     :type checkpoint: str
-    :param quantization: The quantization scheme used by the model. Can be one of "4bit", "8bit" or None (default is "4bit").
-    :type quantization: str or None
     :param init_timeout: The timeout in seconds for the initialization process. Defaults to None.
     :type init_timeout: int, optional
+    :param options: Optional dictionary to configure generation behavior. Options that conflict with component config options such as (num_predict and temperature) will be overridden if set in component config. Only the following keys with their specified value types are allowed. For details check [Ollama api documentation](https://github.com/ollama/ollama/blob/main/docs/api.md#generate-request-with-options):
+        - num_keep: int
+        - seed: int
+        - num_predict: int
+        - top_k: int
+        - top_p: float
+        - min_p: float
+        - typical_p: float
+        - repeat_last_n: int
+        - temperature: float
+        - repeat_penalty: float
+        - presence_penalty: float
+        - frequency_penalty: float
+        - penalize_newline: bool
+        - stop: list of strings
+        - numa: bool
+        - num_ctx: int
+        - num_batch: int
+        - num_gpu: int
+        - main_gpu: int
+        - use_mmap: bool
+        - num_thread: int
+    :type options: dict, optional
 
-    Example usage:
+     Example usage:
     ```python
-    llm = OllamaModel(name='ollama1', checkpoint="gemma2:latest")
-    ```
-    """
+    llm = OllamaModel(
+        name='ollama1',
+        checkpoint="gemma2:latest",
+        options={"temperature": 0.7, "num_predict": 50}
+    )
+    ```"""
 
+    checkpoint: str = field(default="llama3.2:3b")
     port: Optional[int] = field(default=11434)
+    options: Optional[Dict[str, Any]] = field(default=None)
+
+    @options.validator
+    def _validate_options(self, _, value):
+        if value is None:
+            return
+
+        allowed_keys = {
+            "num_keep": int,
+            "seed": int,
+            "num_predict": int,
+            "top_k": int,
+            "top_p": float,
+            "min_p": float,
+            "typical_p": float,
+            "repeat_last_n": int,
+            "temperature": float,
+            "repeat_penalty": float,
+            "presence_penalty": float,
+            "frequency_penalty": float,
+            "penalize_newline": bool,
+            "stop": list,
+            "numa": bool,
+            "num_ctx": int,
+            "num_batch": int,
+            "num_gpu": int,
+            "main_gpu": int,
+            "use_mmap": bool,
+            "num_thread": int,
+        }
+
+        for key, val in value.items():
+            if key not in allowed_keys:
+                raise ValueError(f"Invalid key in options: {key}")
+            expected_type = allowed_keys[key]
+            if key == "stop":
+                if not isinstance(val, list) or not all(
+                    isinstance(item, str) for item in val
+                ):
+                    raise TypeError(f"Value for key '{key}' must be a list of strings")
+            elif not isinstance(val, expected_type):
+                raise TypeError(
+                    f"Value for key '{key}' must be of type {expected_type.__name__}"
+                )
+
+    def _get_init_params(self) -> Dict:
+        """Get init params for model initialization."""
+        return {
+            "checkpoint": self.checkpoint,
+            "options": self.options,
+        }
 
 
 @define(kw_only=True)

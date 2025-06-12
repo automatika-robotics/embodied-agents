@@ -80,7 +80,7 @@ def get_prompt_template(template: Union[str, Path]) -> Template:
             ) from e
 
 
-def validate_kwargs(_, attribute: Attribute, value: Dict):
+def validate_kwargs_from_default(_, attribute: Attribute, value: Dict):
     """Validate kwargs
     :param attribute:
     :type attribute: Attribute

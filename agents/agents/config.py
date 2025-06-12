@@ -4,7 +4,7 @@ from pathlib import Path
 from attrs import define, field, Factory
 
 from .ros import base_validators, BaseComponentConfig, Topic, Route
-from .utils import validate_kwargs, _LANGUAGE_CODES
+from .utils import validate_kwargs_from_default, _LANGUAGE_CODES
 from .utils.vision import _MS_COCO_LABELS
 
 __all__ = [
@@ -111,7 +111,7 @@ class LLMConfig(ModelComponentConfig):
     )
 
     @response_terminator.validator
-    def not_empty(self, _, value):
+    def _not_empty(self, _, value):
         if not value:
             raise ValueError("response_terminator must not be an empty string")
 
@@ -120,7 +120,6 @@ class LLMConfig(ModelComponentConfig):
         :rtype: dict
         """
         return {
-            "chat_history": self.chat_history,
             "temperature": self.temperature,
             "max_new_tokens": self.max_new_tokens,
             "stream": self.stream,
@@ -465,7 +464,7 @@ class SpeechToTextConfig(ModelComponentConfig):
     _word_timestamps: bool = field(init=False)
 
     @enable_wakeword.validator
-    def check_wakeword(self, _, value):
+    def _check_wakeword(self, _, value):
         """Wakeword validator"""
         if value and not self.enable_vad:
             raise ValueError(
@@ -473,7 +472,7 @@ class SpeechToTextConfig(ModelComponentConfig):
             )
 
     @stream.validator
-    def check_stream(self, _, value):
+    def _check_stream(self, _, value):
         """Stream validator"""
         if value and not self.enable_vad:
             raise ValueError(
@@ -613,5 +612,5 @@ class VideoMessageMakerConfig(BaseComponentConfig):
             "poly_sigma": 1.1,
             "flags": 0,
         },
-        validator=validate_kwargs,
+        validator=validate_kwargs_from_default,
     )
