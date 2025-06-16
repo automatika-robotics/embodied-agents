@@ -1,6 +1,9 @@
-![Logo](_static/ROS_AGENTS_DARK.png)
+<div>
+  <img src="_static/ROS_AGENTS_DARK.png" class="only-light" />
+  <img src="_static/ROS_AGENTS_LIGHT.png" class="only-dark" />
+</div>
 
-# ROS Agents  🤖
+# ROS Agents 🤖
 
 ROS Agents is a fully-loaded framework for creating interactive embodied agents that can understand, remember, and act upon contextual information from their environment.
 

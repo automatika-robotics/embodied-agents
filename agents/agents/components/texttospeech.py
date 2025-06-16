@@ -389,7 +389,7 @@ class TextToSpeech(ModelComponent):
         """
         Say the input text.
 
-        This method plays converts the input text to speech and plays the speech on device if play_on_device is set to True and publishes to Audio topics if any publishers have been provided to the component. Any current playback is stopped.
+        This method converts the input text to speech and plays the speech on device if play_on_device is set to True and publishes to Audio topics if any publishers have been provided to the component. Any current playback is stopped.
 
         The method can be invoked as an action consequence of an event. For example, the robot can say 'I am low on battery" when a low battery event gets triggered.
         """
