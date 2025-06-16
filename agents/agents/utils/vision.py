@@ -65,7 +65,32 @@ class LocalVisionModel:
 
         im_t = np.transpose(new_image, (2, 0, 1))  # HWC to CHW
 
-        return im_t
+        return im_t, ratio, pad_left, pad_top
+
+    def __scale_boxes(
+        self,
+        boxes: np.ndarray,
+        original_width: int,
+        original_height: int,
+        ratio: float,
+        pad_left: int,
+        pad_top: int,
+    ) -> np.ndarray:
+        """
+        Rescales bounding boxes from the model's input size back to the original image size.
+        """
+        # Adjust for padding
+        boxes[:, [0, 2]] -= pad_left
+        boxes[:, [1, 3]] -= pad_top
+
+        # Adjust for scaling ratio
+        boxes /= ratio
+
+        # Clip coordinates to ensure they are within the original image boundaries
+        boxes[:, [0, 2]] = boxes[:, [0, 2]].clip(0, original_width)
+        boxes[:, [1, 3]] = boxes[:, [1, 3]].clip(0, original_height)
+
+        return boxes
 
     def __call__(
         self,
@@ -80,18 +105,18 @@ class LocalVisionModel:
         # Create the size array using NumPy, matching the expected int64 dtype
         orig_size_np = np.array([[img_height, img_width]], dtype=np.int64)
 
-        # Convert image to tensor-like numpy array
+        # NOTE: Handles only one image in the input
+        input_image = inference_input["images"][0]
+        original_h, original_w = input_image.shape[:2]
+
+        # Preprocess the image and retrieve the scaling parameters
+        processed_image, ratio, pad_left, pad_top = self.__resize_with_aspect_ratio(
+            input_image, img_height, img_width
+        )
+
+        # Normalize the image and add a batch dimension
         im_data_np = (
-            np.array(
-                [
-                    self.__resize_with_aspect_ratio(
-                        img, img_height, img_width
-                    )  # preprocess
-                    for img in inference_input["images"]
-                ],
-                dtype=np.float32,
-            )
-            / 255  # Normal to Normalize to [0, 1]
+            np.array([processed_image], dtype=np.float32) / 255.0  # Normalize to [0, 1]
         )
 
         results = []
@@ -105,12 +130,16 @@ class LocalVisionModel:
             # format results
             labels, boxes, scores = detections
             result = {}
-            if boxes.size != 0:
+            if boxes.size > 0:
                 # filter for threshold
                 mask = scores >= inference_input["threshold"]
                 scores, labels, boxes = scores[mask], labels[mask], boxes[mask]
                 # Check if predictions survived thresholding
-                if not (scores.size == 0):
+                if scores.size > 0:
+                    # Scale the boxes to match the original image dimensions
+                    boxes = self.__scale_boxes(
+                        boxes, original_w, original_h, ratio, pad_left, pad_top
+                    )
                     # if labels are requested in text
                     if inference_input["get_dataset_labels"]:
                         # get text labels from model dataset info
