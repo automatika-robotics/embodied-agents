@@ -15,7 +15,6 @@ __all__ = ["ChromaDB"]
 class DB(BaseAttrs):
     """This class describes a database initialization configuration."""
 
-    db_location: str = field(default="./data")
     username: Optional[str] = field(default=None)
     password: Optional[str] = field(default=None)
     init_timeout: int = field(default=600)  # 10 minutes
@@ -24,7 +23,6 @@ class DB(BaseAttrs):
         params = {
             "username": self.username,
             "password": self.password,
-            "db_location": self.db_location,
         }
         return params
 
@@ -33,8 +31,6 @@ class DB(BaseAttrs):
 class ChromaDB(DB):
     """[Chroma](https://www.trychroma.com/) is the open-source AI application database. It provides embeddings, vector search, document storage, full-text search, metadata filtering, and multi-modal retreival support.
 
-    :param db_location: The on-disk location where the database will be initialized. Defaults to "./data".
-    :type db_location: str, optional
     :param username: The username for authentication. Defaults to None.
     :type username: Optional[str], optional
     :param password: The password for authentication. Defaults to None.
@@ -65,7 +61,6 @@ class ChromaDB(DB):
     from agents.vectordbs import ChromaDB
 
     chroma_config = ChromaDB(
-        db_location='/path/to/db',
         embeddings='ollama',
         checkpoint='bge-large:latest',
         ollama_host='localhost',
@@ -86,7 +81,6 @@ class ChromaDB(DB):
         params = {
             "username": self.username,
             "password": self.password,
-            "db_location": self.db_location,
             "embeddings": self.embeddings,
             "checkpoint": self.checkpoint,
             "ollama_host": self.ollama_host,
