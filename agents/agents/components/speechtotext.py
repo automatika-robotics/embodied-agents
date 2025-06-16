@@ -313,7 +313,7 @@ class SpeechToText(ModelComponent):
                 # Get any last words not currently confirmed in hypothesis
                 if remaining_words := self.transcript_buffer.complete():
                     self.result_partial.extend(remaining_words)
-                complete_transcript = " ".join(i[2] for i in self.result_partial)
+                complete_transcript = "".join(i[2] for i in self.result_partial)
                 self.get_logger().debug(complete_transcript)
                 self._publish({"output": complete_transcript})
                 # reset buffers
