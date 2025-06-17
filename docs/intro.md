@@ -1,16 +1,17 @@
 <div>
-  <img src="_static/ROS_AGENTS_DARK.png" class="only-light" />
-  <img src="_static/ROS_AGENTS_LIGHT.png" class="only-dark" />
+  <img src="_static/EMBODIED_AGENTS_LIGHT.png" class="only-light" />
+  <img src="_static/EMBODIED_AGENTS_DARK.png" class="only-dark" />
 </div>
+<br/>
 
-# ROS Agents 🤖
+# Embodied Agents 🤖
 
-ROS Agents is a fully-loaded framework for creating interactive embodied agents that can understand, remember, and act upon contextual information from their environment.
+Embodied Agents is a fully-loaded framework, written in pure ROS2, for creating interactive physical agents that can understand, remember, and act upon contextual information from their environment.
 
-- **Agents in the real world:** Designed to be used with autonomous robot systems that operate in dynamic environments, specifically AMRs.
-- **Intuitive API**: Simple pythonic API to utilize local or cloud based ML models (specifically **Multimodal LLMs** and other **Transformer Architectures**) on robots.
+- **Production Ready Physical Agents:** Designed to be used with autonomous robot systems that operate in real world dynamic environments, specifically AMRs.
+- **Intuitive API**: Simple pythonic API to utilize local or cloud based ML models (specifically **Multimodal LLMs** and other **transformer based architectures**) on robots.
 - **Semantic Memory**: Integrates vector databases, semantic routing and other supporting components to quickly build arbitrarily complex graphs for agentic information flow. No need to utilize bloated "GenAI" frameworks on your robot.
-- **Made in ROS2**: Utilizes ROS2 as the underlying distributed communications backbone. Theoretically, all devices that provide a ROS2 package can be utilized to send data to ML models, as long as the datatype callback has been implemented.
+- **Made in ROS2**: Utilizes ROS2 as the underlying distributed communications backbone. Theoretically, all devices that provide a ROS2 package can be utilized to send data to ML models, with callbacks implemented for most commonly used data types and infinite extensibility.
 
 Checkout [Installation Instructions](installation.md) 🛠️
 
@@ -22,4 +23,4 @@ Dive right in with [Examples](examples/index.md) ✨
 
 ## Contributions
 
-ROS Agents has been developed in collaboration betweeen [Automatika Robotics](https://automatikarobotics.com/) and [Inria](https://inria.fr/). Contributions from the community are most welcome.
+Embodied Agents has been developed in collaboration betweeen [Automatika Robotics](https://automatikarobotics.com/) and [Inria](https://inria.fr/). Contributions from the community are most welcome.

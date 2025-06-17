@@ -1,6 +1,6 @@
 from agents.components import Vision, MLLM
-from agents.models import VisionModel, Idefics2
-from agents.clients.roboml import RESPModelClient, HTTPModelClient
+from agents.models import VisionModel, TransformersMLLM
+from agents.clients import RoboMLRESPClient, RoboMLHTTPClient
 from agents.ros import Topic, Launcher
 from agents.config import VisionConfig
 
@@ -10,7 +10,7 @@ detections_topic = Topic(name="detections", msg_type="Detections")
 object_detection = VisionModel(
     name="object_detection", checkpoint="dino-4scale_r50_8xb2-12e_coco"
 )
-roboml_detection = RESPModelClient(object_detection)
+roboml_detection = RoboMLRESPClient(object_detection)
 
 detection_config = VisionConfig(threshold=0.5)
 vision = Vision(
@@ -25,8 +25,8 @@ vision = Vision(
 text_query = Topic(name="text0", msg_type="String")
 text_answer = Topic(name="text1", msg_type="String")
 
-idefics = Idefics2(name="idefics_model")
-idefics_client = HTTPModelClient(idefics)
+idefics = TransformersMLLM(name="idefics_model", checkpoint="HuggingFaceM4/idefics2-8b")
+idefics_client = RoboMLHTTPClient(idefics)
 
 mllm = MLLM(
     inputs=[text_query, image0, detections_topic],

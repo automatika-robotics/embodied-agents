@@ -80,8 +80,8 @@ html_static_path = ["_static"]
 html_favicon = "_static/favicon.png"
 html_theme_options = {
     "logo": {
-        "image_light": "_static/ROS_AGENTS_DARK.png",
-        "image_dark": "_static/ROS_AGENTS_LIGHT.png",
+        "image_light": "_static/EMBODIED_AGENTS_LIGHT.png",
+        "image_dark": "_static/EMBODIED_AGENTS_DARK.png",
     },
     "icon_links": [
         {

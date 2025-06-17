@@ -2,28 +2,32 @@ from typing import Optional
 import json
 import numpy as np
 from agents.components import LLM, SemanticRouter
-from agents.models import Llama3_1
+from agents.models import OllamaModel
 from agents.vectordbs import ChromaDB
 from agents.config import LLMConfig, SemanticRouterConfig
-from agents.clients.roboml import HTTPDBClient
-from agents.clients.ollama import OllamaClient
+from agents.clients import ChromaClient, OllamaClient
 from agents.ros import Launcher, Topic, Route
 
-
 # Start a Llama3.1 based llm component using ollama client
-llama = Llama3_1(name="llama")
+llama = OllamaModel(name="llama", checkpoint="llama3.2:3b")
 llama_client = OllamaClient(llama)
 
 # Initialize a vector DB that will store our routes
-chroma = ChromaDB(name="MainDB")
-chroma_client = HTTPDBClient(db=chroma)
+chroma = ChromaDB()
+chroma_client = ChromaClient(db=chroma)
 
 
 # Make a generic LLM component using the Llama3_1 model
 llm_in = Topic(name="text_in_llm", msg_type="String")
 llm_out = Topic(name="text_out_llm", msg_type="String")
 
-llm = LLM(inputs=[llm_in], outputs=[llm_out], model_client=llama_client, trigger=llm_in)
+llm = LLM(
+    inputs=[llm_in],
+    outputs=[llm_out],
+    model_client=llama_client,
+    trigger=llm_in,
+    component_name="generic_llm",
+)
 
 
 # Define LLM input and output topics including goal_point topic of type PoseStamped

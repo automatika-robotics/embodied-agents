@@ -40,7 +40,7 @@ The _enable_wakeword_ option cannot be enabled without the _enable_vad_ option.
 Check the available defaults and options for the SpeechToTextConfig [here](../apidocs/agents/agents.config)
 ```
 
-To initialize the component we also need a model client for a speech to text model. We will be using the HTTP client for RoboML for this purpose.
+To initialize the component we also need a model client for a speech to text model. We will be using the WebSocket client for RoboML for this purpose.
 
 ```{note}
 RoboML is a aggregator library that provides a model serving aparatus for locally serving opensource ML models useful in robotics. Learn about setting up RoboML [here](https://www.github.com/automatika-robotics/roboml).
@@ -49,12 +49,12 @@ RoboML is a aggregator library that provides a model serving aparatus for locall
 Additionally, we will use the client with a model called, Whisper, a popular opensource speech to text model from OpenAI. Lets see what the looks like in code.
 
 ```python
-from agents.clients.roboml import HTTPModelClient
+from agents.clients import RoboMLWSClient
 from agents.models import Whisper
 
 # Setup the model client
 whisper = Whisper(name="whisper")  # Custom model init params can be provided here
-roboml_whisper = HTTPModelClient(whisper)
+roboml_whisper = RoboMLWSClient(whisper)
 
 # Initialize the component
 speech_to_text = SpeechToText(
@@ -69,7 +69,7 @@ speech_to_text = SpeechToText(
 The trigger parameter lets the component know that it has to perform its function (in this case model inference) when an input is received on this particular topic. In our configuration, the component will be triggered using voice activity detection on the continuous stream of audio being received on the microphone. Next we will setup our MLLM component.
 
 ## MLLM Component
-The MLLM component takes as input a text topic (the output of the SpeechToText component) and an image topic, assuming we have a camera device onboard the robot publishing this topic. And just like before we need to provide a model client, this time with an MLLM model. This time we will use the OllamaClient along with Llava, a popular opensource multimodal LLM.
+The MLLM component takes as input a text topic (the output of the SpeechToText component) and an image topic, assuming we have a camera device onboard the robot publishing this topic. And just like before we need to provide a model client, this time with an MLLM model. This time we will use the OllamaClient along with _llava:latest_ model, a popular opensource multimodal LLM available on Ollama.
 
 ```{note}
 Ollama is one of the most popular local LLM serving projects. Learn about setting up Ollama [here](https://ollama.com).
@@ -78,14 +78,15 @@ Here is the code for our MLLM setup.
 
 ```python
 from agents.clients.ollama import OllamaClient
-from agents.models import Llava
+from agents.models import OllamaModel
 
 # Define the image input topic and a new text output topic
 image0 = Topic(name="image_raw", msg_type="Image")
 text_answer = Topic(name="text1", msg_type="String")
 
 # Define a model client (working with Ollama in this case)
-llava = Llava(name="llava")
+# OllamaModel is a generic wrapper for all ollama models
+llava = OllamaModel(name="llava", checkpoint="llava:latest")
 llava_client = OllamaClient(llava)
 
 # Define an MLLM component
@@ -123,7 +124,7 @@ from agents.models import SpeechT5
 t2s_config = TextToSpeechConfig(play_on_device=True)
 
 speecht5 = SpeechT5(name="speecht5")
-roboml_speecht5 = HTTPModelClient(speecht5)
+roboml_speecht5 = RoboMLWSClient(speecht5)
 text_to_speech = TextToSpeech(
     inputs=[text_answer],
     trigger=text_answer,
@@ -153,33 +154,33 @@ Et voila! we have setup a graph of three components in less than 50 lines of wel
 :linenos:
 from agents.components import MLLM, SpeechToText, TextToSpeech
 from agents.config import SpeechToTextConfig, TextToSpeechConfig
-from agents.clients.roboml import HTTPModelClient
-from agents.clients.ollama import OllamaClient
-from agents.models import Whisper, SpeechT5, Llava
+from agents.clients import OllamaClient, RoboMLWSClient
+from agents.models import Whisper, SpeechT5, OllamaModel
 from agents.ros import Topic, Launcher
 
 audio_in = Topic(name="audio0", msg_type="Audio")
 text_query = Topic(name="text0", msg_type="String")
 
 whisper = Whisper(name="whisper")  # Custom model init params can be provided here
-roboml_whisper = HTTPModelClient(whisper)
+roboml_whisper = RoboMLWSClient(whisper)
 
-s2t_config = SpeechToTextConfig(enable_vad=True,     # option to listen for speech through the microphone
-                                enable_wakeword=True  # option to invoke the component with a wakeword like 'hey jarvis'
-                               )
+s2t_config = SpeechToTextConfig(
+    enable_vad=True,  # option to listen for speech through the microphone
+    enable_wakeword=True,  # option to invoke the component with a wakeword like 'hey jarvis'
+)
 speech_to_text = SpeechToText(
     inputs=[audio_in],
     outputs=[text_query],
     model_client=roboml_whisper,
     trigger=audio_in,
     config=s2t_config,
-    component_name="speech_to_text"
+    component_name="speech_to_text",
 )
 
 image0 = Topic(name="image_raw", msg_type="Image")
 text_answer = Topic(name="text1", msg_type="String")
 
-llava = Llava(name="llava")
+llava = OllamaModel(name="llava", checkpoint="llava:latest")
 llava_client = OllamaClient(llava)
 
 mllm = MLLM(
@@ -187,26 +188,26 @@ mllm = MLLM(
     outputs=[text_answer],
     model_client=llava_client,
     trigger=text_query,
-    component_name="vqa"
+    component_name="vqa",
 )
 
 # config for playing audio on device
 t2s_config = TextToSpeechConfig(play_on_device=True)
 
 speecht5 = SpeechT5(name="speecht5")
-roboml_speecht5 = HTTPModelClient(speecht5)
+roboml_speecht5 = RoboMLWSClient(speecht5)
 text_to_speech = TextToSpeech(
     inputs=[text_answer],
     trigger=text_answer,
     model_client=roboml_speecht5,
     config=t2s_config,
-    component_name="text_to_speech"
+    component_name="text_to_speech",
 )
 
 launcher = Launcher()
 launcher.add_pkg(
-    components=[speech_to_text, mllm, text_to_speech]
-    )
+    components=[speech_to_text, mllm, text_to_speech],
+)
 launcher.bringup()
 ```
 
