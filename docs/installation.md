@@ -16,27 +16,39 @@ For utilizing larger models, it is recommended that model serving platforms are 
 
 ## Install EmbodiedAgents (Ubuntu)
 
-**Binary packages for Ubuntu will be released soon. Check this space.**
+Install python dependencies using pip as follows:
+
+`pip install 'attrs>=23.2.0' numpy-quaternion`
+
+For ROS versions >= 'humble', you can install EmbodiedAgents with your package manager. For example on Ubuntu:
+
+`sudo apt install ros-$ROS_DISTRO-automatika-embodied-agents`
 
 ## Install EmbodiedAgents from source
 
 Create your ROS workspace.
+
 ```shell
 mkdir -p agents_ws/src
 cd agents_ws/src
 ```
+
 ### Get Dependencies
 
 Install python dependencies
+
 ```shell
-pip install numpy opencv-python-headless 'attrs>=23.2.0' jinja2 httpx setproctitle msgpack msgpack-numpy numpy-quaternion platformdirs
+pip install numpy opencv-python-headless 'attrs>=23.2.0' jinja2 httpx setproctitle msgpack msgpack-numpy numpy-quaternion platformdirs tqdm
 ```
 
 Download Sugarcoat.
+
 ```shell
 git clone https://github.com/automatika-robotics/sugarcoat
 ```
+
 ### Install EmbodiedAgents
+
 ```shell
 git clone https://github.com/automatika-robotics/embodied-agents.git
 cd ..

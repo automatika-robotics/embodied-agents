@@ -34,7 +34,13 @@ The core of EmbodiedAgents is agnostic to model serving platforms. It currently 
 
 ### Install EmbodiedAgents (Ubuntu)
 
-**Binary packages for Ubuntu will be released soon. Check this space.**
+Install python dependencies using pip as follows:
+
+`pip install 'attrs>=23.2.0' numpy-quaternion`
+
+For ROS versions >= 'humble', you can install EmbodiedAgents with your package manager. For example on Ubuntu:
+
+`sudo apt install ros-$ROS_DISTRO-automatika-embodied-agents`
 
 ### Install EmbodiedAgents from source
 
@@ -43,7 +49,7 @@ The core of EmbodiedAgents is agnostic to model serving platforms. It currently 
 Install python dependencies
 
 ```shell
-pip install numpy opencv-python-headless 'attrs>=23.2.0' jinja2 httpx setproctitle msgpack msgpack-numpy numpy-quaternion platformdirs
+pip install numpy opencv-python-headless 'attrs>=23.2.0' jinja2 httpx setproctitle msgpack msgpack-numpy numpy-quaternion platformdirs tqdm
 ```
 
 Download Sugarcoat
@@ -102,6 +108,7 @@ launcher.bringup()
 And just like that we have an agent that can answer questions like **'What do you see?'**. To interact with this agent, EmbodiedAgents includes a tiny web client. Checkout the [Quick Start Guide](https://automatika-robotics.github.io/embodied-agents/quickstart.html) to learn more about how components and models work together.
 
 ## Complex Physical Agents
+
 The quickstart example above is just an amuse-bouche of what is possible with EmbodiedAgents. In EmbodiedAgents we can create arbitrarily sophisticated component graphs. And furthermore our system can be configured to even change or reconfigure itself based on events internal or external to the system. Check out the code for the following agent [here](https://automatika-robotics.github.io/embodied-agents/examples/complete.html).
 
 <picture>
