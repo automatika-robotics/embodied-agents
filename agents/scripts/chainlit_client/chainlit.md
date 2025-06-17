@@ -1,4 +1,4 @@
-# Tiny Web Client for ROS Agents
+# Tiny Web Client for EmbodiedAgents
 
 This client is based on chainlit. In order to use it, run the following in order.
 

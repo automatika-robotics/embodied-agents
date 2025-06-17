@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.abspath(".."))
 version = ET.parse("../agents/package.xml").getroot()[1].text
 print("Found version:", version)
 
-project = "ROS Agents"
+project = "EmbodiedAgents"
 copyright = f"{date.today().year}, Automatika Robotics"
 author = "Automatika Robotics"
 release = version
@@ -92,7 +92,7 @@ html_theme_options = {
         },
         {
             "name": "GitHub",
-            "url": "https://github.com/automatika-robotics/ros-agents",
+            "url": "https://github.com/automatika-robotics/embodied-agents",
             "icon": "fa-brands fa-github",
         },
         {
@@ -102,7 +102,7 @@ html_theme_options = {
         },
     ],
     "path_to_docs": "docs",
-    "repository_url": "https://github.com/automatika-robotics/ros-agents",
+    "repository_url": "https://github.com/automatika-robotics/embodied-agents",
     "repository_branch": "main",
     "use_source_button": True,
     "use_issues_button": True,

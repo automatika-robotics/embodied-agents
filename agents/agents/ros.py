@@ -5,7 +5,7 @@ import numpy as np
 from attrs import define, field, Factory
 from importlib.util import find_spec
 
-# FROM ROS_SUGAR
+# FROM SUGARCOAT
 from ros_sugar.supported_types import (
     add_additional_datatypes,
     SupportedType,
@@ -155,7 +155,7 @@ class Tracking(SupportedType):
     """Tracking."""
 
     _ros_type = ROSTracking
-    callback = None  # Not defined in ROS Agents
+    callback = None  # Not defined in EmbodiedAgents
 
     @classmethod
     def convert(
@@ -259,7 +259,7 @@ class Topic(BaseTopic):
 
     :param name: Name of the topic
     :type name: str
-    :param msg_type: One of the SupportedTypes. This parameter can be set by passing the SupportedType data-type name as a string. See a list of supported types [here](https://automatika-robotics.github.io/ros-sugar/advanced/types.html)
+    :param msg_type: One of the SupportedTypes. This parameter can be set by passing the SupportedType data-type name as a string. See a list of supported types [here](https://automatika-robotics.github.io/sugarcoat/advanced/types.html)
     :type msg_type: Union[type[supported_types.SupportedType], str]
     :param qos_profile: QoS profile for the topic
     :type qos_profile: QoSConfig

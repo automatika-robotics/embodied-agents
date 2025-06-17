@@ -12,13 +12,13 @@ EmbodiedAgents is a fully-loaded framework, written in pure ROS2, for creating i
 - **Semantic Memory**: Integrates vector databases, semantic routing and other supporting components to quickly build arbitrarily complex graphs for agentic information flow. No need to utilize bloated "GenAI" frameworks on your robot.
 - **Made in ROS2**: Utilizes ROS2 as the underlying distributed communications backbone. Theoretically, all devices that provide a ROS2 package can be utilized to send data to ML models, with callbacks implemented for most commonly used data types and infinite extensibility.
 
-Checkout [Installation Instructions](https://automatika-robotics.github.io/ros-agents/installation.html) 🛠️
+Checkout [Installation Instructions](https://automatika-robotics.github.io/embodied-agents/installation.html) 🛠️
 
-Get started with the [Quickstart Guide](https://automatika-robotics.github.io/ros-agents/quickstart.html) 🚀
+Get started with the [Quickstart Guide](https://automatika-robotics.github.io/embodied-agents/quickstart.html) 🚀
 
-Get familiar with [Basic Concepts](https://automatika-robotics.github.io/ros-agents/basics.html) 📚
+Get familiar with [Basic Concepts](https://automatika-robotics.github.io/embodied-agents/basics.html) 📚
 
-Dive right in with [Examples](https://automatika-robotics.github.io/ros-agents/examples/index.html) ✨
+Dive right in with [Examples](https://automatika-robotics.github.io/embodied-agents/examples/index.html) ✨
 
 ## Installation 🛠️
 
@@ -55,7 +55,7 @@ git clone https://github.com/automatika-robotics/sugarcoat
 #### Install EmbodiedAgents
 
 ```shell
-git clone https://github.com/automatika-robotics/ros-agents.git
+git clone https://github.com/automatika-robotics/embodied-agents.git
 cd ..
 colcon build
 source install/setup.bash
@@ -99,10 +99,10 @@ launcher.add_pkg(components=[mllm])
 launcher.bringup()
 ```
 
-And just like that we have an agent that can answer questions like **'What do you see?'**. To interact with this agent, EmbodiedAgents includes a tiny web client. Checkout the [Quick Start Guide](https://automatika-robotics.github.io/ros-agents/quickstart.html) to learn more about how components and models work together.
+And just like that we have an agent that can answer questions like **'What do you see?'**. To interact with this agent, EmbodiedAgents includes a tiny web client. Checkout the [Quick Start Guide](https://automatika-robotics.github.io/embodied-agents/quickstart.html) to learn more about how components and models work together.
 
 ## Complex Physical Agents
-The quickstart example above is just an amuse-bouche of what is possible with EmbodiedAgents. In EmbodiedAgents we can create arbitrarily sophisticated component graphs. And furthermore our system can be configured to even change or reconfigure itself based on events internal or external to the system. Check out the code for the following agent [here](https://automatika-robotics.github.io/ros-agents/examples/complete.html).
+The quickstart example above is just an amuse-bouche of what is possible with EmbodiedAgents. In EmbodiedAgents we can create arbitrarily sophisticated component graphs. And furthermore our system can be configured to even change or reconfigure itself based on events internal or external to the system. Check out the code for the following agent [here](https://automatika-robotics.github.io/embodied-agents/examples/complete.html).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/_static/complete_dark.png">

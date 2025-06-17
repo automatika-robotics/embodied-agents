@@ -1,15 +1,15 @@
 # Create a conversational agent with audio
 
-Often times robots are equipped with a speaker system and a microphone. Once these peripherals have been exposed through ROS, we can use ROS Agents to trivially create a conversational interface on the robot. Our conversational agent will use a multimodal LLM for contextual question/answering utilizing the camera onboard the robot. Furthermore, it will use speech-to-text and text-to-speech models for converting audio to text and vice versa. We will start by importing the relavent components that we want to string together.
+Often times robots are equipped with a speaker system and a microphone. Once these peripherals have been exposed through ROS, we can use EmbodiedAgents to trivially create a conversational interface on the robot. Our conversational agent will use a multimodal LLM for contextual question/answering utilizing the camera onboard the robot. Furthermore, it will use speech-to-text and text-to-speech models for converting audio to text and vice versa. We will start by importing the relavent components that we want to string together.
 
 ```python
 from agents.components import MLLM, SpeechToText, TextToSpeech
 ```
 
- [Components](../basics) are basic functional units in ROS Agents. Their inputs and outputs are defined using ROS [Topics](../basics). And their function can be any input transformation, for example the inference of an ML model. Lets setup these components one by one. Since our input to the robot would be speech, we will setup the speech-to-text component first.
+ [Components](../basics) are basic functional units in EmbodiedAgents. Their inputs and outputs are defined using ROS [Topics](../basics). And their function can be any input transformation, for example the inference of an ML model. Lets setup these components one by one. Since our input to the robot would be speech, we will setup the speech-to-text component first.
 
  ## SpeechToText Component
- This component listens to input an audio input topic, that takes in a multibyte array of audio (captured in a ROS std_msgs message, which maps to Audio msg_type in ROS Sugar) and can publish output to a text topic. It can also be configured to get the audio stream from microphones on board our robot. By default the component is configured to use a small Voice Activity Detection (VAD) model, [Silero-VAD](https://github.com/snakers4/silero-vad) to filter out any audio that is not speech.
+ This component listens to input an audio input topic, that takes in a multibyte array of audio (captured in a ROS std_msgs message, which maps to Audio msg_type in Sugarcoat) and can publish output to a text topic. It can also be configured to get the audio stream from microphones on board our robot. By default the component is configured to use a small Voice Activity Detection (VAD) model, [Silero-VAD](https://github.com/snakers4/silero-vad) to filter out any audio that is not speech.
 
  However, merely utilizing speech can be problamatic in robots, due to the hands free nature of the audio system. Therefore its useful to add wakeword detection, so that speech-to-text is only activated when the robot is called with a specific phrase (e.g. 'Hey Jarvis').
 
@@ -213,7 +213,7 @@ launcher.bringup()
 
 ## Web Based Client for Interacting with the Robot
 
-To interact with text and audio based topics on the robot, ROS Agents includes a tiny browser based client made with [chainlit](https://chainlit.io/). This is useful if the robot does not have a microphone/speaker interface or if one wants to communicate with it remotely. The client can be launched as follows:
+To interact with text and audio based topics on the robot, EmbodiedAgents includes a tiny browser based client made with [chainlit](https://chainlit.io/). This is useful if the robot does not have a microphone/speaker interface or if one wants to communicate with it remotely. The client can be launched as follows:
 
 ```shell
 ros2 run automatika_embodied_agents tiny_web_client

@@ -153,7 +153,7 @@ def _parse_ros_args(args_names: List[str]) -> List[str]:
 
 def main():
     """Executable main function to run a component as a ROS2 node in a new process.
-    Used to start a node using ROS Sugar Launcher. Extends functionality from ROS Sugar
+    Used to start a node using Sugarcoat Launcher. Extends functionality from ROS Sugar
 
     :param list_of_components: List of all known Component classes in the package
     :type list_of_components: List[Type]

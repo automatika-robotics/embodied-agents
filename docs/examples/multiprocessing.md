@@ -1,9 +1,9 @@
 # Making the System Robust And Production Ready
 
-In the [last example](complete.md) we saw how we can make a complex graph of components to create an intelligent embodied agent. In this example we will have a look at some of the features that ROS Agents provides to make the same system robust and production-ready.
+In the [last example](complete.md) we saw how we can make a complex graph of components to create an intelligent embodied agent. In this example we will have a look at some of the features that EmbodiedAgents provides to make the same system robust and production-ready.
 
 ## Run Components in Separate Processes
-The first thing we want to do is to run each component in a different process. By default our launcher launches each component in a seperate thread, however ROS was designed such that each functional unit (a component in ROS Agents, that maps to a node in ROS) runs in a seperate process such that failure of one process does not crash the whole system. In order to enable multiprocessing we simply pass the name of our ROS package, i.e. 'automatika_embodied_agents' and the multiprocessing parameter to our launcher as follows:
+The first thing we want to do is to run each component in a different process. By default our launcher launches each component in a seperate thread, however ROS was designed such that each functional unit (a component in EmbodiedAgents, that maps to a node in ROS) runs in a seperate process such that failure of one process does not crash the whole system. In order to enable multiprocessing we simply pass the name of our ROS package, i.e. 'automatika_embodied_agents' and the multiprocessing parameter to our launcher as follows:
 
 ```python
 launcher = Launcher()
@@ -25,7 +25,7 @@ launcher.add_pkg(
 ```
 
 ## Adding Fallback Behavior
-ROS Agents provides fallback behaviors in case a component fails. For example in components that send inference requests to machine learning models, a failure can happen if the model client cannot connect to model serving platform due to a connection glitch or a failure at the end of the platform. To handle such a case we can restart our component, which will make it check connection with the model serving platform during its activation. The component will remain in an unhealthy state until it succesfully activates, and it will keep on executing fallback behavior until it remains unhealthy. This fallback behavior can be specified in the launcher which will automatically apply it to all components. We can also add a time interval between consecutive fallback actions. All of this can be done by passing the following parameters to the launcher before bring up:
+EmbodiedAgents provides fallback behaviors in case a component fails. For example in components that send inference requests to machine learning models, a failure can happen if the model client cannot connect to model serving platform due to a connection glitch or a failure at the end of the platform. To handle such a case we can restart our component, which will make it check connection with the model serving platform during its activation. The component will remain in an unhealthy state until it succesfully activates, and it will keep on executing fallback behavior until it remains unhealthy. This fallback behavior can be specified in the launcher which will automatically apply it to all components. We can also add a time interval between consecutive fallback actions. All of this can be done by passing the following parameters to the launcher before bring up:
 
 ```python
 launcher.on_fail(action_name="restart")
@@ -33,7 +33,7 @@ launcher.fallback_rate = 1 / 10  # 0.1 Hz or 10 seconds
 ```
 
 ```{seealso}
-ROS Agents provides advanced fallback behaviors at the component level. To learn more about these, checkout [ROS Sugar Documentation](https://automatika-robotics.github.io/ros-sugar/design/fallbacks.html)
+EmbodiedAgents provides advanced fallback behaviors at the component level. To learn more about these, checkout [Sugarcoat Documentation](https://automatika-robotics.github.io/sugarcoat/design/fallbacks.html)
 ```
 
 With these two simple modifications, our complex graph of an embodied agent can be made significatly more robust to failures and has a graceful fallback behavior in case a failure does occur. The complete agent code is as follows:

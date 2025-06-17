@@ -201,7 +201,7 @@ class VisionConfig(ModelComponentConfig):
        :type device_local_classifier: str
        :param ncpu_local_classifier: Number of CPU cores to allocate to the local classifier when using CPU (default: 1). This parameter is only effective when enable_local_classifier is set to True.
        :type ncpu_local_classifier: int
-       :param local_classifier_model_path: Path or URL to the ONNX model used by the local classifier (default: DEIM, Huang et al. CVPR 2025). Other models based on [DEIM](https://github.com/ShihuaHuang95/DEIM?tab=readme-ov-file#deim-d-fine) can be checked [here](https://github.com/automatika-robotics/ros-agents/releases/tag/0.3.3). This parameter is only effective when enable_local_classifier is set to True.
+       :param local_classifier_model_path: Path or URL to the ONNX model used by the local classifier (default: DEIM, Huang et al. CVPR 2025). Other models based on [DEIM](https://github.com/ShihuaHuang95/DEIM?tab=readme-ov-file#deim-d-fine) can be checked [here](https://github.com/automatika-robotics/embodied-agents/releases/tag/0.3.3). This parameter is only effective when enable_local_classifier is set to True.
        :type local_classifier_model_path: str
 
        Example of usage:
@@ -225,7 +225,7 @@ class VisionConfig(ModelComponentConfig):
     )
     ncpu_local_classifier: int = field(default=1)
     local_classifier_model_path: str = field(
-        default="https://github.com/automatika-robotics/ros-agents/releases/download/0.3.3/deim_dfine_hgnetv2_n_coco_160e.onnx"
+        default="https://github.com/automatika-robotics/embodied-agents/releases/download/0.3.3/deim_dfine_hgnetv2_n_coco_160e.onnx"
     )
 
     def _get_inference_params(self) -> Dict:
