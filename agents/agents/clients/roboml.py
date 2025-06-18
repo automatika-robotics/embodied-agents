@@ -116,7 +116,9 @@ class RoboMLHTTPClient(ModelClient):
         except Exception as e:
             self.__handle_exceptions(e)
             raise
-        self.logger.info(f"{self.model_name} initialized on remote")
+        self.logger.info(
+            f"{self.model_name} with {self.model_init_params['checkpoint']} model initialized"
+        )
 
     def _inference(
         self, inference_input: Dict[str, Any]
@@ -451,10 +453,12 @@ class RoboMLRESPClient(ModelClient):
             self.__handle_exceptions(e)
             raise
 
-        # check status for init completion after every second
+        # check status for init completion
         status = self.__check_model_status()
         if status == Status.READY:
-            self.logger.info(f"{self.model_name} model initialized on remote")
+            self.logger.info(
+                f"{self.model_name} with {self.model_init_params['checkpoint']} model initialized"
+            )
         elif status == Status.INITIALIZING:
             raise Exception(f"{self.model_name} model initialization timed out.")
         elif status == Status.INITIALIZATION_ERROR:

@@ -271,7 +271,7 @@ class TextToSpeechConfig(ModelComponentConfig):
     block_size: int = field(default=1024)
     thread_shutdown_timeout: int = field(default=5)
     stream: bool = field(default=True)
-    _get_bytes: bool = field(default=False)
+    _get_bytes: bool = field(default=False, alias="_get_bytes")
 
     def _get_inference_params(self) -> Dict:
         """get_inference_params.
@@ -458,10 +458,10 @@ class SpeechToTextConfig(ModelComponentConfig):
     wakeword_model_path: str = field(
         default="https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/hey_jarvis_v0.1.onnx"
     )
-    _sample_rate: int = field(default=16000)
-    _block_size: int = field(default=1280)
-    _vad_filter: bool = field(init=False)
-    _word_timestamps: bool = field(init=False)
+    _sample_rate: int = field(default=16000, alias="_sample_rate")
+    _block_size: int = field(default=1280, alias="_block_size")
+    _vad_filter: bool = field(init=False, alias="_vad_filter")
+    _word_timestamps: bool = field(init=False, alias="_word_timestamps")
 
     @enable_wakeword.validator
     def _check_wakeword(self, _, value):

@@ -45,7 +45,9 @@ class ChromaClient(DBClient):
         if self.db_init_params["embeddings"] == "ollama":
             self.embeddings_client = OllamaClient(
                 model=OllamaModel(
-                    name="embed", checkpoint=self.db_init_params["checkpoint"]
+                    name="internal_ollama_embeddings",
+                    checkpoint=self.db_init_params["checkpoint"],
+                    init_timeout=self.db_init_params["init_timeout"],
                 ),
                 host=self.db_init_params["ollama_host"],
                 port=self.db_init_params["ollama_port"],

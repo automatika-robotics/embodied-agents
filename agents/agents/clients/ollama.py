@@ -31,7 +31,7 @@ class OllamaClient(ModelClient):
                 "In order to use the OllamaClient, you need ollama-python package installed. You can install it with 'pip install ollama'"
             ) from e
 
-        if not isinstance(model, OllamaModel):
+        if not isinstance(model, OllamaModel) and model["model_type"] != "OllamaModel":
             raise TypeError("OllamaClient can only be used with an OllamaModel")
 
         super().__init__(
@@ -79,7 +79,9 @@ class OllamaClient(ModelClient):
                     f"Could not pull model {self.model_init_params['checkpoint']}"
                 )
             # load model in memory with empty request
-            if self.model_name == "embed":  # Internal embeddings model name
+            if (
+                self.model_name == "internal_ollama_embeddings"
+            ):  # Internal embeddings model name
                 self.client.embed(
                     model=self.model_init_params["checkpoint"], keep_alive=10
                 )
@@ -92,7 +94,9 @@ class OllamaClient(ModelClient):
                 f"Failed to initialize model {self.model_init_params['checkpoint']} on Ollama, please ensure that the checkpoint name is correct. Received the following error: {e}"
             )
             raise
-        self.logger.info(f"{self.model_name} model initialized")
+        self.logger.info(
+            f"{self.model_name} with {self.model_init_params['checkpoint']} model initialized"
+        )
 
     def _inference(
         self, inference_input: Dict[str, Any]
