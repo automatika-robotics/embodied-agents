@@ -1,6 +1,6 @@
 # Create a spatio-temporal semantic map
 
-Autonomous Mobile Robots (AMRs) keep a representation of their environment in the form of occupancy maps. One can layer semantic information on top of these occupancy maps and with the use of MLLMs one can even add answers to arbitrary questions about the environment to this map. In ROS Agents such maps can be created using vector databases which are specifically designed to store natural language data and retreive it based on natural language queries. Thus an embodied agent can keep a text based _spatio-temporal memory_, from which it can do retreival to answer questions or do spatial planning.
+Autonomous Mobile Robots (AMRs) keep a representation of their environment in the form of occupancy maps. One can layer semantic information on top of these occupancy maps and with the use of MLLMs one can even add answers to arbitrary questions about the environment to this map. In EmbodiedAgents such maps can be created using vector databases which are specifically designed to store natural language data and retreive it based on natural language queries. Thus an embodied agent can keep a text based _spatio-temporal memory_, from which it can do retreival to answer questions or do spatial planning.
 
 Here we will show an example of generating such a map using object detection information and questions answered by an MLLM. This map, of course can be made arbitrarily complex and robust by adding checks on the data being stored, however in our example we will keep things simple. Lets start by importing relevant components.
 
@@ -21,7 +21,7 @@ image0 = Topic(name="image_raw", msg_type="Image")
 detections_topic = Topic(name="detections", msg_type="Detections")
 ```
 
-Additionally the component requiers a model client with an object detection model. We will use the RESP client for RoboML and use the VisionModel a convenient model class made available in ROS Agents, for initializing all vision models available in the opensource [mmdetection](https://github.com/open-mmlab/mmdetection) library. We will specify the model we want to use by specifying the checkpoint attribute.
+Additionally the component requiers a model client with an object detection model. We will use the RESP client for RoboML and use the VisionModel a convenient model class made available in EmbodiedAgents, for initializing all vision models available in the opensource [mmdetection](https://github.com/open-mmlab/mmdetection) library. We will specify the model we want to use by specifying the checkpoint attribute.
 
 ```{note}
 Learn about setting up RoboML with vision [here](https://www.github.com/automatika-robotics/roboml).
@@ -29,13 +29,13 @@ Learn about setting up RoboML with vision [here](https://www.github.com/automati
 
 ```python
 from agents.models import VisionModel
-from agents.clients.roboml import RESPModelClient
+from agents.clients.roboml import RoboMLRESPClient
 from agents.config import VisionConfig
 
 # Add an object detection model
 object_detection = VisionModel(name="object_detection",
                                checkpoint="dino-4scale_r50_8xb2-12e_coco")
-roboml_detection = RESPModelClient(object_detection)
+roboml_detection = RoboMLRESPClient(object_detection)
 
 # Initialize the Vision component
 detection_config = VisionConfig(threshold=0.5)
@@ -53,15 +53,15 @@ The vision component will provide us with semantic information to add to our map
 
 ## Setting up an MLLM Component
 
-With large scale multimodal LLMs we can ask higher level introspective questions about the sensor information the robot is receiving and record this information on our spatio-temporal map. As an example we will setup an MLLM component that periodically asks itself the same question, about the nature of the space the robot is present iin. In order to acheive this we will use two concepts. First is that of a **FixedInput**, a simulated Topic that has a fixed value whenever it is read by a listener. And the second is that of a _timed_ component. In ROS Agents, components can get triggered by either an input received on a Topic or automatically after a certain period of time. This latter trigger specifies a timed component. Lets see what all of this looks like in code.
+With large scale multimodal LLMs we can ask higher level introspective questions about the sensor information the robot is receiving and record this information on our spatio-temporal map. As an example we will setup an MLLM component that periodically asks itself the same question, about the nature of the space the robot is present iin. In order to acheive this we will use two concepts. First is that of a **FixedInput**, a simulated Topic that has a fixed value whenever it is read by a listener. And the second is that of a _timed_ component. In EmbodiedAgents, components can get triggered by either an input received on a Topic or automatically after a certain period of time. This latter trigger specifies a timed component. Lets see what all of this looks like in code.
 
 ```python
-from agents.clients.ollama import OllamaClient
-from agents.models import Llava
+from agents.clients import OllamaClient
+from agents.models import OllamaModel
 from agents.ros import FixedInput
 
 # Define a model client (working with Ollama in this case)
-llava = Llava(name="llava")
+llava = OllamaModel(name="llava", checkpoint="llava:latest")
 llava_client = OllamaClient(llava)
 
 # Define a fixed input for the component
@@ -82,7 +82,7 @@ introspector = MLLM(
 )
 ```
 
-LLM/MLLM model outputs can be unpredictable. Before publishing the answer of our question to the output topic, we want to ensure that the model has indeed provided a one word answer, and this answer is one of the expected choices. ROS Agents allows us to add arbitrary pre-processor functions to data that is going to be published (Conversely, we can also add post-processing functions to data that has been received in a listeners callback, but we will see that in another example). We will add a simple pre-processing function to our output topic as follows:
+LLM/MLLM model outputs can be unpredictable. Before publishing the answer of our question to the output topic, we want to ensure that the model has indeed provided a one word answer, and this answer is one of the expected choices. EmbodiedAgents allows us to add arbitrary pre-processor functions to data that is going to be published (Conversely, we can also add post-processing functions to data that has been received in a listeners callback, but we will see that in another example). We will add a simple pre-processing function to our output topic as follows:
 
 ```python
 # Define an arbitrary function to validate the output of the introspective component
@@ -101,7 +101,7 @@ This should ensure that our component only publishes the model output to this to
 
 ## Creating a Semantic Map as a Vector DB
 
-The final step is to store the output of our models in a spatio-temporal map. ROS Agents provides a MapEncoding component that takes input data being published by other components and appropriately stores them in a vector DB. The input to a MapEncoding component is in the form of map layers. A _MapLayer_ is a thin abstraction over _Topic_, with certain additional parameters. We will create our map layers as follows:
+The final step is to store the output of our models in a spatio-temporal map. EmbodiedAgents provides a MapEncoding component that takes input data being published by other components and appropriately stores them in a vector DB. The input to a MapEncoding component is in the form of map layers. A _MapLayer_ is a thin abstraction over _Topic_, with certain additional parameters. We will create our map layers as follows:
 
 ```python
 from agents.ros import MapLayer
@@ -134,12 +134,12 @@ Checkout Chroma DB [here](https://trychroma.com).
 
 ```python
 from agents.vectordbs import ChromaDB
-from agents.clients.roboml import HTTPDBClient
+from agents.clients import ChromaClient
 from agents.config import MapConfig
 
 # Initialize a vector DB that will store our semantic map
-chroma = ChromaDB(name="MainDB")
-chroma_client = HTTPDBClient(db=chroma)
+chroma = ChromaDB()
+chroma_client = ChromaClient(db=chroma)
 
 # Create the map component
 map_conf = MapConfig(map_name="map")  # We give our map a name
@@ -176,9 +176,8 @@ And that is it. We have created our spatio-temporal semantic map using the outpu
 :linenos:
 from typing import Optional
 from agents.components import MapEncoding, Vision, MLLM
-from agents.models import VisionModel, Llava
-from agents.clients.roboml import RESPModelClient, HTTPDBClient
-from agents.clients.ollama import OllamaClient
+from agents.models import VisionModel, OllamaModel
+from agents.clients import RoboMLRESPClient, ChromaClient, OllamaClient
 from agents.ros import Topic, MapLayer, Launcher, FixedInput
 from agents.vectordbs import ChromaDB
 from agents.config import MapConfig, VisionConfig
@@ -189,9 +188,10 @@ image0 = Topic(name="image_raw", msg_type="Image")
 detections_topic = Topic(name="detections", msg_type="Detections")
 
 # Add an object detection model
-object_detection = VisionModel(name="object_detection",
-                               checkpoint="dino-4scale_r50_8xb2-12e_coco")
-roboml_detection = RESPModelClient(object_detection)
+object_detection = VisionModel(
+    name="object_detection", checkpoint="dino-4scale_r50_8xb2-12e_coco"
+)
+roboml_detection = RoboMLRESPClient(object_detection)
 
 # Initialize the Vision component
 detection_config = VisionConfig(threshold=0.5)
@@ -206,14 +206,15 @@ vision = Vision(
 
 
 # Define a model client (working with Ollama in this case)
-llava = Llava(name="llava")
+llava = OllamaModel(name="llava", checkpoint="llava:latest")
 llava_client = OllamaClient(llava)
-
 
 # Define a fixed input for the component
 introspection_query = FixedInput(
-    name="introspection_query", msg_type="String",
-    fixed="What kind of a room is this? Is it an office, a bedroom or a kitchen? Give a one word answer, out of the given choices")
+    name="introspection_query",
+    msg_type="String",
+    fixed="What kind of a room is this? Is it an office, a bedroom or a kitchen? Give a one word answer, out of the given choices",
+)
 # Define output of the component
 introspection_answer = Topic(name="introspection_answer", msg_type="String")
 
@@ -226,6 +227,7 @@ introspector = MLLM(
     trigger=15.0,  # we provide the time interval as a float value to the trigger parameter
     component_name="introspector",
 )
+
 
 # Define an arbitrary function to validate the output of the introspective component
 # before publication.
@@ -247,8 +249,8 @@ position = Topic(name="odom", msg_type="Odometry")
 map_topic = Topic(name="map", msg_type="OccupancyGrid")
 
 # Initialize a vector DB that will store our semantic map
-chroma = ChromaDB(name="MainDB")
-chroma_client = HTTPDBClient(db=chroma)
+chroma = ChromaDB()
+chroma_client = ChromaClient(db=chroma)
 
 # Create the map component
 map_conf = MapConfig(map_name="map")  # We give our map a name

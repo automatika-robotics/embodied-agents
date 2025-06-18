@@ -1,6 +1,6 @@
 # Create a semantic router to route text queries between different components
 
-While semantic routing can be implemented with an LLM component, ROS Agents also provides a convenient SemanticRouter component that works directly with text encoding distances and can be utilized with a vector DB.
+While semantic routing can be implemented with an LLM component, EmbodiedAgents also provides a convenient SemanticRouter component that works directly with text encoding distances and can be utilized with a vector DB.
 
 In this example we will use the SemanticRouter component to route text queries between two components, a general purpose LLM and a Go-to-X component that we built in the previous [example](goto.md). Lets start by setting up our components.
 
@@ -9,26 +9,35 @@ In this example we will use the SemanticRouter component to route text queries b
 In the following code snippet we will setup our two components.
 
 ```python
-from agents.components import LLM
-from agents.clients.ollama import OllamaClient
-from agents.clients.roboml import HTTPModelClient
-from agents.models import Idefics2, Llama3_1
-from agents.config import LLMConfig
-from agents.ros import Topic
+from typing import Optional
+import json
+import numpy as np
+from agents.components import LLM, SemanticRouter
+from agents.models import OllamaModel
+from agents.vectordbs import ChromaDB
+from agents.config import LLMConfig, SemanticRouterConfig
+from agents.clients import ChromaClient, OllamaClient
+from agents.ros import Launcher, Topic, Route
 
-# Create a llama3.1 client using Ollama
-llama = Llama3_1(name="llama")
-ollama_client = OllamaClient(llama)
+# Start a Llama3.1 based llm component using ollama client
+llama = OllamaModel(name="llama", checkpoint="llama3.2:3b")
+llama_client = OllamaClient(llama)
+
+# Initialize a vector DB that will store our routes
+chroma = ChromaDB()
+chroma_client = ChromaClient(db=chroma)
+
 
 # Make a generic LLM component using the Llama3_1 model
-llm_in = Topic(name="llm_in", msg_type="String")
-llm_out = Topic(name="llm_out", msg_type="String")
+llm_in = Topic(name="text_in_llm", msg_type="String")
+llm_out = Topic(name="text_out_llm", msg_type="String")
 
 llm = LLM(
     inputs=[llm_in],
     outputs=[llm_out],
     model_client=llama_client,
-    trigger=[llm_in],
+    trigger=llm_in,
+    component_name="generic_llm",
 )
 
 # Make a Go-to-X component using the same Llama3_1 model
@@ -135,32 +144,31 @@ from typing import Optional
 import json
 import numpy as np
 from agents.components import LLM, SemanticRouter
-from agents.models import Llama3_1
+from agents.models import OllamaModel
 from agents.vectordbs import ChromaDB
 from agents.config import LLMConfig, SemanticRouterConfig
-from agents.clients.roboml import HTTPDBClient
-from agents.clients.ollama import OllamaClient
+from agents.clients import ChromaClient, OllamaClient
 from agents.ros import Launcher, Topic, Route
 
-
 # Start a Llama3.1 based llm component using ollama client
-llama = Llama3_1(name="llama")
+llama = OllamaModel(name="llama", checkpoint="llama3.2:3b")
 llama_client = OllamaClient(llama)
 
 # Initialize a vector DB that will store our routes
-chroma = ChromaDB(name="MainDB")
-chroma_client = HTTPDBClient(db=chroma)
+chroma = ChromaDB()
+chroma_client = ChromaClient(db=chroma)
 
 
 # Make a generic LLM component using the Llama3_1 model
-llm_in = Topic(name="llm_in", msg_type="String")
-llm_out = Topic(name="llm_out", msg_type="String")
+llm_in = Topic(name="text_in_llm", msg_type="String")
+llm_out = Topic(name="text_out_llm", msg_type="String")
 
 llm = LLM(
     inputs=[llm_in],
     outputs=[llm_out],
     model_client=llama_client,
-    trigger=llm_in
+    trigger=llm_in,
+    component_name="generic_llm",
 )
 
 
@@ -168,11 +176,13 @@ llm = LLM(
 goto_in = Topic(name="goto_in", msg_type="String")
 goal_point = Topic(name="goal_point", msg_type="PoseStamped")
 
-config = LLMConfig(enable_rag=True,
-                   collection_name="map",
-                   distance_func="l2",
-                   n_results=1,
-                   add_metadata=True)
+config = LLMConfig(
+    enable_rag=True,
+    collection_name="map",
+    distance_func="l2",
+    n_results=1,
+    add_metadata=True,
+)
 
 # initialize the component
 goto = LLM(
@@ -182,7 +192,7 @@ goto = LLM(
     db_client=chroma_client,  # check the previous example where we setup this database client
     trigger=goto_in,
     config=config,
-    component_name='go_to_x'
+    component_name="go_to_x",
 )
 
 # set a component prompt
@@ -196,13 +206,13 @@ goto.set_component_prompt(
 def llm_answer_to_goal_point(output: str) -> Optional[np.ndarray]:
     # extract the json part of the output string (including brackets)
     # one can use sophisticated regex parsing here but we'll keep it simple
-    json_string = output[output.find("{"):output.find("}") + 1]
+    json_string = output[output.find("{") : output.find("}") + 1]
 
     # load the string as a json and extract position coordinates
     # if there is an error, return None, i.e. no output would be published to goal_point
     try:
         json_dict = json.loads(json_string)
-        return np.array(json_dict['position'])
+        return np.array(json_dict["position"])
     except Exception:
         return
 
@@ -214,14 +224,28 @@ goto.add_publisher_preprocessor(goal_point, llm_answer_to_goal_point)
 query_topic = Topic(name="question", msg_type="String")
 
 # Define a route to a topic that processes go-to-x commands
-goto_route = Route(routes_to=goto_in,
-    samples=["Go to the door", "Go to the kitchen",
-        "Get me a glass", "Fetch a ball", "Go to hallway"])
+goto_route = Route(
+    routes_to=goto_in,
+    samples=[
+        "Go to the door",
+        "Go to the kitchen",
+        "Get me a glass",
+        "Fetch a ball",
+        "Go to hallway",
+    ],
+)
 
 # Define a route to a topic that is input to an LLM component
-llm_route = Route(routes_to=llm_in,
-    samples=["What is the capital of France?", "Is there life on Mars?",
-        "How many tablespoons in a cup?", "How are you today?", "Whats up?"])
+llm_route = Route(
+    routes_to=llm_in,
+    samples=[
+        "What is the capital of France?",
+        "Is there life on Mars?",
+        "How many tablespoons in a cup?",
+        "How are you today?",
+        "Whats up?",
+    ],
+)
 
 router_config = SemanticRouterConfig(router_name="go-to-router", distance_func="l2")
 # Initialize the router component
@@ -236,8 +260,6 @@ router = SemanticRouter(
 
 # Launch the components
 launcher = Launcher()
-launcher.add_pkg(
-    components=[llm, goto, router]
-    )
+launcher.add_pkg(components=[llm, goto, router])
 launcher.bringup()
 ```

@@ -1,0 +1,311 @@
+#!/usr/bin/env python3
+import json
+import argparse
+from typing import List, Dict, Union, Tuple
+
+import rclpy
+import setproctitle
+from rclpy.executors import MultiThreadedExecutor
+from rclpy.utilities import try_shutdown
+
+from agents import config as all_configs
+from agents import components as all_components
+from agents import clients
+from agents.ros import Topic, FixedInput, MapLayer, Route
+
+
+def _parse_args() -> Tuple[argparse.Namespace, List[str]]:
+    """Parse arguments."""
+    parser = argparse.ArgumentParser(description="Component Executable Config")
+    parser.add_argument(
+        "--config_type", type=str, help="Component configuration class name"
+    )
+    parser.add_argument("--component_type", type=str, help="Component class name")
+    parser.add_argument(
+        "--node_name",
+        type=str,
+        help="Component ROS2 node name",
+    )
+    parser.add_argument("--config", type=str, help="Component configuration object")
+    parser.add_argument(
+        "--inputs",
+        type=str,
+        help="Component input topics",
+    )
+    parser.add_argument(
+        "--outputs",
+        type=str,
+        help="Component output topics",
+    )
+    parser.add_argument(
+        "--routes",
+        type=str,
+        help="Semantic router routes",
+    )
+    parser.add_argument(
+        "--layers",
+        type=str,
+        help="Map Encoding layers",
+    )
+    parser.add_argument(
+        "--trigger",
+        type=str,
+        help="Component trigger",
+    )
+    parser.add_argument(
+        "--model_client",
+        type=str,
+        help="Model Client",
+    )
+    parser.add_argument(
+        "--db_client",
+        type=str,
+        help="DB Client",
+    )
+    parser.add_argument(
+        "--config_file", type=str, help="Path to configuration YAML file"
+    )
+    parser.add_argument(
+        "--events", type=str, help="Events to be monitored by the component"
+    )
+    parser.add_argument(
+        "--actions", type=str, help="Actions associated with the component Events"
+    )
+    parser.add_argument(
+        "--external_processors",
+        type=str,
+        help="External processors associated with the component input and output topics",
+    )
+    return parser.parse_known_args()
+
+
+def _parse_component_config(
+    args: argparse.Namespace,
+) -> all_configs.BaseComponentConfig:
+    """Parse the component config object
+
+    :param args: Command line arguments
+    :type args: argparse.Namespace
+
+    :return: Component config object
+    :rtype: object
+    """
+    config_type = args.config_type or None
+    if not config_type:
+        raise ValueError("config_type must be provided")
+
+    # Get config type and update from json arg
+    config_class = getattr(all_configs, config_type)
+    if not config_class:
+        raise TypeError(
+            f"Unknown config_type '{config_type}'. Known types are {all_configs.__all__}"
+        )
+
+    config = config_class(**json.loads(args.config))
+
+    return config
+
+
+def _parse_trigger(trigger_str: str) -> Union[Topic, List[Topic], float]:
+    """Parse component trigger json string
+
+    :param trigger_str: Trigger JSON string
+    :type trigger_str: str
+
+    :return: Trigger topics or float
+    :rtype: Topic | List[Topic] | float
+    """
+    trigger_json = json.loads(trigger_str)
+    if isinstance(trigger_json, List):
+        return [Topic(**json.loads(t)) for t in trigger_json]
+    elif isinstance(trigger_json, Dict):
+        return Topic(**trigger_json)
+    else:
+        # return float
+        return trigger_json
+
+
+def _deserialize_topics(serialized_topics: str) -> List[Dict]:
+    list_of_str = json.loads(serialized_topics)
+    return [json.loads(t) for t in list_of_str]
+
+
+def _parse_ros_args(args_names: List[str]) -> List[str]:
+    """Parse ROS arguments from command line arguments
+
+    :param args_names: List of all parsed arguments
+    :type args_names: list[str]
+
+    :return: List ROS parsed arguments
+    :rtype: list[str]
+    """
+    # Look for --ros-args in ros_args
+    ros_args_start = None
+    if "--ros-args" in args_names:
+        ros_args_start = args_names.index("--ros-args")
+
+    if ros_args_start is not None:
+        ros_specific_args = args_names[ros_args_start:]
+    else:
+        ros_specific_args = []
+    return ros_specific_args
+
+
+def main():
+    """Executable main function to run a component as a ROS2 node in a new process.
+    Used to start a node using Sugarcoat Launcher. Extends functionality from ROS Sugar
+
+    :param list_of_components: List of all known Component classes in the package
+    :type list_of_components: List[Type]
+    :param list_of_configs: List of all known ComponentConfig classes in the package
+    :type list_of_configs: List[Type]
+    :raises ValueError: If component or component config are unknown classes
+    :raises ValueError: If component cannot be started with provided arguments
+    """
+    args, args_names = _parse_args()
+
+    # Initialize rclpy with the ros-specific arguments
+    rclpy.init(args=_parse_ros_args(args_names))
+
+    component_type = args.component_type or None
+
+    if not component_type:
+        raise ValueError("Cannot launch without providing a component_type")
+
+    comp_class = getattr(all_components, component_type)
+
+    if not comp_class:
+        raise ValueError(
+            f"Cannot launch unknown component type '{component_type}'. Known types are: '{all_components.__all__}'"
+        )
+
+    # Get name
+    component_name = args.node_name or None
+
+    if not component_name:
+        raise ValueError("Cannot launch component without specifying a name")
+
+    # SET PROCESS NAME
+    setproctitle.setproctitle(component_name)
+
+    config = _parse_component_config(args)
+
+    # Get Yaml config file if provided
+    config_file = args.config_file or None
+
+    # Get inputs/outputs/layers/routes
+    inputs = (
+        [
+            FixedInput(**i) if i.get("fixed") else Topic(**i)
+            for i in _deserialize_topics(args.inputs)
+        ]
+        if args.inputs
+        else None
+    )
+    outputs = (
+        [Topic(**o) for o in _deserialize_topics(args.outputs)]
+        if args.outputs
+        else None
+    )
+    layers = (
+        [MapLayer(**i) for i in _deserialize_topics(args.layers)]
+        if args.layers
+        else None
+    )
+    routes = (
+        [Route(**r) for r in _deserialize_topics(args.routes)] if args.routes else None
+    )
+
+    # Get triggers
+    trigger = _parse_trigger(args.trigger)
+
+    # Init the component
+    # Semantic Router Component
+    if component_type == all_components.SemanticRouter.__name__:
+        db_client_json = json.loads(args.db_client)
+        db_client = getattr(clients, db_client_json["client_type"])(**db_client_json)
+        component = comp_class(
+            inputs=inputs,
+            routes=routes,
+            db_client=db_client,
+            config=config,
+            default_route=config._default_route,
+            component_name=component_name,
+            config_file=config_file,
+        )
+    # Map Encoding Component
+    elif component_type == all_components.MapEncoding.__name__:
+        db_client_json = json.loads(args.db_client)
+        db_client = getattr(clients, db_client_json["client_type"])(**db_client_json)
+        component = comp_class(
+            layers=layers,
+            position=config._position,
+            map_topic=config._map_topic,
+            db_client=db_client,
+            config=config,
+            trigger=trigger,
+            component_name=component_name,
+            config_file=config_file,
+        )
+
+    # All other components
+    else:
+        if args.model_client:
+            model_client_json = json.loads(args.model_client)
+            model_client = getattr(clients, model_client_json["client_type"])(
+                **model_client_json
+            )
+        else:
+            model_client = None
+        if args.db_client:
+            db_client_json = json.loads(args.db_client)
+            db_client = getattr(clients, db_client_json["client_type"])(
+                **db_client_json
+            )
+        else:
+            db_client = None
+
+        component = comp_class(
+            inputs=inputs,
+            outputs=outputs,
+            model_client=model_client,
+            db_client=db_client,
+            trigger=trigger,
+            config=config,
+            component_name=component_name,
+            config_file=config_file,
+        )
+
+    # Init the node with rclpy
+    component.rclpy_init_node()
+
+    # Set events/actions
+    events_json = args.events or None
+    actions_json = args.actions or None
+
+    if events_json and actions_json:
+        component._events_json = events_json
+        component._actions_json = actions_json
+
+    # Set external processors
+    external_processors = args.external_processors or None
+    if external_processors:
+        component._external_processors_json = external_processors
+
+    executor = MultiThreadedExecutor()
+
+    executor.add_node(component)
+
+    try:
+        executor.spin()
+
+    except KeyboardInterrupt:
+        pass
+
+    finally:
+        executor.remove_node(component)
+        try_shutdown()
+
+
+if __name__ == "__main__":
+    main()

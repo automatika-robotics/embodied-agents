@@ -1,5 +1,5 @@
 ---
-title: ROS Agents Documentation
+title: EmbodiedAgents Documentation
 ---
 
 

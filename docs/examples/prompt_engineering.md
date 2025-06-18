@@ -6,7 +6,7 @@ from agents.components import Vision, MLLM
 ```
 
 ## Setting up the Object Detection Component
-For object detection and tracking, ROS Agents provides a unified Vision component. This component takes as input an image topic published by a camera device onboard our robot. The output of this component can be a _detections_ topic in case of object detection or a _trackings_ topic in case of object tracking. In this example we will use a _detections_ topic.
+For object detection and tracking, EmbodiedAgents provides a unified Vision component. This component takes as input an image topic published by a camera device onboard our robot. The output of this component can be a _detections_ topic in case of object detection or a _trackings_ topic in case of object tracking. In this example we will use a _detections_ topic.
 
 ```python
 from agents.ros import Topic
@@ -16,7 +16,7 @@ image0 = Topic(name="image_raw", msg_type="Image")
 # Create a detection topic
 detections_topic = Topic(name="detections", msg_type="Detections")
 ```
-Additionally the component requiers a model client with an object detection model. We will use the RESP client for RoboML and use the VisionModel a convenient model class made available in ROS Agents, for initializing all vision models available in the opensource [mmdetection](https://github.com/open-mmlab/mmdetection) library. We will specify the model we want to use by specifying the checkpoint attribute.
+Additionally the component requiers a model client with an object detection model. We will use the RESP client for RoboML and use the VisionModel a convenient model class made available in EmbodiedAgents, for initializing all vision models available in the opensource [mmdetection](https://github.com/open-mmlab/mmdetection) library. We will specify the model we want to use by specifying the checkpoint attribute.
 
 ```{note}
 Learn about setting up RoboML with vision [here](https://github.com/automatika-robotics/roboml/blob/main/README.md#for-vision-models-support).
@@ -27,13 +27,13 @@ Checkout all available mmdetection models and their benchmarking results in the 
 
 ```python
 from agents.models import VisionModel
-from agents.clients.roboml import RESPModelClient, HTTPModelClient
+from agents.clients import RoboMLRESPClient, RoboMLHTTPClient
 from agents.config import VisionConfig
 
 # Add an object detection model
 object_detection = VisionModel(name="object_detection",
                                checkpoint="dino-4scale_r50_8xb2-12e_coco")
-roboml_detection = RESPModelClient(object_detection)
+roboml_detection = RoboMLRESPClient(object_detection)
 
 # Initialize the Vision component
 detection_config = VisionConfig(threshold=0.5)
@@ -56,15 +56,15 @@ Notice that we passed in an option config to the component. Component configs ca
 For the MLLM component, we will provide an additional text input topic, which will listen to our queries. The output of the component will be another text topic. We will use the RoboML HTTP client with the multimodal LLM Idefics2 by the good folks at HuggingFace for this example.
 
 ```python
-from agents.models import Idefics2
+from agents.models import TransformersMLLM
 
 # Define MLLM input and output text topics
 text_query = Topic(name="text0", msg_type="String")
 text_answer = Topic(name="text1", msg_type="String")
 
 # Define a model client (working with roboml in this case)
-idefics = Idefics2(name="idefics_model")
-idefics_client = HTTPModelClient(idefics)
+idefics = TransformersMLLM(name="idefics_model", checkpoint="HuggingFaceM4/idefics2-8b")
+idefics_client = RoboMLHTTPClient(idefics)
 
 # Define an MLLM component
 # We can pass in the detections topic which we defined previously directy as an optional input
@@ -110,17 +110,18 @@ And there we have it. Complete code of this example is provided below.
 :caption: Prompt Engineering with Object Detection
 :linenos:
 from agents.components import Vision, MLLM
-from agents.models import VisionModel, Idefics2
-from agents.clients.roboml import RESPModelClient, HTTPModelClient
-from agents.config import VisionConfig
+from agents.models import VisionModel, TransformersMLLM
+from agents.clients import RoboMLRESPClient, RoboMLHTTPClient
 from agents.ros import Topic, Launcher
+from agents.config import VisionConfig
 
 image0 = Topic(name="image_raw", msg_type="Image")
 detections_topic = Topic(name="detections", msg_type="Detections")
 
-object_detection = VisionModel(name="object_detection",
-                               checkpoint="dino-4scale_r50_8xb2-12e_coco")
-roboml_detection = RESPModelClient(object_detection)
+object_detection = VisionModel(
+    name="object_detection", checkpoint="dino-4scale_r50_8xb2-12e_coco"
+)
+roboml_detection = RoboMLRESPClient(object_detection)
 
 detection_config = VisionConfig(threshold=0.5)
 vision = Vision(
@@ -135,8 +136,8 @@ vision = Vision(
 text_query = Topic(name="text0", msg_type="String")
 text_answer = Topic(name="text1", msg_type="String")
 
-idefics = Idefics2(name="idefics_model")
-idefics_client = HTTPModelClient(idefics)
+idefics = TransformersMLLM(name="idefics_model", checkpoint="HuggingFaceM4/idefics2-8b")
+idefics_client = RoboMLHTTPClient(idefics)
 
 mllm = MLLM(
     inputs=[text_query, image0, detections_topic],

@@ -75,20 +75,19 @@ The complete code for this example is given below:
 :linenos:
 import numpy as np
 from agents.components import LLM
-from agents.models import Llama3_1
+from agents.models import OllamaModel
 from agents.vectordbs import ChromaDB
 from agents.config import LLMConfig
-from agents.clients.roboml import HTTPDBClient
-from agents.clients.ollama import OllamaClient
+from agents.clients import ChromaClient, OllamaClient
 from agents.ros import Launcher, Topic
 
 # Start a Llama3.1 based llm component using ollama client
-llama = Llama3_1(name="llama")
+llama = OllamaModel(name="llama", checkpoint="llama3.2:3b")
 llama_client = OllamaClient(llama)
 
 # Initialize a vector DB that will store our routes
-chroma = ChromaDB(name="MainDB")
-chroma_client = HTTPDBClient(db=chroma)
+chroma = ChromaDB()
+chroma_client = ChromaClient(db=chroma)
 
 # Define LLM input and output topics including goal_point topic of type PoseStamped
 goto_in = Topic(name="goto_in", msg_type="String")

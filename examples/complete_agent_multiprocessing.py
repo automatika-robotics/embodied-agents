@@ -11,9 +11,10 @@ from agents.components import (
     SemanticRouter,
 )
 from agents.config import TextToSpeechConfig
-from agents.clients.roboml import HTTPModelClient, RESPModelClient, HTTPDBClient
-from agents.clients.ollama import OllamaClient
-from agents.models import Whisper, SpeechT5, Llava, Llama3_1, VisionModel
+from agents.clients import RoboMLHTTPClient, RoboMLRESPClient
+from agents.clients import ChromaClient
+from agents.clients import OllamaClient
+from agents.models import Whisper, SpeechT5, VisionModel, OllamaModel
 from agents.vectordbs import ChromaDB
 from agents.config import VisionConfig, LLMConfig, MapConfig, SemanticRouterConfig
 from agents.ros import Topic, Launcher, FixedInput, MapLayer, Route
@@ -21,19 +22,19 @@ from agents.ros import Topic, Launcher, FixedInput, MapLayer, Route
 
 ### Setup our models and vectordb ###
 whisper = Whisper(name="whisper")
-whisper_client = HTTPModelClient(whisper)
+whisper_client = RoboMLHTTPClient(whisper)
 speecht5 = SpeechT5(name="speecht5")
-speecht5_client = HTTPModelClient(speecht5)
+speecht5_client = RoboMLHTTPClient(speecht5)
 object_detection_model = VisionModel(
     name="dino_4scale", checkpoint="dino-4scale_r50_8xb2-12e_coco"
 )
-detection_client = RESPModelClient(object_detection_model)
-llava = Llava(name="llava")
+detection_client = RoboMLRESPClient(object_detection_model)
+llava = OllamaModel(name="llava", checkpoint="llava:latest")
 llava_client = OllamaClient(llava)
-llama = Llama3_1(name="llama")
+llama = OllamaModel(name="llama", checkpoint="llama3.2:3b")
 llama_client = OllamaClient(llama)
-chroma = ChromaDB(name="MainDB")
-chroma_client = HTTPDBClient(db=chroma)
+chroma = ChromaDB()
+chroma_client = ChromaClient(db=chroma)
 
 ### Setup our components ###
 # Setup a speech to text component

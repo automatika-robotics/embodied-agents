@@ -1,18 +1,18 @@
 # Create a Go-to-X component using map data
 
-In the previous [example](semantic_map.md) we created a semantic map using the MapEncoding component. Intuitively one can imagine that using the map data would require some form of RAG. Let us suppose that we want to create a Go-to-X component, which, when given a command like 'Go to the yellow door', would retreive the coordinates of the _yellow door_ from the map and publish them to a goal point topic of type _PoseStamped_ to be handled by our robots navigation system. We will create our Go-to-X component using the LLM component provided by ROS Agents. We will start by initializing the component, and configuring it to use RAG.
+In the previous [example](semantic_map.md) we created a semantic map using the MapEncoding component. Intuitively one can imagine that using the map data would require some form of RAG. Let us suppose that we want to create a Go-to-X component, which, when given a command like 'Go to the yellow door', would retreive the coordinates of the _yellow door_ from the map and publish them to a goal point topic of type _PoseStamped_ to be handled by our robots navigation system. We will create our Go-to-X component using the LLM component provided by EmbodiedAgents. We will start by initializing the component, and configuring it to use RAG.
 
 ## Initialize the component
 
 ```python
 from agents.components import LLM
-from agents.models import Llama3_1
+from agents.models import OllamaModel
 from agents.config import LLMConfig
-from agents.clients.ollama import OllamaClient
-from agents.ros import Topic
+from agents.clients import OllamaClient
+from agents.ros import Launcher, Topic
 
 # Start a Llama3.1 based llm component using ollama client
-llama = Llama3_1(name="llama")
+llama = OllamaModel(name="llama", checkpoint="llama3.2:3b")
 llama_client = OllamaClient(llama)
 
 # Define LLM input and output topics including goal_point topic of type PoseStamped
@@ -129,20 +129,19 @@ from typing import Optional
 import json
 import numpy as np
 from agents.components import LLM
-from agents.models import Llama3_1
+from agents.models import OllamaModel
 from agents.vectordbs import ChromaDB
 from agents.config import LLMConfig
-from agents.clients.roboml import HTTPDBClient
-from agents.clients.ollama import OllamaClient
+from agents.clients import ChromaClient, OllamaClient
 from agents.ros import Launcher, Topic
 
 # Start a Llama3.1 based llm component using ollama client
-llama = Llama3_1(name="llama")
+llama = OllamaModel(name="llama", checkpoint="llama3.2:3b")
 llama_client = OllamaClient(llama)
 
 # Initialize a vector DB that will store our routes
-chroma = ChromaDB(name="MainDB")
-chroma_client = HTTPDBClient(db=chroma)
+chroma = ChromaDB()
+chroma_client = ChromaClient(db=chroma)
 
 # Define LLM input and output topics including goal_point topic of type PoseStamped
 goto_in = Topic(name="goto_in", msg_type="String")
