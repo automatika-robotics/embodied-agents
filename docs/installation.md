@@ -20,9 +20,13 @@ Install python dependencies using pip as follows:
 
 `pip install 'attrs>=23.2.0' numpy-quaternion`
 
-For ROS versions >= 'humble', you can install EmbodiedAgents with your package manager. For example on Ubuntu:
+For ROS versions >= 'jazzy', you can install EmbodiedAgents with your package manager. For example on Ubuntu:
 
 `sudo apt install ros-$ROS_DISTRO-automatika-embodied-agents`
+
+Alternatively, grab your favorite deb package from the [release page](https://github.com/automatika-robotics/sugarcoat/releases) and install it as follows:
+
+`sudo dpkg -i ros-$ROS_DISTRO-automatica-ros-sugar_$version$DISTRO_$ARCHITECTURE.deb`
 
 ## Install EmbodiedAgents from source
 
@@ -38,7 +42,7 @@ cd agents_ws/src
 Install python dependencies
 
 ```shell
-pip install numpy opencv-python-headless 'attrs>=23.2.0' jinja2 httpx setproctitle msgpack msgpack-numpy numpy-quaternion platformdirs tqdm
+pip install numpy opencv-python-headless 'attrs>=23.2.0' jinja2 httpx setproctitle msgpack msgpack-numpy numpy-quaternion platformdirs tqdm pyyaml toml
 ```
 
 Download Sugarcoat.

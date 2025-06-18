@@ -38,7 +38,7 @@ Install python dependencies using pip as follows:
 
 `pip install 'attrs>=23.2.0' numpy-quaternion`
 
-For ROS versions >= 'humble', you can install EmbodiedAgents with your package manager. For example on Ubuntu:
+For ROS versions >= 'jazzy', you can install EmbodiedAgents with your package manager. For example on Ubuntu:
 
 `sudo apt install ros-$ROS_DISTRO-automatika-embodied-agents`
 
