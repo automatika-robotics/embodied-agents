@@ -51,7 +51,7 @@ autodoc2_module_all_regexes = [
 ]
 
 templates_path = ["_templates"]
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "README*"]
 
 myst_enable_extensions = [
     "amsmath",
