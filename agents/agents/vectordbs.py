@@ -19,12 +19,14 @@ class DB(BaseAttrs):
     password: Optional[str] = field(default=None)
     init_timeout: int = field(default=600)  # 10 minutes
 
+    def get_init_params(self) -> Dict:
+        """Get init params from models"""
+        return self._get_init_params()
+
     def _get_init_params(self) -> Dict:
-        params = {
-            "username": self.username,
-            "password": self.password,
-        }
-        return params
+        raise NotImplementedError(
+            "This method needs to be implemented by vectordb definition classes"
+        )
 
 
 @define(kw_only=True)
@@ -85,5 +87,6 @@ class ChromaDB(DB):
             "checkpoint": self.checkpoint,
             "ollama_host": self.ollama_host,
             "ollama_port": self.ollama_port,
+            "init_timeout": self.init_timeout,
         }
         return params

@@ -27,9 +27,14 @@ class Model(BaseAttrs):
     checkpoint: str
     init_timeout: Optional[int] = field(default=None)
 
+    def get_init_params(self) -> Dict:
+        """Get init params from models"""
+        return self._get_init_params()
+
     def _get_init_params(self) -> Dict:
-        """Get init params for model initialization."""
-        return {"checkpoint": self.checkpoint}
+        raise NotImplementedError(
+            "This method needs to be implemented by model definition classes"
+        )
 
 
 @define(kw_only=True)
@@ -226,7 +231,7 @@ class Whisper(Model):
         validator=base_validators.in_(["int8", "float16", "float32", None]),
     )
 
-    def get_init_params(self) -> Dict:
+    def _get_init_params(self) -> Dict:
         """Get init params for model initialization."""
         return {"checkpoint": self.checkpoint, "compute_type": self.compute_type}
 
@@ -290,7 +295,7 @@ class Bark(Model):
     checkpoint: str = field(default="suno/bark-small")
     voice: str = field(default="v2/en_speaker_6")
 
-    def get_init_params(self) -> Dict:
+    def _get_init_params(self) -> Dict:
         """Get init params for model initialization."""
         return {
             "checkpoint": self.checkpoint,
@@ -320,7 +325,7 @@ class MeloTTS(Model):
     language: str = field(default="EN")
     speaker_id: str = field(default="EN-US")
 
-    def get_init_params(self) -> Dict:
+    def _get_init_params(self) -> Dict:
         """Get init params for model initialization."""
         return {
             "language": self.language,
