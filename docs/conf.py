@@ -5,7 +5,7 @@ from datetime import date
 import xml.etree.ElementTree as ET
 
 sys.path.insert(0, os.path.abspath(".."))
-version = ET.parse("../agents/package.xml").getroot()[1].text
+version = ET.parse("../package.xml").getroot()[1].text
 print("Found version:", version)
 
 project = "EmbodiedAgents"
