@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import json
 import argparse
-from typing import List, Dict, Union
+from typing import List, Dict, Union, Tuple
 
 import rclpy
 import setproctitle
@@ -14,7 +14,7 @@ from agents import clients
 from agents.ros import Topic, FixedInput, MapLayer, Route
 
 
-def _parse_args() -> tuple[argparse.Namespace, List[str]]:
+def _parse_args() -> Tuple[argparse.Namespace, List[str]]:
     """Parse arguments."""
     parser = argparse.ArgumentParser(description="Component Executable Config")
     parser.add_argument(
