@@ -24,7 +24,7 @@ extensions = [
 autodoc2_packages = [
     {
         "module": "agents",
-        "path": "../agents/agents",
+        "path": "../agents",
         "exclude_dirs": ["__pycache__", "utils"],
         "exclude_files": [
             "callbacks.py",
