@@ -23,10 +23,6 @@
   <member_of_group>rosidl_interface_packages</member_of_group>
 
   <test_depend>python3-pytest</test_depend>
-    <!-- ROS Dep based dependencies -->
-  <test_depend>python-attrs-pip</test_depend>
-  <test_depend>python-numpy-quaternion-pip</test_depend>
-
 
   <export>
     <build_type>ament_cmake</build_type>
