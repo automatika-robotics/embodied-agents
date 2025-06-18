@@ -2,8 +2,8 @@
 Changelog for package automatika_embodied_agents
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+0.4.0 (2025-06-18)
+------------------
 * (docs) Adds international readme files
 * (feature) Adds better connection error messages in clients, adds installation instructions
 * (chore) Adds debian packaging workflow
