@@ -2,6 +2,44 @@
 Changelog for package automatika_embodied_agents
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+* (docs) Adds international readme files
+* (feature) Adds better connection error messages in clients, adds installation instructions
+* (chore) Adds debian packaging workflow
+* (docs) Updates installation instructions
+* (chore) Updates package names .. ROS Agents -> EmbodiedAgents
+* (feature) Adds a GenericHTTPClient for using llm and mllm models served on any OpenAI compatible API
+* (feature) Adds ollama specific inference options to OllamaModel and client
+* (feature) Adds MeloTTS model to model definitions
+* (feature) Adds say text method to text to speech for invoking with events
+* (feature) Adds streaming playback for streaming input in speeech to text component
+* (fix) Fixes clearing old output in the vision component when getting subscription data in a timed manner
+* (feature) Adds tensorrt as an onnx provider option for local models
+* (refactor) Removes sounddevice as a dependancy for text to speech component
+* (feature) Adds local classification model for Vision component
+  Default model: DEIM: DETR with Improved Matching for Fast Convergence by Huang et al.
+* (feature) Adds warnings if device for local models is set to GPU and runtime is not available
+* (feature) Adds hypothesis buffer for publishing confirmed transcripts when using streaming
+* (feature) Adds asynchronous receiving for streaming websockets client in speech to text component
+* (refactor) Adds getting inference params just once during node configuration
+* (fix) Fixes handling of model init params and sending np arrays during inference
+* (feature) Adds asynchronous publishing of response in LLM component when streaming with websocket client
+* (feature) Adds local embeddings option using sentence-transformers to ChromaDB client
+* (feature) Adds ChromaDB http client with ollama embeddigs
+* (feature) Adds streaming with websocket client in llm component
+* (fix) Fixes error message for required topics when they can be either/or
+* (feature) Adds support for RGBD messages (in realsense style)
+* (feature) Adds async websocket client for roboml
+* (refactor) Marks child threads as daemons for smoother termination
+* (feature) Adds break_character to llm component config to handle breaking streaming output into chunks for publishing
+* (feature) Adds streaming to roboml http client for text data
+* (feature) Adds streaming output handling to ollama client
+* (refactor) Adds set_system_prompt to components and removes it from model config
+  The same model can be called with various system prompts by different components
+* (fix) Fixes typing bugs for for python 3.8 compatibility
+* Contributors: ahr, aleph-ra, mkabtoul
+
 0.3.3 (2025-01-28)
 ------------------
 * (fix) Removes python dependencies from package manifest until package names merged in rosdistro
