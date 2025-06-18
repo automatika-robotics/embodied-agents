@@ -77,7 +77,16 @@ class RoboMLHTTPClient(ModelClient):
         try:
             self.client.get("/").raise_for_status()
         except Exception as e:
-            self.__handle_exceptions(e)
+            self.logger.error(
+                f"""Failed to connect to RoboML server at {self.url} {e}
+
+                Make sure an RoboML is running on the given url by executing the following command:
+
+                `roboml --host {self.host} --port {self.port}`
+
+                To install RoboML, follow instructions on https://github.com/automatika-robotics/roboml?tab=readme-ov-file#installation
+                """
+            )
             raise
 
     def _initialize(self) -> None:
@@ -401,7 +410,16 @@ class RoboMLRESPClient(ModelClient):
         try:
             self.redis.execute_command(b"PING")
         except Exception as e:
-            self.__handle_exceptions(e)
+            self.logger.error(
+                f"""Failed to connect to RoboML resp server at {self.host}:{self.port} {e}
+
+                Make sure an RoboML is running on the given url by executing the following command:
+
+                `roboml-resp --host {self.host} --port {self.port}`
+
+                To install RoboML, follow instructions on https://github.com/automatika-robotics/roboml?tab=readme-ov-file#installation
+                """
+            )
             raise
 
     def _initialize(self) -> None:

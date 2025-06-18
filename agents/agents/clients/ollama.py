@@ -52,7 +52,17 @@ class OllamaClient(ModelClient):
         try:
             httpx.get(f"http://{self.host}:{self.port}").raise_for_status()
         except Exception as e:
-            self.logger.error(str(e))
+            self.logger.error(
+                f"""Failed to connect to Ollama server at {self.host}:{self.port} {e}
+
+                Make sure an Ollama is running on the given url by executing the following command:
+
+                `export OLLAMA_HOST={self.host}:{self.port}  # if not using default`
+                `ollama serve`
+
+                To install ollama, follow instructions on https://ollama.com/download
+                """
+            )
             raise
 
     def _initialize(self) -> None:
