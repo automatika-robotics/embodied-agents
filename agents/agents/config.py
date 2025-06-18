@@ -418,7 +418,7 @@ class SpeechToTextConfig(ModelComponentConfig):
     ```
     """
 
-    initial_prompt: str = field(default=None)
+    initial_prompt: Optional[str] = field(default=None)
     language: str = field(
         default="en",
         validator=base_validators.in_(_LANGUAGE_CODES),
