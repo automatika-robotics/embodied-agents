@@ -69,7 +69,8 @@ speech_to_text = SpeechToText(
 The trigger parameter lets the component know that it has to perform its function (in this case model inference) when an input is received on this particular topic. In our configuration, the component will be triggered using voice activity detection on the continuous stream of audio being received on the microphone. Next we will setup our MLLM component.
 
 ## MLLM Component
-The MLLM component takes as input a text topic (the output of the SpeechToText component) and an image topic, assuming we have a camera device onboard the robot publishing this topic. And just like before we need to provide a model client, this time with an MLLM model. This time we will use the OllamaClient along with _llava:latest_ model, a popular opensource multimodal LLM available on Ollama.
+The MLLM component takes as input a text topic (the output of the SpeechToText component) and an image topic, assuming we have a camera device onboard the robot publishing this topic. And just like before we need to provide a model client, this time with an MLLM model. This time we will use the OllamaClient along with _llava:latest_ model, a popular opensource multimodal LLM available on Ollama. Furthermore, we will configure our MLLM component using `MLLMConfig`. We will set `stream=True` to make the MLLM output text, be published as a stream for downstream components that consume this output. In EmbodiedAgents, streaming can output can be chunked using a `break_character` in the config (Default: '.').This way the downstream TextToSpeech component can start generating audio as soon as the first sentence is produced by the LLM.
+
 
 ```{note}
 Ollama is one of the most popular local LLM serving projects. Learn about setting up Ollama [here](https://ollama.com).
@@ -79,6 +80,7 @@ Here is the code for our MLLM setup.
 ```python
 from agents.clients.ollama import OllamaClient
 from agents.models import OllamaModel
+from agents.config import MLLMConfig
 
 # Define the image input topic and a new text output topic
 image0 = Topic(name="image_raw", msg_type="Image")
@@ -88,6 +90,8 @@ text_answer = Topic(name="text1", msg_type="String")
 # OllamaModel is a generic wrapper for all ollama models
 llava = OllamaModel(name="llava", checkpoint="llava:latest")
 llava_client = OllamaClient(llava)
+
+mllm_config = MLLMConfig(stream=True)  # Other inference specific paramters can be provided here
 
 # Define an MLLM component
 mllm = MLLM(
@@ -120,8 +124,8 @@ In order to utilize _play_on_device_ you need to install a couple of dependencie
 from agents.config import TextToSpeechConfig
 from agents.models import SpeechT5
 
-# config for playing audio on device
-t2s_config = TextToSpeechConfig(play_on_device=True)
+# config for asynchronously playing audio on device
+t2s_config = TextToSpeechConfig(play_on_device=True, stream=True)
 
 speecht5 = SpeechT5(name="speecht5")
 roboml_speecht5 = RoboMLWSClient(speecht5)
@@ -153,7 +157,7 @@ Et voila! we have setup a graph of three components in less than 50 lines of wel
 :caption: Multimodal Audio Conversational Agent
 :linenos:
 from agents.components import MLLM, SpeechToText, TextToSpeech
-from agents.config import SpeechToTextConfig, TextToSpeechConfig
+from agents.config import SpeechToTextConfig, TextToSpeechConfig, MLLMConfig
 from agents.clients import OllamaClient, RoboMLWSClient
 from agents.models import Whisper, SpeechT5, OllamaModel
 from agents.ros import Topic, Launcher
@@ -182,17 +186,19 @@ text_answer = Topic(name="text1", msg_type="String")
 
 llava = OllamaModel(name="llava", checkpoint="llava:latest")
 llava_client = OllamaClient(llava)
+mllm_config = MLLMConfig(stream=True)  # Other inference specific paramters can be provided here
 
 mllm = MLLM(
     inputs=[text_query, image0],
     outputs=[text_answer],
     model_client=llava_client,
     trigger=text_query,
+    config=mllm_config,
     component_name="vqa",
 )
 
-# config for playing audio on device
-t2s_config = TextToSpeechConfig(play_on_device=True)
+# config for asynchronously playing audio on device
+t2s_config = TextToSpeechConfig(play_on_device=True, stream=True)
 
 speecht5 = SpeechT5(name="speecht5")
 roboml_speecht5 = RoboMLWSClient(speecht5)

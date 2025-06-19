@@ -1,5 +1,5 @@
 from agents.components import MLLM, SpeechToText, TextToSpeech
-from agents.config import SpeechToTextConfig, TextToSpeechConfig
+from agents.config import SpeechToTextConfig, TextToSpeechConfig, MLLMConfig
 from agents.clients import OllamaClient, RoboMLWSClient
 from agents.models import Whisper, SpeechT5, OllamaModel
 from agents.ros import Topic, Launcher
@@ -12,7 +12,7 @@ roboml_whisper = RoboMLWSClient(whisper)
 
 s2t_config = SpeechToTextConfig(
     enable_vad=True,  # option to listen for speech through the microphone
-    enable_wakeword=True,  # option to invoke the component with a wakeword like 'hey jarvis'
+    # enable_wakeword=True,  # option to invoke the component with a wakeword like 'hey jarvis'
 )
 speech_to_text = SpeechToText(
     inputs=[audio_in],
@@ -28,17 +28,21 @@ text_answer = Topic(name="text1", msg_type="String")
 
 llava = OllamaModel(name="llava", checkpoint="llava:latest")
 llava_client = OllamaClient(llava)
+mllm_config = MLLMConfig(
+    stream=True
+)  # Other inference specific paramters can be provided here
 
 mllm = MLLM(
     inputs=[text_query, image0],
     outputs=[text_answer],
     model_client=llava_client,
     trigger=text_query,
+    config=mllm_config,
     component_name="vqa",
 )
 
-# config for playing audio on device
-t2s_config = TextToSpeechConfig(play_on_device=True)
+# config for asynchronously playing audio on device
+t2s_config = TextToSpeechConfig(play_on_device=True, stream=True)
 
 speecht5 = SpeechT5(name="speecht5")
 roboml_speecht5 = RoboMLWSClient(speecht5)
