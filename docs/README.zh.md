@@ -53,7 +53,7 @@ sudo apt install ros-$ROS_DISTRO-automatika-embodied-agents
 pip install numpy opencv-python-headless 'attrs>=23.2.0' jinja2 httpx setproctitle msgpack msgpack-numpy numpy-quaternion platformdirs tqdm
 ```
 
-克隆 Sugarcoat：
+克隆 Sugarcoat🍬：
 
 ```bash
 git clone https://github.com/automatika-robotics/sugarcoat
@@ -71,7 +71,7 @@ python your_script.py
 
 ## 快速开始 🚀
 
-与其他 ROS 包不同，EmbodiedAgents 使用纯 Python 的方式，通过 [Sugarcoat](https://www.github.com/automatika-robotics/sugarcoat) 描述节点图。复制以下代码并运行：
+与其他 ROS 包不同，EmbodiedAgents 使用纯 Python 的方式，通过 [Sugarcoat🍬](https://www.github.com/automatika-robotics/sugarcoat) 描述节点图。复制以下代码并运行：
 
 ```python
 from agents.clients.ollama import OllamaClient

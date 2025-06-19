@@ -14,27 +14,32 @@ Some clients might need additional dependacies, which are provided in the follow
 
 * - **Generic**
   - [GenericHTTPClient](agents.clients.generic.GenericHTTPClient)
-  - A generic client for interacting with OpenAI-compatible APIs, including vLLM, ms-swift, lmdeploy, Google Gemini etc. This client works with LLM multimodal LLM models and supports both standard and streaming responses. It is designed to be compatible with any API that follows the OpenAI standard.
+  - A generic client for interacting with OpenAI-compatible APIs, including vLLM, ms-swift, lmdeploy, Google Gemini, etc. Supports both standard and streaming responses, and works with LLMS and multimodal LLMs. Designed to be compatible with any API following the OpenAI standard.
 
 * - **RoboML**
   - [RoboMLHTTPClient](agents.clients.roboml.RoboMLHTTPClient)
-  - An HTTP client for interaction with ML models served on RoboML.
+  - An HTTP client for interacting with ML models served on [RoboML](https://github.com/automatika-robotics/roboml). Supports streaming outputs.
 
 * - **RoboML**
   - [RoboMLWSClient](agents.clients.roboml.RoboMLWSClient)
-  - A websocket based client for persistent interaction with ML models served on RoboML. Specially useful for low latency streaming of audio or streaming text data.
+  - A WebSocket-based client for persistent interaction with [RoboML](https://github.com/automatika-robotics/roboml)-hosted ML models. Particularly useful for low-latency streaming of audio or text data.
 
 * - **RoboML**
   - [RoboMLRESPClient](agents.clients.roboml.RoboMLRESPClient)
-  - A Redis Serialization Protocol (RESP) based client for interaction with ML models served on RoboML. **Note:** In order to use this client, please install dependencies with `pip install redis[hiredis]`
+  - A Redis Serialization Protocol (RESP) based client for ML models served via [RoboML](https://github.com/automatika-robotics/roboml).
+    Requires `pip install redis[hiredis]`.
 
 * - **Ollama**
   - [OllamaClient](agents.clients.ollama.OllamaClient)
-  - An HTTP client for interaction with ML models served on Ollama. **Note:** In order to use this client, please install dependencies with `pip install ollama`
+  - An HTTP client for interacting with ML models served on [Ollama](https://ollama.com). Supports LLMs/MLLMs and embedding models. It can be invoked with the generic [OllamaModel](agents.models.md#classes).
+    Requires `pip install ollama`.
 
 * - **ChromaDB**
   - [ChromaClient](agents.clients.chroma.ChromaClient)
-  - An HTTP client for interaction with a ChromaDB instance running as a server. Before using this client, make sure an instance of ChromaDB is running on the given host and port by executing `chroma run --path /db_path`
+  - An HTTP client for interacting with a ChromaDB instance running as a server.
+    Ensure that a ChromaDB server is active using:
+    `pip install chromadb`
+    `chroma run --path /db_path`
 """
 
 from .generic import GenericHTTPClient

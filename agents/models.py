@@ -168,8 +168,6 @@ class TransformersLLM(LLM):
     :type checkpoint: str
     :param quantization: The quantization scheme used by the model. Can be one of "4bit", "8bit" or None (default is "4bit").
     :type quantization: str or None
-    :param system_prompt: The system prompt used to initialize the model. If not provided, defaults to None.
-    :type system_prompt: str or None
     :param init_timeout: The timeout in seconds for the initialization process. Defaults to None.
     :type init_timeout: int, optional
 
@@ -192,8 +190,6 @@ class TransformersMLLM(LLM):
     :type checkpoint: str
     :param quantization: The quantization scheme used by the model. Can be one of "4bit", "8bit" or None (default is "4bit").
     :type quantization: str or None
-    :param system_prompt: The system prompt used to initialize the model. If not provided, defaults to None.
-    :type system_prompt: str or None
     :param init_timeout: The timeout in seconds for the initialization process. Defaults to None.
     :type init_timeout: int, optional
 

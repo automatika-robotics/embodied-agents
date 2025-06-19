@@ -54,7 +54,7 @@ Install python dependencies
 pip install numpy opencv-python-headless 'attrs>=23.2.0' jinja2 httpx setproctitle msgpack msgpack-numpy numpy-quaternion platformdirs tqdm
 ```
 
-Download Sugarcoat
+Download Sugarcoat🍬
 
 ```shell
 git clone https://github.com/automatika-robotics/sugarcoat
@@ -72,7 +72,7 @@ python your_script.py
 
 ## Quick Start 🚀
 
-Unlike other ROS package, EmbodiedAgents provides a pure pythonic way of describing the node graph using [Sugarcoat](https://www.github.com/automatika-robotics/sugarcoat). Copy the following code in a python script and run it.
+Unlike other ROS package, EmbodiedAgents provides a pure pythonic way of describing the node graph using [Sugarcoat🍬](https://www.github.com/automatika-robotics/sugarcoat). Copy the following code in a python script and run it.
 
 ```python
 from agents.clients.ollama import OllamaClient

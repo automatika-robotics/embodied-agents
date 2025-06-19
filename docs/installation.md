@@ -45,7 +45,7 @@ Install python dependencies
 pip install numpy opencv-python-headless 'attrs>=23.2.0' jinja2 httpx setproctitle msgpack msgpack-numpy numpy-quaternion platformdirs tqdm pyyaml toml
 ```
 
-Download Sugarcoat.
+Download Sugarcoat🍬.
 
 ```shell
 git clone https://github.com/automatika-robotics/sugarcoat

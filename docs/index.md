@@ -14,7 +14,7 @@ title: EmbodiedAgents Documentation
 intro
 installation
 quickstart
-basics
+basics/index
 examples/index
 apidocs/index
 ```

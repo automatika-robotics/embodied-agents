@@ -8,28 +8,28 @@ A Component is the main execution unit in EmbodiedAgents and in essence each com
   - Description
 
 * - **[LLM](agents.components.llm.md)**
-  - This component utilizes large language models (e.g LLama) that can be used to process text data.
+  - Uses large language models (e.g., LLaMA) to process text input. Can be used for reasoning, tool calling, instruction following, or dialogue. It can also utilize vector DBs for storing and retreiving contextual information.
 
 * - **[MLLM](agents.components.mllm.md)**
-  - This component utilizes multi-modal large language models (e.g. Llava) that can be used to process text and image data.
+  - Leverages multimodal LLMs (e.g., Llava) for understanding and processing both text and image data. Inherits all functionalities of the LLM component.
 
 * - **[SpeechToText](agents.components.speechtotext.md)**
-  - This component takes in audio input and outputs a text representation of the audio using Speech-to-Text models (e.g. Whisper).
+  - Converts spoken audio into text using speech-to-text models (e.g., Whisper). Suitable for voice command recognition. It also implements small on-board models for Voice Activity Detection (VAD) and Wakeword recognition, using audio capture devices onboard the robot.
 
 * - **[TextToSpeech](agents.components.texttospeech.md)**
-  - This component takes in text input and outputs an audio representation of the text using TTS models (e.g. SpeechT5). The generated audio can be played using any audio playback device available on the agent.
+  - Synthesizes audio from text using TTS models (e.g., SpeechT5, Bark). Output audio can be played using the robot's speakers or published to a topic. Implements `say(text)` and `stop_playback` functions to play/stop audio based on events from other components or the environment.
 
 * - **[MapEncoding](agents.components.map_encoding.md)**
-  - Map encoding component that encodes text information as a semantic map based on the robots localization. It takes in map layers, position topic, map meta data topic, and a vector database client. Map layers can be arbitrary text based outputs from other components such as MLLMs or Vision.
+  - Provides a spatio-temporal working memory by converting semantic outputs (e.g., from MLLMs or Vision) into a structured map representation. Uses robot localization data and output topics from other components to store information in a vector DB.
 
 * - **[SemanticRouter](agents.components.semantic_router.md)**
-  - A component that routes semantic information from input topics to output topics based on pre-defined routes. The Semantic Router takes in a list of input topics, a list of routes, an optional default route, and a configuration object. It uses the database client to store and retrieve routing information.
+  - Routes information between topics based on semantic content and predefined routing rules. Uses a vector DB for semantic matching and decision-making. This allows for creating complex graphs of components where a single input source can trigger different information processing pathways.
 
 * - **[Vision](agents.components.vision.md)**
-  - This component performs object detection and tracking on input images and outputs a list of detected objects, along with their bounding boxes and confidence scores.
+  - An essential component in all vision powered robots. Performs object detection and tracking on incoming images. Outputs object classes, bounding boxes, and confidence scores. It implements a low-latency small on-board classification model as well.
 
 * - **[VideoMessageMaker](agents.components.imagestovideo.md)**
-  - This component generates ROS video messages from input image messages. A video message is a collection of image messages that have a perceivable motion. I.e. the primary task of this component is to make intentionality decisions about what sequence of consecutive images should be treated as one coherent temporal sequence. The motion estimation method used for selecting images for a video can be configured in component config.
+  - This component generates ROS video messages from input image messages. A video message is a collection of image messages that have a perceivable motion. I.e. the primary task of this component is to make intentionality decisions about what sequence of consecutive images should be treated as one coherent temporal sequence. The chunking method used for selecting images for a video can be configured in component config. It can be useful in sending videos to ML models that take image sequences.
 ```
 """
 

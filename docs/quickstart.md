@@ -1,6 +1,6 @@
 # Quick Start 🚀
 
-Unlike other ROS package, EmbodiedAgents provides a pure pythonic way of describing the node graph using [Sugarcoat](https://automatika-robotics.github.io/sugarcoat/). Copy the following code in a python script and run it.
+Unlike other ROS package, EmbodiedAgents provides a pure pythonic way of describing the node graph using [Sugarcoat🍬](https://automatika-robotics.github.io/sugarcoat/). Copy the following code in a python script and run it.
 
 ```python
 from agents.clients.ollama import OllamaClient
@@ -56,7 +56,7 @@ image0 = Topic(name="NAME_OF_THE_TOPIC", msg_type="Image")
 If you are running EmbodiedAgents on a testing machine, and the machine has a webcam, you can install the [**ROS2 USB Cam**](https://github.com/klintan/ros2_usb_camera). Make sure you use the correct name of the image topic as above.
 ```
 
-Then we will create a multimodal LLM component. Components are functional units in EmbodiedAgents. To learn more about them, check out [Basic Concepts](basics.md). Other than input/output topics, the MLLM component expects a model client. So first we will create a model client that can utilize a [Llava](https://ollama.com/library/llava) model on [Ollama](https://ollama.com) as its model serving platform.
+Then we will create a multimodal LLM component. Components are functional units in EmbodiedAgents. To learn more about them, check out [Basic Concepts](basics/index.md). Other than input/output topics, the MLLM component expects a model client. So first we will create a model client that can utilize a [Llava](https://ollama.com/library/llava) model on [Ollama](https://ollama.com) as its model serving platform.
 
 ```python
 # Define a model client (working with Ollama in this case)
