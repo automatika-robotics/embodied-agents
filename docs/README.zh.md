@@ -115,7 +115,7 @@ launcher.bringup()
 
 ## 版权信息
 
-除非另有明确说明，本发行版中的代码版权归 2024 Automatika Robotics 所有。
+除非另有明确说明，本发行版中的代码版权归 2024 [Automatika Robotics](https://automatikarobotics.com/) 所有。
 
 EmbodiedAgents 采用 MIT 许可证发布。详细信息请参见 [LICENSE](LICENSE) 文件。
 

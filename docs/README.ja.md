@@ -115,7 +115,7 @@ launcher.bringup()
 
 ## 著作権情報
 
-本配布物に含まれるコードは、特に明記されていない限り、すべて © 2024 Automatika Robotics に著作権があります。
+本配布物に含まれるコードは、特に明記されていない限り、すべて © 2024 [Automatika Robotics](https://automatikarobotics.com/) に著作権があります。
 
 EmbodiedAgents は MIT ライセンスのもとで公開されています。詳細は [LICENSE](LICENSE) ファイルをご確認ください。
 

@@ -121,7 +121,7 @@ The quickstart example above is just an amuse-bouche of what is possible with Em
 
 ## Copyright
 
-The code in this distribution is Copyright (c) 2024 Automatika Robotics unless explicitly indicated otherwise.
+The code in this distribution is Copyright (c) 2024 [Automatika Robotics](https://automatikarobotics.com/) unless explicitly indicated otherwise.
 
 EmbodiedAgents is made available under the MIT license. Details can be found in the [LICENSE](LICENSE) file.
 
