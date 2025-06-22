@@ -19,6 +19,7 @@ extensions = [
     "sphinx_copybutton",  # install with `pip install sphinx-copybutton`
     "autodoc2",  # install with `pip install sphinx-autodoc2`
     "myst_parser",  # install with `pip install myst-parser`
+    "sphinx_sitemap",  # install with `pip install sphinx-sitemap`
 ]
 
 autodoc2_packages = [
@@ -74,6 +75,7 @@ myst_html_meta = {
 }
 myst_heading_anchors = 7  # to remove cross reference errors with md
 
+html_baseurl = "https://automatika-robotics.github.com/embodied-agents/"
 language = "en"
 html_theme = "sphinx_book_theme"  # install with `pip install sphinx-book-theme`
 html_static_path = ["_static"]
