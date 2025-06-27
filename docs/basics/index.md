@@ -1,8 +1,8 @@
 # Basic Concepts 📚
 
-Welcome to the core concepts of the **EmbodiedAgents** framework. This section introduces the three fundamental building blocks you'll work with:
+Welcome to the core concepts of the **_EmbodiedAgents_** framework. This section introduces the three fundamental building blocks you'll work with:
 
-* 🧩 **Components**: Basic building blocks of EmbodiedAgents.
+* 🧩 **Components**: Basic building blocks of _EmbodiedAgents_.
 * 🔌 **Clients**: Execution backends that instantiate and call inference on ML models served on local or remote platforms.
 * 🧠 **Models / Vector DBs**: Configurations for ML models (like LLMs, MLLMs, TTS, vision etc.) or databases used by components.
 

@@ -1,5 +1,5 @@
 """
-A Component is the main execution unit in EmbodiedAgents and in essence each component is synctactic sugar over a ROS2 Lifecycle Node. EmbodiedAgents provides the following components. These components can be arbitrarily combined to form an embodied agent graph.
+A Component is the main execution unit in _EmbodiedAgents_ and in essence each component is synctactic sugar over a ROS2 Lifecycle Node. EmbodiedAgents provides the following components. These components can be arbitrarily combined to form an embodied agent graph.
 
 ```{list-table}
 :widths: 20 80

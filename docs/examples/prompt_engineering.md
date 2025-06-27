@@ -6,7 +6,7 @@ from agents.components import Vision, MLLM
 ```
 
 ## Setting up the Object Detection Component
-For object detection and tracking, EmbodiedAgents provides a unified Vision component. This component takes as input an image topic published by a camera device onboard our robot. The output of this component can be a _detections_ topic in case of object detection or a _trackings_ topic in case of object tracking. In this example we will use a _detections_ topic.
+For object detection and tracking, _EmbodiedAgents_ provides a unified Vision component. This component takes as input an image topic published by a camera device onboard our robot. The output of this component can be a _detections_ topic in case of object detection or a _trackings_ topic in case of object tracking. In this example we will use a _detections_ topic.
 
 ```python
 from agents.ros import Topic
@@ -16,7 +16,7 @@ image0 = Topic(name="image_raw", msg_type="Image")
 # Create a detection topic
 detections_topic = Topic(name="detections", msg_type="Detections")
 ```
-Additionally the component requiers a model client with an object detection model. We will use the RESP client for RoboML and use the VisionModel a convenient model class made available in EmbodiedAgents, for initializing all vision models available in the opensource [mmdetection](https://github.com/open-mmlab/mmdetection) library. We will specify the model we want to use by specifying the checkpoint attribute.
+Additionally the component requiers a model client with an object detection model. We will use the RESP client for RoboML and use the VisionModel a convenient model class made available in _EmbodiedAgents_, for initializing all vision models available in the opensource [mmdetection](https://github.com/open-mmlab/mmdetection) library. We will specify the model we want to use by specifying the checkpoint attribute.
 
 ```{note}
 Learn about setting up RoboML with vision [here](https://github.com/automatika-robotics/roboml/blob/main/README.md#for-vision-models-support).

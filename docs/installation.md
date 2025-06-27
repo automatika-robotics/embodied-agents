@@ -4,23 +4,23 @@
 
 ### Install ROS
 
-EmbodiedAgents is built to be used with ROS2. All ROS distributions starting from _Iron_ are supported. Install ROS2 by following the instructions on the [official site](https://docs.ros.org/en/iron/Installation.html).
+_EmbodiedAgents_ is built to be used with ROS2. All ROS distributions starting from _Iron_ are supported. Install ROS2 by following the instructions on the [official site](https://docs.ros.org/en/iron/Installation.html).
 
 ### Install a model serving platform
 
-The core of EmbodiedAgents is agnostic to model serving platforms. It currently supports [Ollama](https://ollama.com) and [RoboML](https://github.com/automatika-robotics/RoboML). Please install either of these by following the instructions provided by respective projects. Support for new platforms will be continuously added. If you would like to support a particular platform, please open an issue/PR.
+The core of _EmbodiedAgents_ is agnostic to model serving platforms. It currently supports [Ollama](https://ollama.com) and [RoboML](https://github.com/automatika-robotics/RoboML). Please install either of these by following the instructions provided by respective projects. Support for new platforms will be continuously added. If you would like to support a particular platform, please open an issue/PR.
 
 ```{tip}
 For utilizing larger models, it is recommended that model serving platforms are not installed directly on the robot (or the edge device) but on a GPU powered machine on the local network (or one of the cloud providers).
 ```
 
-## Install EmbodiedAgents (Ubuntu)
+## Install _EmbodiedAgents_ (Ubuntu)
 
 Install python dependencies using pip as follows:
 
 `pip install 'attrs>=23.2.0'`
 
-For ROS versions >= 'humble', you can install EmbodiedAgents with your package manager. For example on Ubuntu:
+For ROS versions >= 'humble', you can install _EmbodiedAgents_ with your package manager. For example on Ubuntu:
 
 `sudo apt install ros-$ROS_DISTRO-automatika-embodied-agents`
 
@@ -28,7 +28,7 @@ Alternatively, grab your favorite deb package from the [release page](https://gi
 
 `sudo dpkg -i ros-$ROS_DISTRO-automatica-ros-sugar_$version$DISTRO_$ARCHITECTURE.deb`
 
-## Install EmbodiedAgents from source
+## Install _EmbodiedAgents_ from source
 
 Create your ROS workspace.
 
@@ -51,7 +51,7 @@ Download Sugarcoat🍬.
 git clone https://github.com/automatika-robotics/sugarcoat
 ```
 
-### Install EmbodiedAgents
+### Install _EmbodiedAgents_
 
 ```shell
 git clone https://github.com/automatika-robotics/embodied-agents.git

@@ -1,12 +1,12 @@
 # Clients 🔌
 
-Certain components in EmbodiedAgents deal with ML models, vector databases, or both. These components take in a model or DB client as one of their initialization parameters. The reason for this abstraction is to enforce _separation of concerns_. Whether an ML model is running on the edge hardware, on a powerful compute node in the network, or in the cloud, the components running on the robot edge can always use the model (or DB) via a client in a standardized way.
+Certain components in _EmbodiedAgents_ deal with ML models, vector databases, or both. These components take in a model or DB client as one of their initialization parameters. The reason for this abstraction is to enforce _separation of concerns_. Whether an ML model is running on the edge hardware, on a powerful compute node in the network, or in the cloud, the components running on the robot edge can always use the model (or DB) via a client in a standardized way.
 
 This approach makes components independent of the model serving platforms, which may implement various inference optimizations depending on the model type. As a result, developers can choose an ML serving platform that offers the best latency/accuracy tradeoff based on the application’s requirements.
 
 All clients implement a connection check. ML clients must implement inference methods, and optionally model initialization and deinitialization methods. This supports scenarios where an embodied agent dynamically switches between models or fine-tuned versions based on environmental events. Similarly, vector DB clients implement standard CRUD methods tailored to vector databases.
 
-EmbodiedAgents provides the following clients, designed to cover the most popular open-source model deployment platforms. Creating simple clients for other platforms is straightforward, and using unnecessarily heavy “duct-tape AI” frameworks on the robot is discouraged 😅.
+_EmbodiedAgents_ provides the following clients, designed to cover the most popular open-source model deployment platforms. Creating simple clients for other platforms is straightforward, and using unnecessarily heavy “duct-tape AI” frameworks on the robot is discouraged 😅.
 
 ```{note}
 Some clients may require additional dependencies, which are detailed in the table below. If these are not installed, users will be prompted at runtime.
@@ -44,7 +44,7 @@ Some clients may require additional dependencies, which are detailed in the tabl
 * - **ChromaDB**
   - ChromaClient
   - An HTTP client for interacting with a ChromaDB instance running as a server.
-    Ensure that a ChromaDB server is active using:
-    `pip install chromadb`
+    Ensure that a ChromaDB server is active using: <br/>
+    `pip install chromadb`<br/>
     `chroma run --path /db_path`
 ```

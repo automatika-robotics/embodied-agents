@@ -1,6 +1,6 @@
 # Create a Go-to-X component using map data
 
-In the previous [example](semantic_map.md) we created a semantic map using the MapEncoding component. Intuitively one can imagine that using the map data would require some form of RAG. Let us suppose that we want to create a Go-to-X component, which, when given a command like 'Go to the yellow door', would retreive the coordinates of the _yellow door_ from the map and publish them to a goal point topic of type _PoseStamped_ to be handled by our robots navigation system. We will create our Go-to-X component using the LLM component provided by EmbodiedAgents. We will start by initializing the component, and configuring it to use RAG.
+In the previous [example](semantic_map.md) we created a semantic map using the MapEncoding component. Intuitively one can imagine that using the map data would require some form of RAG. Let us suppose that we want to create a Go-to-X component, which, when given a command like 'Go to the yellow door', would retreive the coordinates of the _yellow door_ from the map and publish them to a goal point topic of type _PoseStamped_ to be handled by our robots navigation system. We will create our Go-to-X component using the LLM component provided by _EmbodiedAgents_. We will start by initializing the component, and configuring it to use RAG.
 
 ## Initialize the component
 

@@ -1,4 +1,4 @@
-# Tiny Web Client for EmbodiedAgents
+# Tiny Web Client for _EmbodiedAgents_
 
 This client is based on chainlit. In order to use it, run the following in order.
 

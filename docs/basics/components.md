@@ -1,14 +1,14 @@
 # Components 🧩
 
-A **Component** is the primary execution unit in EmbodiedAgents. Conceptually, each component is syntactic sugar over a ROS 2 Lifecycle Node, inheriting all its lifecycle behaviors while also offering additional abstraction to simplify development. Components receive one or more ROS topics as inputs and produce outputs on designated topics. The specific types and formats of these topics depend on the component's function.
+A **Component** is the primary execution unit in _EmbodiedAgents_. Conceptually, each component is syntactic sugar over a ROS 2 Lifecycle Node, inheriting all its lifecycle behaviors while also offering additional abstraction to simplify development. Components receive one or more ROS topics as inputs and produce outputs on designated topics. The specific types and formats of these topics depend on the component's function.
 
 ```{note}
 To learn more about the internal structure and lifecycle behavior of components, check out the documentation of [Sugarcoat🍬](https://automatika-robotics.github.io/sugarcoat/).
 ```
 
-## Components Available in EmbodiedAgents
+## Components Available in _EmbodiedAgents_
 
-EmbodiedAgents provides a suite of ready-to-use components. These can be composed into flexible execution graphs for building autonomous, perceptive, and interactive robot behavior. Each component focuses on a particular modality or functionality, from vision and speech to map reasoning and LLM-based inference.
+_EmbodiedAgents_ provides a suite of ready-to-use components. These can be composed into flexible execution graphs for building autonomous, perceptive, and interactive robot behavior. Each component focuses on a particular modality or functionality, from vision and speech to map reasoning and LLM-based inference.
 
 ```{list-table}
 :widths: 20 80
@@ -57,7 +57,7 @@ To see the default configuration options for each component, refer to the respec
 
 ## Component RunType
 
-In EmbodiedAgents, components can operate in one of two modes:
+In _EmbodiedAgents_, components can operate in one of two modes:
 
 ```{list-table}
 :widths: 10 80

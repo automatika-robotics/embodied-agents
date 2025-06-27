@@ -1,6 +1,6 @@
 # Create a spatio-temporal semantic map
 
-Autonomous Mobile Robots (AMRs) keep a representation of their environment in the form of occupancy maps. One can layer semantic information on top of these occupancy maps and with the use of MLLMs one can even add answers to arbitrary questions about the environment to this map. In EmbodiedAgents such maps can be created using vector databases which are specifically designed to store natural language data and retreive it based on natural language queries. Thus an embodied agent can keep a text based _spatio-temporal memory_, from which it can do retreival to answer questions or do spatial planning.
+Autonomous Mobile Robots (AMRs) keep a representation of their environment in the form of occupancy maps. One can layer semantic information on top of these occupancy maps and with the use of MLLMs one can even add answers to arbitrary questions about the environment to this map. In _EmbodiedAgents_ such maps can be created using vector databases which are specifically designed to store natural language data and retreive it based on natural language queries. Thus an embodied agent can keep a text based _spatio-temporal memory_, from which it can do retreival to answer questions or do spatial planning.
 
 Here we will show an example of generating such a map using object detection information and questions answered by an MLLM. This map, of course can be made arbitrarily complex and robust by adding checks on the data being stored, however in our example we will keep things simple. Lets start by importing relevant components.
 
@@ -21,7 +21,7 @@ image0 = Topic(name="image_raw", msg_type="Image")
 detections_topic = Topic(name="detections", msg_type="Detections")
 ```
 
-Additionally the component requiers a model client with an object detection model. We will use the RESP client for RoboML and use the VisionModel a convenient model class made available in EmbodiedAgents, for initializing all vision models available in the opensource [mmdetection](https://github.com/open-mmlab/mmdetection) library. We will specify the model we want to use by specifying the checkpoint attribute.
+Additionally the component requiers a model client with an object detection model. We will use the RESP client for RoboML and use the VisionModel a convenient model class made available in _EmbodiedAgents_, for initializing all vision models available in the opensource [mmdetection](https://github.com/open-mmlab/mmdetection) library. We will specify the model we want to use by specifying the checkpoint attribute.
 
 ```{note}
 Learn about setting up RoboML with vision [here](https://www.github.com/automatika-robotics/roboml).
@@ -53,7 +53,7 @@ The vision component will provide us with semantic information to add to our map
 
 ## Setting up an MLLM Component
 
-With large scale multimodal LLMs we can ask higher level introspective questions about the sensor information the robot is receiving and record this information on our spatio-temporal map. As an example we will setup an MLLM component that periodically asks itself the same question, about the nature of the space the robot is present iin. In order to acheive this we will use two concepts. First is that of a **FixedInput**, a simulated Topic that has a fixed value whenever it is read by a listener. And the second is that of a _timed_ component. In EmbodiedAgents, components can get triggered by either an input received on a Topic or automatically after a certain period of time. This latter trigger specifies a timed component. Lets see what all of this looks like in code.
+With large scale multimodal LLMs we can ask higher level introspective questions about the sensor information the robot is receiving and record this information on our spatio-temporal map. As an example we will setup an MLLM component that periodically asks itself the same question, about the nature of the space the robot is present iin. In order to acheive this we will use two concepts. First is that of a **FixedInput**, a simulated Topic that has a fixed value whenever it is read by a listener. And the second is that of a _timed_ component. In _EmbodiedAgents_, components can get triggered by either an input received on a Topic or automatically after a certain period of time. This latter trigger specifies a timed component. Lets see what all of this looks like in code.
 
 ```python
 from agents.clients import OllamaClient
@@ -82,7 +82,7 @@ introspector = MLLM(
 )
 ```
 
-LLM/MLLM model outputs can be unpredictable. Before publishing the answer of our question to the output topic, we want to ensure that the model has indeed provided a one word answer, and this answer is one of the expected choices. EmbodiedAgents allows us to add arbitrary pre-processor functions to data that is going to be published (Conversely, we can also add post-processing functions to data that has been received in a listeners callback, but we will see that in another example). We will add a simple pre-processing function to our output topic as follows:
+LLM/MLLM model outputs can be unpredictable. Before publishing the answer of our question to the output topic, we want to ensure that the model has indeed provided a one word answer, and this answer is one of the expected choices. _EmbodiedAgents_ allows us to add arbitrary pre-processor functions to data that is going to be published (Conversely, we can also add post-processing functions to data that has been received in a listeners callback, but we will see that in another example). We will add a simple pre-processing function to our output topic as follows:
 
 ```python
 # Define an arbitrary function to validate the output of the introspective component
@@ -101,7 +101,7 @@ This should ensure that our component only publishes the model output to this to
 
 ## Creating a Semantic Map as a Vector DB
 
-The final step is to store the output of our models in a spatio-temporal map. EmbodiedAgents provides a MapEncoding component that takes input data being published by other components and appropriately stores them in a vector DB. The input to a MapEncoding component is in the form of map layers. A _MapLayer_ is a thin abstraction over _Topic_, with certain additional parameters. We will create our map layers as follows:
+The final step is to store the output of our models in a spatio-temporal map. _EmbodiedAgents_ provides a MapEncoding component that takes input data being published by other components and appropriately stores them in a vector DB. The input to a MapEncoding component is in the form of map layers. A _MapLayer_ is a thin abstraction over _Topic_, with certain additional parameters. We will create our map layers as follows:
 
 ```python
 from agents.ros import MapLayer
