@@ -36,7 +36,7 @@ EmbodiedAgents 与模型服务平台无关。当前支持 [Ollama](https://ollam
 使用 pip 安装 Python 依赖：
 
 ```bash
-pip install 'attrs>=23.2.0' numpy-quaternion
+pip install 'attrs>=23.2.0'
 ```
 
 ROS 版本 >= 'humble' 时，可通过包管理器安装 EmbodiedAgents，例如：
@@ -50,7 +50,7 @@ sudo apt install ros-$ROS_DISTRO-automatika-embodied-agents
 #### 安装依赖项
 
 ```bash
-pip install numpy opencv-python-headless 'attrs>=23.2.0' jinja2 httpx setproctitle msgpack msgpack-numpy numpy-quaternion platformdirs tqdm
+pip install numpy opencv-python-headless 'attrs>=23.2.0' jinja2 httpx setproctitle msgpack msgpack-numpy platformdirs tqdm
 ```
 
 克隆 Sugarcoat🍬：

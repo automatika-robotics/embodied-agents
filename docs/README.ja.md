@@ -36,7 +36,7 @@ EmbodiedAgents のコアは、どのモデル提供プラットフォームに�
 Python の依存関係を pip でインストール：
 
 ```bash
-pip install 'attrs>=23.2.0' numpy-quaternion
+pip install 'attrs>=23.2.0'
 ```
 
 ROS のバージョンが `'humble'` 以上の場合、パッケージマネージャーから EmbodiedAgents をインストール可能です。例（Ubuntu）：
@@ -50,7 +50,7 @@ sudo apt install ros-$ROS_DISTRO-automatika-embodied-agents
 #### 依存関係の取得
 
 ```bash
-pip install numpy opencv-python-headless 'attrs>=23.2.0' jinja2 httpx setproctitle msgpack msgpack-numpy numpy-quaternion platformdirs tqdm
+pip install numpy opencv-python-headless 'attrs>=23.2.0' jinja2 httpx setproctitle msgpack msgpack-numpy platformdirs tqdm
 ```
 
 Sugarcoat🍬 をクローン：

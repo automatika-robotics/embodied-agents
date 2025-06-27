@@ -38,7 +38,7 @@ The core of EmbodiedAgents is agnostic to model serving platforms. It currently 
 
 Install python dependencies using pip as follows:
 
-`pip install 'attrs>=23.2.0' numpy-quaternion`
+`pip install 'attrs>=23.2.0'`
 
 For ROS versions >= 'humble', you can install EmbodiedAgents with your package manager. For example on Ubuntu:
 
@@ -51,7 +51,7 @@ For ROS versions >= 'humble', you can install EmbodiedAgents with your package m
 Install python dependencies
 
 ```shell
-pip install numpy opencv-python-headless 'attrs>=23.2.0' jinja2 httpx setproctitle msgpack msgpack-numpy numpy-quaternion platformdirs tqdm
+pip install numpy opencv-python-headless 'attrs>=23.2.0' jinja2 httpx setproctitle msgpack msgpack-numpy platformdirs tqdm
 ```
 
 Download Sugarcoat🍬
