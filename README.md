@@ -5,7 +5,7 @@
 </picture>
 <br/>
 
-🇨🇳  [简体中文](docs/README.zh.md) | 🇯🇵  [日本語](docs/README.ja.md)
+🇨🇳 [简体中文](docs/README.zh.md) | 🇯🇵 [日本語](docs/README.ja.md)
 
 **_EmbodiedAgents_** is a fully-loaded framework, written in pure ROS2, for creating interactive physical agents that can understand, remember, and act upon contextual information from their environment.
 
@@ -24,25 +24,23 @@ Dive right in with [Examples](https://automatika-robotics.github.io/embodied-age
 
 ## Installation 🛠️
 
-### Pre-Requisits
+### Install a model serving platform
 
-#### Install ROS
-
-_EmbodiedAgents_ is built to be used with ROS2. All ROS distributions starting from _Humble_ are supported. Install ROS2 by following the instructions on the [official site](https://docs.ros.org/en/iron/Installation.html).
-
-#### Install a model serving platform
-
-The core of _EmbodiedAgents_ is agnostic to model serving platforms. It currently supports [Ollama](https://ollama.com) and [RoboML](https://github.com/automatika-robotics/robo-ml). Please install either of these by following the instructions provided by respective projects. Support for new platforms will be continuously added. If you would like to support a particular platform, please open an issue/PR.
+The core of _EmbodiedAgents_ is agnostic to model serving platforms. It currently supports [Ollama](https://ollama.com), [RoboML](https://github.com/automatika-robotics/robo-ml) and any platform or cloud provider with an OpenAI compatible API (e.g. [vLLM](https://github.com/vllm-project/vllm), [lmdeploy](https://github.com/InternLM/lmdeploy) etc.). Please install either of these by following the instructions provided by respective projects. Support for new platforms is being continuously added. If you would like to support a particular platform, please open an issue/PR.
 
 ### Install _EmbodiedAgents_ (Ubuntu)
 
-Install python dependencies using pip as follows:
-
-`pip install 'attrs>=23.2.0'`
-
-For ROS versions >= 'humble', you can install _EmbodiedAgents_ with your package manager. For example on Ubuntu:
+For ROS versions >= _humble_, you can install _EmbodiedAgents_ with your package manager. For example on Ubuntu:
 
 `sudo apt install ros-$ROS_DISTRO-automatika-embodied-agents`
+
+Alternatively, grab your favorite deb package from the [release page](https://github.com/automatika-robotics/embodied-agents/releases) and install it as follows:
+
+`sudo dpkg -i ros-$ROS_DISTRO-automatica-embodied-agents_$version$DISTRO_$ARCHITECTURE.deb`
+
+If the attrs version from your package manager is < 23.2, install it using pip as follows:
+
+`pip install 'attrs>=23.2.0'`
 
 ### Install _EmbodiedAgents_ from source
 

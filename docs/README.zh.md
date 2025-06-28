@@ -21,29 +21,23 @@
 
 ## 安装 🛠️
 
-### 先决条件
+### 安装模型部署平台
 
-#### 安装 ROS
-
-_EmbodiedAgents_ 构建于 ROS2 之上。支持从 _Humble_ 开始的所有 ROS 版本。请参阅 [官方安装指南](https://docs.ros.org/en/iron/Installation.html)。
-
-#### 安装模型服务平台
-
-_EmbodiedAgents_ 与模型服务平台无关。当前支持 [Ollama](https://ollama.com) 和 [RoboML](https://github.com/automatika-robotics/robo-ml)。请按照各自项目提供的说明进行安装。我们会不断添加对新平台的支持。如有建议，请提交 issue 或 PR。
+_EmbodiedAgents_ 的核心与具体的模型部署平台无关。目前支持的平台包括 [Ollama](https://ollama.com)、[RoboML](https://github.com/automatika-robotics/robo-ml)，以及任何兼容 OpenAI API 的平台或云服务提供商（例如 [vLLM](https://github.com/vllm-project/vllm)、[lmdeploy](https://github.com/InternLM/lmdeploy) 等）。请根据各自项目提供的说明进行安装。我们正在持续添加对新平台的支持。如果你希望支持某个平台，请提交 issue 或 PR。
 
 ### 安装 _EmbodiedAgents_（Ubuntu）
 
-使用 pip 安装 Python 依赖：
+对于 ROS 版本 >= _humble_，你可以通过软件包管理器安装 _EmbodiedAgents_。例如在 Ubuntu 上执行以下命令：
 
-```bash
-pip install 'attrs>=23.2.0'
-```
+`sudo apt install ros-$ROS_DISTRO-automatika-embodied-agents`
 
-ROS 版本 >= 'humble' 时，可通过包管理器安装 _EmbodiedAgents_ ，例如：
+或者，你也可以从 [发布页面](https://github.com/automatika-robotics/embodied-agents/releases) 下载你喜欢的 `.deb` 安装包，并通过以下方式进行安装：
 
-```bash
-sudo apt install ros-$ROS_DISTRO-automatika-embodied-agents
-```
+`sudo dpkg -i ros-$ROS_DISTRO-automatica-embodied-agents_$version$DISTRO_$ARCHITECTURE.deb`
+
+如果你从软件包管理器安装的 attrs 版本低于 23.2，请使用 pip 安装如下版本：
+
+`pip install 'attrs>=23.2.0'`
 
 ### 从源码安装 _EmbodiedAgents_
 
