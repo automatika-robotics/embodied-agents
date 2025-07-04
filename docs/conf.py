@@ -3,6 +3,7 @@ import os
 import sys
 from datetime import date
 import xml.etree.ElementTree as ET
+import shutil
 
 sys.path.insert(0, os.path.abspath(".."))
 version = ET.parse("../package.xml").getroot()[1].text
@@ -75,7 +76,7 @@ myst_html_meta = {
 }
 myst_heading_anchors = 7  # to remove cross reference errors with md
 
-html_baseurl = "https://automatika-robotics.github.com/embodied-agents/"
+html_baseurl = "https://automatika-robotics.github.io/embodied-agents/"
 language = "en"
 html_theme = "sphinx_book_theme"  # install with `pip install sphinx-book-theme`
 html_static_path = ["_static"]
@@ -100,7 +101,7 @@ html_theme_options = {
         },
         {
             "name": "Discord",
-            "url": "https://discord.gg/cAW3BWwt",
+            "url": "https://discord.gg/B9ZU6qjzND",
             "icon": "fa-brands fa-discord",
         },
     ],
@@ -112,3 +113,43 @@ html_theme_options = {
     "use_edit_page_button": True,
     "show_navbar_depth": 2,
 }
+
+
+def copy_markdown_files(app, exception):
+    """Copy source markdown files"""
+    if exception is None:  # Only run if build succeeded
+        # Source dir is where your .md files are
+        src_dir = app.srcdir  # This points to your `source/` folder
+        dst_dir = app.outdir  # This is typically `build/html`
+
+        for root, _, files in os.walk(src_dir):
+            for file in files:
+                if file.endswith(".md"):
+                    src_path = os.path.join(root, file)
+                    # Compute path relative to the source dir
+                    rel_path = os.path.relpath(src_path, src_dir)
+                    # Destination path inside the build output
+                    dst_path = os.path.join(dst_dir, rel_path)
+
+                    # Make sure the target directory exists
+                    os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+                    shutil.copy2(src_path, dst_path)
+
+
+def create_robots_txt(app, exception):
+    """Create robots.txt file to take advantage of sitemap crawl"""
+    if exception is None:
+        dst_dir = app.outdir  # Typically 'build/html/'
+        robots_path = os.path.join(dst_dir, "robots.txt")
+        content = f"""User-agent: *
+
+Sitemap: {html_baseurl}/sitemap.xml
+"""
+        with open(robots_path, "w") as f:
+            f.write(content)
+
+
+def setup(app):
+    """Plugin to post build and copy markdowns as well"""
+    app.connect("build-finished", copy_markdown_files)
+    app.connect("build-finished", create_robots_txt)
