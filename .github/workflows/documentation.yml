@@ -20,8 +20,7 @@ jobs:
       - name: Make docs LLM Ready
         uses: demodrive-ai/llms-txt-action@v1
         with:
-          name: docs-dir
-          path: docs/_build/html/
+          docs_dir: docs/_build/html/
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
