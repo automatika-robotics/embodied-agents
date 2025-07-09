@@ -73,12 +73,12 @@ class MLLM(LLM):
         **kwargs,
     ):
         self.allowed_inputs = {
-            "Required": [String, Image, RGBD],
+            "Required": [String, [Image, RGBD]],
             "Optional": [Detections],
         }
         self.handled_outputs = [String, Detections, PointsOfInterest]
 
-        self.config: MLLMConfig = config or MLLMConfig()
+        config = config or MLLMConfig()
 
         super().__init__(
             inputs=inputs,
@@ -97,6 +97,7 @@ class MLLM(LLM):
     def custom_on_configure(self):
         # configure the rest
         super().custom_on_configure()
+        self._task = self.config.task
         # Initialize the topic type lists
         self._string_publishers: List = []
         self._poi_publishers: List = []
@@ -194,35 +195,35 @@ class MLLM(LLM):
             raise ValueError(
                 'Task value should be one of the following "general", "pointing", "affordance", "trajectory", "grounding"'
             )
-        self.config.task = task
-        self.inference_params = self.config.get_inference_params()
+        self._task = task
+        self.inference_params["task"] = task
 
     def _publish_task_specific_outputs(self, result: Dict[str, Any]) -> None:
         """Publish outputs based on task type"""
-        if self.config.task == "general":
+        if self._task == "general":
             self.messages.append({"role": "assistant", "content": result["output"]})
             for pub_name in self._string_publishers:
                 self.publishers_dict[pub_name].publish(
                     **result, time_stamp=self.get_ros_time()
                 )
-        elif self.config.task == "pointing":
+        elif self._task == "pointing":
             for pub_name in self._poi_publishers:
                 self.publishers_dict[pub_name].publish(
                     **result,
                     img=self._images[0],  # POI msg takes only one image
                     time_stamp=self.get_ros_time(),
                 )
-        elif self.config.task == "grounding":
+        elif self._task == "grounding":
             for pub_name in self._detections_publishers:
                 self.publishers_dict[pub_name].publish(
                     **result, images=self._images, time_stamp=self.get_ros_time()
                 )
-        elif self.config.task == "affordance":
+        elif self._task == "affordance":
             for pub_name in self._detections_publishers:
                 self.publishers_dict[pub_name].publish(
                     **result, images=self._images, time_stamp=self.get_ros_time()
                 )
-        elif self.config.task == "trajectory":
+        elif self._task == "trajectory":
             for pub_name in self._poi_publishers:
                 self.publishers_dict[pub_name].publish(
                     **result,
@@ -236,7 +237,7 @@ class MLLM(LLM):
         :param args:
         :param kwargs:
         """
-        if not self.config.task:
+        if not self._task:
             super()._execution_step(*args, **kwargs)
             return
 
