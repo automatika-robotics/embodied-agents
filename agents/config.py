@@ -178,6 +178,14 @@ class MLLMConfig(LLMConfig):
         Literal["general", "pointing", "affordance", "trajectory", "grounding"]
     ] = field(default=None)
 
+    @task.validator
+    def _check_task(self, _, value):
+        """Stream validator"""
+        if value and self.stream:
+            raise ValueError(
+                "stream cannot be set to True when a task is set in MLLMConfig"
+            )
+
     def _get_inference_params(self) -> Dict:
         """get_inference_params.
         :rtype: dict
