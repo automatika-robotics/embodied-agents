@@ -108,15 +108,16 @@ class Detection(SupportedType):
         :return: Detection2D
         """
         msg = Detection2D()
+        print(output)
         msg.scores = output["scores"]
         msg.labels = output["labels"]
         boxes = []
         for bbox in output["bboxes"]:
             box = Bbox2D()
-            box.top_left_x = bbox[0]
-            box.top_left_y = bbox[1]
-            box.bottom_right_x = bbox[2]
-            box.bottom_right_y = bbox[3]
+            box.top_left_x = float(bbox[0])
+            box.top_left_y = float(bbox[1])
+            box.bottom_right_x = float(bbox[2])
+            box.bottom_right_y = float(bbox[3])
             boxes.append(box)
 
         msg.boxes = boxes
@@ -163,7 +164,6 @@ class PointsOfInterest(SupportedType):
         cls,
         output: List[Tuple[int, int]],
         img: Union[ROSImage, ROSCompressedImage, np.ndarray],
-        labels: Optional[List[str]] = None,
         **_,
     ) -> ROSPointsOfInterest:
         """
@@ -172,13 +172,11 @@ class PointsOfInterest(SupportedType):
         :return: PointsOfInterest
         """
         msg = ROSPointsOfInterest()
-        if labels:
-            msg.labels = labels
         points = []
         for p in output:
             point = Point2D()
-            point.x = p[0]
-            point.y = p[1]
+            point.x = float(p[0])
+            point.y = float(p[1])
             points.append(point)
         msg.points = points
 

@@ -226,6 +226,12 @@ class RoboBrain2(Model):
 
     checkpoint: str = field(default="BAAI/RoboBrain2.0-7B")
 
+    def _get_init_params(self) -> Dict:
+        """Get init params for model initialization."""
+        return {
+            "checkpoint": self.checkpoint,
+        }
+
 
 @define(kw_only=True)
 class Whisper(Model):

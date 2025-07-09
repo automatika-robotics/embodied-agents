@@ -76,7 +76,6 @@ class MLLM(LLM):
             "Required": [String, [Image, RGBD]],
             "Optional": [Detections],
         }
-        self.handled_outputs = [String, Detections, PointsOfInterest]
 
         config = config or MLLMConfig()
 
@@ -92,27 +91,31 @@ class MLLM(LLM):
             **kwargs,
         )
 
+        self.handled_outputs = [String, Detections, PointsOfInterest]
         self._images: List[Union[np.ndarray, ROSImage, ROSCompressedImage]] = []
 
     def custom_on_configure(self):
         # configure the rest
         super().custom_on_configure()
-        self._task = self.config.task
-        # Initialize the topic type lists
-        self._string_publishers: List = []
-        self._poi_publishers: List = []
-        self._detections_publishers: List = []
 
-        # Loop through the list of topics and categorize them
-        for topic in self.out_topics:
-            if topic.msg_type is String:
-                self._string_publishers.append(topic.name)
-            elif topic.msg_type is PointsOfInterest:
-                self._poi_publishers.append(topic.name)
-            elif topic.msg_type is Detections:
-                self._detections_publishers.append(topic.name)
-            else:
-                pass
+        # Setup task
+        self._task = self.config.task
+        if self._task:
+            # Initialize the topic type lists
+            self._string_publishers: List = []
+            self._poi_publishers: List = []
+            self._detections_publishers: List = []
+
+            # Loop through the list of topics and categorize them
+            for topic in self.out_topics:
+                if topic.msg_type is String:
+                    self._string_publishers.append(topic.name)
+                elif topic.msg_type is PointsOfInterest:
+                    self._poi_publishers.append(topic.name)
+                elif topic.msg_type is Detections:
+                    self._detections_publishers.append(topic.name)
+                else:
+                    pass
 
     def _create_input(self, *_, **kwargs) -> Optional[Dict[str, Any]]:
         """Create inference input for MLLM models
@@ -196,7 +199,9 @@ class MLLM(LLM):
                 'Task value should be one of the following "general", "pointing", "affordance", "trajectory", "grounding"'
             )
         self._task = task
-        self.inference_params["task"] = task
+        self.config.task = task
+        self.config.stream = False
+        self.inference_params = self.config.get_inference_params()
 
     def _publish_task_specific_outputs(self, result: Dict[str, Any]) -> None:
         """Publish outputs based on task type"""
@@ -214,11 +219,17 @@ class MLLM(LLM):
                     time_stamp=self.get_ros_time(),
                 )
         elif self._task == "grounding":
+            result["output"] = [
+                {"bboxes": result["output"], "labels": [], "scores": []}
+            ]
             for pub_name in self._detections_publishers:
                 self.publishers_dict[pub_name].publish(
                     **result, images=self._images, time_stamp=self.get_ros_time()
                 )
         elif self._task == "affordance":
+            result["output"] = [
+                {"bboxes": result["output"], "labels": [], "scores": []}
+            ]
             for pub_name in self._detections_publishers:
                 self.publishers_dict[pub_name].publish(
                     **result, images=self._images, time_stamp=self.get_ros_time()
@@ -258,12 +269,14 @@ class MLLM(LLM):
             return
 
         # conduct inference
-        result = self._call_inference(inference_input)
+        unpack = True if self._task != "general" else False
+        result = self._call_inference(inference_input, unpack=unpack)
 
         # Publish results to output topics in accordance with the tasks
         if result:
             self._publish_task_specific_outputs(result)
-            self.get_logger().info(f"Thinking: {result['thinking']}")
+            if result.get("thinking"):
+                self.get_logger().info(f"<think>{result['thinking']}</think>")
 
         else:
             # raise a fallback trigger via health status
