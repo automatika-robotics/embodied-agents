@@ -1,6 +1,6 @@
 """The following classes provide wrappers for data being transmitted via ROS topics. These classes form the inputs and outputs of [Components](agents.components.md)."""
 
-from typing import Union, Any, Dict, List, Tuple, Optional
+from typing import Union, Any, Dict, List, Tuple
 import numpy as np
 from attrs import define, field, Factory
 from importlib.util import find_spec
