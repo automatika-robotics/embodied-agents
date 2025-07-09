@@ -1,6 +1,6 @@
 """The following classes provide wrappers for data being transmitted via ROS topics. These classes form the inputs and outputs of [Components](agents.components.md)."""
 
-from typing import Union, Any, Dict, List, Tuple
+from typing import Union, Any, Dict, List, Tuple, Optional
 import numpy as np
 from attrs import define, field, Factory
 from importlib.util import find_spec
@@ -37,6 +37,7 @@ from automatika_embodied_agents.msg import (
     Video as ROSVideo,
     Tracking as ROSTracking,
     Trackings as ROSTrackings,
+    PointsOfInterest as ROSPointsOfInterest,
 )
 from .callbacks import ObjectDetectionCallback, RGBDCallback, VideoCallback
 
@@ -151,6 +152,47 @@ class Detections(SupportedType):
         return msg
 
 
+class PointsOfInterest(SupportedType):
+    """PointsOfInterest."""
+
+    _ros_type = ROSPointsOfInterest
+    callback = None  # not defined
+
+    @classmethod
+    def convert(
+        cls,
+        output: List[Tuple[int, int]],
+        img: Union[ROSImage, ROSCompressedImage, np.ndarray],
+        labels: Optional[List[str]] = None,
+        **_,
+    ) -> ROSPointsOfInterest:
+        """
+        Takes points of interest on an image and converts it into a ROS message
+        of type PointsOfInterest
+        :return: PointsOfInterest
+        """
+        msg = ROSPointsOfInterest()
+        if labels:
+            msg.labels = labels
+        points = []
+        for p in output:
+            point = Point2D()
+            point.x = p[0]
+            point.y = p[1]
+            points.append(point)
+        msg.points = points
+
+        if isinstance(img, ROSCompressedImage):
+            msg.compressed_image = CompressedImage.convert(img)
+        # Handle RealSense RGBD msgs
+        elif hasattr(img, "depth"):
+            msg.image = Image.convert(img.rgb)
+            msg.depth = Image.convert(img.depth)
+        else:
+            msg.image = Image.convert(img)
+        return msg
+
+
 class Tracking(SupportedType):
     """Tracking."""
 
@@ -246,7 +288,15 @@ class RGBD(SupportedType):
         return RealSenseRGBD
 
 
-agent_types = [Video, Detection, Detections, Tracking, Trackings, RGBD]
+agent_types = [
+    Video,
+    Detection,
+    Detections,
+    Tracking,
+    Trackings,
+    RGBD,
+    PointsOfInterest,
+]
 
 
 add_additional_datatypes(agent_types)

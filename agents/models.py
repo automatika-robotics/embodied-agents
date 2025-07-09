@@ -203,6 +203,31 @@ class TransformersMLLM(LLM):
 
 
 @define(kw_only=True)
+class RoboBrain2(Model):
+    """[RoboBrain 2.0 by BAAI](https://github.com/FlagOpen/RoboBrain2.0) supports interactive reasoning with long-horizon planning and closed-loop feedback, spatial perception for precise point and bbox prediction from complex instructions, temporal perception for future trajectory estimation, and scene reasoning through real-time structured memory construction and update.
+        @article{RoboBrain2.0TechnicalReport,
+        title={RoboBrain 2.0 Technical Report},
+        author={BAAI RoboBrain Team},
+        journal={arXiv preprint arXiv:2507.02029},
+        year={2025}
+    }
+    :param name: An arbitrary name given to the model.
+    :type name: str
+    :param checkpoint: The name of the pre-trained model's checkpoint. Default is "BAAI/RoboBrain2.0-7B". For available checkpoints consult [RoboBrain2 Model Collection](https://huggingface.co/collections/BAAI/robobrain20-6841eeb1df55c207a4ea0036) on HuggingFace.
+    :type checkpoint: str
+    :param init_timeout: The timeout in seconds for the initialization process. Defaults to None.
+    :type init_timeout: int, optional
+
+    Example usage:
+    ```python
+    robobrain = RoboBrain2(name='robobrain', checkpoint="BAAI/RoboBrain2.0-32B")
+    ```
+    """
+
+    checkpoint: str = field(default="BAAI/RoboBrain2.0-7B")
+
+
+@define(kw_only=True)
 class Whisper(Model):
     """Whisper is an automatic speech recognition (ASR) system by OpenAI trained on 680,000 hours of multilingual and multitask supervised data collected from the web. [Details](https://openai.com/index/whisper/)
 
