@@ -299,6 +299,22 @@ class LLM(ModelComponent):
             # return result with its output set to last function response
             return result
 
+    def _extract_query_and_context(self, kwargs, context: dict) -> Optional[str]:
+        """Extract the query from the trigger topic and initialize context."""
+        if trigger := kwargs.get("topic"):
+            query = self.trig_callbacks[trigger.name].get_output()
+            context[trigger.name] = query
+            return query
+        return None
+
+    def _should_reset_chat(self, query: Optional[str]) -> bool:
+        """Check if the chat should be reset based on the query."""
+        return bool(
+            self.config.chat_history
+            and query
+            and query.strip().lower() == self.config.history_reset_phrase
+        )
+
     def _create_input(self, *_, **kwargs) -> Optional[Dict[str, Any]]:
         """Create inference input for LLM models
         :param args:
@@ -307,32 +323,25 @@ class LLM(ModelComponent):
         """
         # context dict to gather all String inputs for use in system prompt
         context = {}
+
         # set llm query as trigger
-        if trigger := kwargs.get("topic"):
-            query = self.trig_callbacks[trigger.name].get_output()
-            context[trigger.name] = query
-
-            # handle chat reset
-            if (
-                self.config.chat_history
-                and query.strip().lower() == self.config.history_reset_phrase
-            ):
-                self.messages = []
-                return None
-
-        else:
-            query = None
+        query = self._extract_query_and_context(kwargs, context)
+        if self._should_reset_chat(query):
+            self.messages = []
+            return None
 
         # aggregate all inputs that are available
         for i in self.callbacks.values():
-            if (item := i.get_output()) is not None:
-                # set trigger equal to a topic with type String if trigger not found
-                if i.input_topic.msg_type is String:
-                    if not query:
-                        query = item
-                    context[i.input_topic.name] = item
-                elif i.input_topic.msg_type is Detections:
-                    context[i.input_topic.name] = item
+            if (item := i.get_output()) is None:
+                continue
+            msg_type = i.input_topic.msg_type
+            # set trigger equal to a topic with type String if trigger not found
+            if msg_type is String:
+                if not query:
+                    query = item
+                context[i.input_topic.name] = item
+            elif msg_type is Detections:
+                context[i.input_topic.name] = item
 
         if query is None:
             return None
@@ -474,6 +483,7 @@ class LLM(ModelComponent):
             # raise a fallback trigger via health status
             self.health_status.set_failure()
 
+    @validate_func_args
     def set_topic_prompt(self, input_topic: Topic, template: Union[str, Path]) -> None:
         """Set prompt template on any input topic of type string.
 
@@ -502,6 +512,7 @@ class LLM(ModelComponent):
                 )
             self.config._topic_prompts[input_topic.name] = template
 
+    @validate_func_args
     def set_component_prompt(self, template: Union[str, Path]) -> None:
         """Set component level prompt template which can use multiple input topics.
 
@@ -521,6 +532,7 @@ class LLM(ModelComponent):
         """
         self.config._component_prompt = template
 
+    @validate_func_args
     def set_system_prompt(self, prompt: str) -> None:
         """Set system prompt for the model, which defines the models 'personality'.
 
@@ -540,6 +552,7 @@ class LLM(ModelComponent):
         """
         self.config._system_prompt = prompt
 
+    @validate_func_args
     def register_tool(
         self,
         tool: Callable,
@@ -642,4 +655,8 @@ class LLM(ModelComponent):
 
         if result:
             self.get_logger().warning(f"Model Output: {result['output']}")
-        self.get_logger().warning(f"Approximate Inference time: {elapsed_time} seconds")
+            self.get_logger().warning(
+                f"Approximate Inference time: {elapsed_time} seconds"
+            )
+        else:
+            self.get_logger().error("Model inference failed during warmup.")
