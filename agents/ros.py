@@ -108,7 +108,6 @@ class Detection(SupportedType):
         :return: Detection2D
         """
         msg = Detection2D()
-        print(output)
         msg.scores = output["scores"]
         msg.labels = output["labels"]
         boxes = []
