@@ -202,24 +202,32 @@ class MLLM(LLM):
         if self.config.task == "general":
             self.messages.append({"role": "assistant", "content": result["output"]})
             for pub_name in self._string_publishers:
-                self.publishers_dict[pub_name].publish(**result)
+                self.publishers_dict[pub_name].publish(
+                    **result, time_stamp=self.get_ros_time()
+                )
         elif self.config.task == "pointing":
             for pub_name in self._poi_publishers:
                 self.publishers_dict[pub_name].publish(
                     **result,
                     img=self._images[0],  # POI msg takes only one image
+                    time_stamp=self.get_ros_time(),
                 )
         elif self.config.task == "grounding":
             for pub_name in self._detections_publishers:
-                self.publishers_dict[pub_name].publish(**result, images=self._images)
+                self.publishers_dict[pub_name].publish(
+                    **result, images=self._images, time_stamp=self.get_ros_time()
+                )
         elif self.config.task == "affordance":
             for pub_name in self._detections_publishers:
-                self.publishers_dict[pub_name].publish(**result, images=self._images)
+                self.publishers_dict[pub_name].publish(
+                    **result, images=self._images, time_stamp=self.get_ros_time()
+                )
         elif self.config.task == "trajectory":
             for pub_name in self._poi_publishers:
                 self.publishers_dict[pub_name].publish(
                     **result,
                     img=self._images[0],  # POI msg takes only one image
+                    time_stamp=self.get_ros_time(),
                 )
 
     def _execution_step(self, *args, **kwargs):
@@ -254,8 +262,7 @@ class MLLM(LLM):
         # Publish results to output topics in accordance with the tasks
         if result:
             self._publish_task_specific_outputs(result)
-            if self.config.log_thinking:
-                self.get_logger().info(f"Thinking: {result['thinking']}")
+            self.get_logger().info(f"Thinking: {result['thinking']}")
 
         else:
             # raise a fallback trigger via health status

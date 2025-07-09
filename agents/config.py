@@ -72,11 +72,6 @@ class LLMConfig(ModelComponentConfig):
     :param response_terminator: A string token marking that the end of a single response from the model. This token is only used in case of a persistent clients, such as a websocket client and when stream is set to True. It is not published. This value cannot be an empty string.
         Default is '<<Response Ended>>'
     :type response_terminator: str
-    :param strip_thinking: Strip thinking part of the model output from the output published to the egress topics. Only applied to models that have <think></think> tags in their output.
-    Default is True
-    :type log_thinking: bool
-    :param log_thinking: Log thinking of the model if the model has thinking enabled             Default is False
-    :type log_thinking: bool
 
     Example of usage:
     ```python
@@ -99,8 +94,6 @@ class LLMConfig(ModelComponentConfig):
     stream: bool = field(default=False)
     break_character: str = field(default=".")
     response_terminator: str = field(default="<<Response Ended>>")
-    strip_thinking: bool = field(default=True)
-    log_thinking: bool = field(default=False)
     _system_prompt: Optional[str] = field(default=None, alias="_system_prompt")
     _component_prompt: Optional[Union[str, Path]] = field(
         default=None, alias="_component_prompt"
