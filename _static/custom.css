@@ -1,0 +1,60 @@
+/* === Theme Colors === */
+:root {
+    --automatika-primary: #E83F3F;
+    --automatika-secondary: #447AE5;
+    --automatika-black: #1E1E1E;
+}
+
+/* === Text color classes === */
+
+.text-red-strong {
+    color: var(--automatika-primary);
+    font-weight: bold;
+}
+
+.text-red {
+    color: var(--automatika-primary);
+    font-weight: normal;
+}
+
+/* === Global link styling === */
+a {
+    color: var(--automatika-secondary);
+}
+
+a:visited {
+    color: var(--automatika-secondary);
+}
+
+a:hover,
+a:focus {
+    color: var(--automatika-primary);
+    text-decoration: underline;
+}
+
+a .text-primary {
+    color: var(--automatika-primary);
+}
+
+
+/* === Sidebar icons style === */
+/* Light mode */
+html[data-theme="light"] a.pst-navbar-icon {
+    color: var(--automatika-secondary);
+}
+
+/* Dark mode */
+html[data-theme="dark"] a.pst-navbar-icon {
+    color: var(--automatika-secondary);
+}
+
+/* Hover states */
+html[data-theme="dark"] a.pst-navbar-icon:hover {
+    opacity: 0.85;
+    filter: brightness(0) saturate(100%) invert(70%) sepia(0%) saturate(0%) hue-rotate(0deg) brightness(120%) contrast(100%);
+}
+
+html[data-theme="light"] a.pst-navbar-icon:hover {
+    opacity: 0.85;
+    filter: brightness(0) saturate(100%) invert(70%) sepia(0%) saturate(0%) hue-rotate(0deg) brightness(60%) contrast(150%);
+}
