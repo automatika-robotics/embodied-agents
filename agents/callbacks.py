@@ -17,7 +17,7 @@ __all__ = ["GenericCallback", "TextCallback"]
 
 class VideoCallback(GenericCallback):
     """
-    Video Callback class. Its get method saves a video as list of bytes
+    Video Callback class. Its get method saves a video as an array of arrays
     """
 
     def __init__(self, input_topic, node_name: Optional[str] = None) -> None:
@@ -77,7 +77,7 @@ class VideoCallback(GenericCallback):
 
 class RGBDCallback(GenericCallback):
     """
-    Video Callback class. Its get method saves a video as list of bytes
+    RGBD Callback class. Its get method returns numpy array of the RGB part
     """
 
     def __init__(self, input_topic, node_name: Optional[str] = None) -> None:
@@ -94,9 +94,9 @@ class RGBDCallback(GenericCallback):
                 "RGBD message cannot be read from a fixed file"
             )
 
-    def _get_output(self, **_) -> Optional[np.ndarray]:
+    def _get_output(self, get_depth=False, **_) -> Optional[np.ndarray]:
         """
-        Gets video as a numpy array.
+        Gets RGBD image as a numpy array.
         :returns:   Image and Depth as nd_array
         :rtype:     np.ndarray
         """
@@ -104,8 +104,16 @@ class RGBDCallback(GenericCallback):
             return None
 
         else:
-            # pre-process in case of weird encodings and reshape ROS topic
-            return image_pre_processing(self.msg.rgb)
+            # pre-process and reshape the RGB image
+            rgb = image_pre_processing(self.msg.rgb)
+            if get_depth:
+                depth = image_pre_processing(self.msg.depth)
+                # Ensure depth has shape (H, W, 1)
+                depth_expanded = np.expand_dims(depth, axis=-1)
+                # Concatenate along the channel axis and return rgbd
+                return np.concatenate((rgb, depth_expanded), axis=-1)
+            else:
+                return rgb
 
 
 class ObjectDetectionCallback(GenericCallback):

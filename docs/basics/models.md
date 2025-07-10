@@ -20,7 +20,10 @@ Clients mentioned earlier take as input a **model** or **vector database (DB)** 
   - LLM models from HuggingFace/ModelScope based checkpoints. Supports quantization ("4bit", "8bit") specification. This model wrapper can be used with the GenericHTTPClient or any of the RoboML clients.
 
 * - **[TransformersMLLM](../apidocs/agents/agents.models.md#classes)**
-  - Multimodal LLM models from HuggingFace/ModelScope checkpoints for image-text inputs.  Supports quantization. This model wrapper can be used with the GenericHTTPClient or any of the RoboML clients.
+  - Multimodal LLM models from HuggingFace/ModelScope checkpoints for image-text inputs. Supports quantization. This model wrapper can be used with the GenericHTTPClient or any of the RoboML clients.
+
+* - **[RoboBrain2](../apidocs/agents/agents.models.md#classes)**
+  - [RoboBrain 2.0 by BAAI](https://github.com/FlagOpen/RoboBrain2.0) supports interactive reasoning with long-horizon planning and closed-loop feedback, spatial perception for precise point and bbox prediction from complex instructions and temporal perception for future trajectory estimation. Checkpoint defaults to `"BAAI/RoboBrain2.0-7B"`, with larger variants available [here](https://huggingface.co/collections/BAAI/robobrain20-6841eeb1df55c207a4ea0036). This wrapper can be used with any of the RoboML clients.
 
 * - **[Whisper](../apidocs/agents/agents.models.md#classes)**
   - OpenAI's automatic speech recognition (ASR) model with various sizes (e.g., `"small"`, `"large-v3"`, etc.). These models are available on the [RoboML](https://github.com/automatika-robotics/roboml) platform and can be used with any RoboML client. Recommended, **RoboMLWSClient**.
@@ -28,18 +31,14 @@ Clients mentioned earlier take as input a **model** or **vector database (DB)** 
 * - **[SpeechT5](../apidocs/agents/agents.models.md#classes)**
   - Microsoft’s model for TTS synthesis. Configurable voice selection. This model is available on the [RoboML](https://github.com/automatika-robotics/roboml) platform and can be used with any RoboML client. Recommended, **RoboMLWSClient**.
 
-
 * - **[Bark](../apidocs/agents/agents.models.md#classes)**
   - SunoAI’s Bark TTS model. Allows a selection [voices](https://suno-ai.notion.site/8b8e8749ed514b0cbf3f699013548683?v=bc67cff786b04b50b3ceb756fd05f68c). This model is available on the [RoboML](https://github.com/automatika-robotics/roboml) platform and can be used with any RoboML client. Recommended, **RoboMLWSClient**.
-
 
 * - **[MeloTTS](../apidocs/agents/agents.models.md#classes)**
   - MyShell’s multilingual TTS model. Configure via `language` (e.g., `"JP"`) and `speaker_id` (e.g., `"JP-1"`). This model is available on the [RoboML](https://github.com/automatika-robotics/roboml) platform and can be used with any RoboML client. Recommended, **RoboMLWSClient**.
 
-
 * - **[VisionModel](../apidocs/agents/agents.models.md#classes)**
   - A generic wrapper for object detection and tracking models available on [MMDetection framework](https://github.com/open-mmlab/mmdetection). Supports optional tracking, configurable thresholds, and deployment with TensorRT. This model is available on the [RoboML](https://github.com/automatika-robotics/roboml) platform and can be used with any RoboML client. Recommended, **RoboMLRESPClient**.
-
 ```
 
 ## Available Vector Databases

@@ -1,4 +1,4 @@
-from typing import Optional, Union, Dict, List
+from typing import Optional, Union, Dict, List, Literal
 from pathlib import Path
 
 from attrs import define, field, Factory
@@ -81,9 +81,7 @@ class LLMConfig(ModelComponentConfig):
 
     enable_rag: bool = field(default=False)
     collection_name: Optional[str] = field(default=None)
-    distance_func: str = field(
-        default="l2", validator=base_validators.in_(["l2", "ip", "cosine"])
-    )
+    distance_func: Literal["l2", "ip", "cosine"] = field(default="l2")
     n_results: int = field(default=1)
     add_metadata: bool = field(default=False)
     chat_history: bool = field(default=False)
@@ -165,14 +163,35 @@ class MLLMConfig(LLMConfig):
     :param response_terminator: A string token marking that the end of a single response from the model. This token is only used in case of a persistent clients, such as a websocket client and when stream is set to True. It is not published. This value cannot be an empty string.
         Default is '<<Response Ended>>'
     :type response_terminator: str
+     :param task: The specific task the MLLM should perform. This can help tailor model behavior and is useful when the multimodal LLM being used with the component has been trained on specific tasks. For an example of such a model check out RoboBrain2 in models.
+        Supported values are: "general", "pointing", "affordance", "trajectory", and "grounding".
+        Default is None.
+    :type task: Optional[Literal["general", "pointing", "affordance", "trajectory", "grounding"]]
 
     Example of usage:
     ```python
-    config = MLLMConfig(enable_rag=True, collection_name="my_collection", distance_func="l2")
+    config = MLLMConfig(enable_rag=True, collection_name="my_collection", distance_func="l2", task=grounding)
     ```
     """
 
-    pass
+    task: Optional[
+        Literal["general", "pointing", "affordance", "trajectory", "grounding"]
+    ] = field(default=None)
+
+    @task.validator
+    def _check_task(self, _, value):
+        """Stream validator"""
+        if value and self.stream:
+            raise ValueError(
+                "stream cannot be set to True when a task is set in MLLMConfig"
+            )
+
+    def _get_inference_params(self) -> Dict:
+        """get_inference_params.
+        :rtype: dict
+        """
+        llm_params = super()._get_inference_params()
+        return {**llm_params, "task": self.task} if self.task else llm_params
 
 
 @define(kw_only=True)
@@ -220,9 +239,7 @@ class VisionConfig(ModelComponentConfig):
     input_height: int = field(default=640)
     input_width: int = field(default=640)
     dataset_labels: Dict = field(default=_MS_COCO_LABELS)
-    device_local_classifier: str = field(
-        default="cuda", validator=base_validators.in_(["cpu", "cuda", "tensorrt"])
-    )
+    device_local_classifier: Literal["cpu", "cuda", "tensorrt"] = field(default="cuda")
     ncpu_local_classifier: int = field(default=1)
     local_classifier_model_path: str = field(
         default="https://github.com/automatika-robotics/embodied-agents/releases/download/0.3.3/deim_dfine_hgnetv2_n_coco_160e.onnx"
@@ -438,12 +455,8 @@ class SpeechToTextConfig(ModelComponentConfig):
     speech_buffer_max_len: int = field(default=30000)
     stream: bool = field(default=False)
     min_chunk_size: int = field(default=2000, validator=base_validators.gt(500))
-    device_vad: str = field(
-        default="cpu", validator=base_validators.in_(["cpu", "cuda", "tensorrt"])
-    )
-    device_wakeword: str = field(
-        default="cpu", validator=base_validators.in_(["cpu", "cuda", "tensorrt"])
-    )
+    device_vad: Literal["cpu", "cuda", "tensorrt"] = field(default="cpu")
+    device_wakeword: Literal["cpu", "cuda", "tensorrt"] = field(default="cpu")
     ncpu_vad: int = field(default=1)
     ncpu_wakeword: int = field(default=1)
     vad_model_path: str = field(
@@ -521,9 +534,7 @@ class MapConfig(BaseComponentConfig):
     """
 
     map_name: str = field()
-    distance_func: str = field(
-        default="l2", validator=base_validators.in_(["l2", "ip", "cosine"])
-    )
+    distance_func: Literal["l2", "ip", "cosine"] = field(default="l2")
     _position: Optional[Union[Topic, Dict]] = field(
         default=None, converter=_get_optional_topic, alias="_position"
     )
@@ -560,9 +571,7 @@ class SemanticRouterConfig(BaseComponentConfig):
     """
 
     router_name: str = field()
-    distance_func: str = field(
-        default="l2", validator=base_validators.in_(["l2", "ip", "cosine"])
-    )
+    distance_func: Literal["l2", "ip", "cosine"] = field(default="l2")
     maximum_distance: float = field(
         default=0.4, validator=base_validators.in_range(min_value=0.1, max_value=1.0)
     )
@@ -595,9 +604,8 @@ class VideoMessageMakerConfig(BaseComponentConfig):
 
     min_video_frames: int = field(default=15)  # assuming 0.5 second video at 30 fps
     max_video_frames: int = field(default=600)  # assuming 20 second video at 30 fps
-    motion_estimation_func: Optional[str] = field(
-        default=None,
-        validator=base_validators.in_(["frame_difference", "optical_flow"]),
+    motion_estimation_func: Optional[Literal["frame_difference", "optical_flow"]] = (
+        field(default=None)
     )
     threshold: float = field(
         default=0.3, validator=base_validators.in_range(min_value=0.1, max_value=5.0)

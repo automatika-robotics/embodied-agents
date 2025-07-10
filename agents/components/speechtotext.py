@@ -401,8 +401,13 @@ class SpeechToText(ModelComponent):
         result = self.model_client.inference(inference_input)
         elapsed_time = time.time() - start_time
 
-        self.get_logger().warning(f"Model Output: {result}")
-        self.get_logger().warning(f"Approximate Inference time: {elapsed_time} seconds")
-        self.get_logger().warning(
-            f"RTF: {elapsed_time / 2}"  # audio length, 2 seconds
-        )
+        if result:
+            self.get_logger().warning(f"Model Output: {result['output']}")
+            self.get_logger().warning(
+                f"Approximate Inference time: {elapsed_time} seconds"
+            )
+            self.get_logger().warning(
+                f"RTF: {elapsed_time / 2}"  # audio length, 2 seconds
+            )
+        else:
+            self.get_logger().error("Model inference failed during warmup.")

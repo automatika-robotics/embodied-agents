@@ -293,12 +293,13 @@ class Vision(ModelComponent):
         start_time = time.time()
         if self.model_client:
             result = self.model_client.inference(inference_input)
+            elapsed_time = time.time() - start_time
+            self.get_logger().warning(f"Model Output: {result}")
+            self.get_logger().warning(
+                f"Approximate Inference time: {elapsed_time} seconds"
+            )
+            self.get_logger().warning(
+                f"Max throughput: {1 / elapsed_time} frames per second"
+            )
         else:
             result = "Component was run without a client. Did not execute warmup"
-        elapsed_time = time.time() - start_time
-
-        self.get_logger().warning(f"Model Output: {result}")
-        self.get_logger().warning(f"Approximate Inference time: {elapsed_time} seconds")
-        self.get_logger().warning(
-            f"Max throughput: {1 / elapsed_time} frames per second"
-        )

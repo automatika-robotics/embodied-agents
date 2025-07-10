@@ -37,6 +37,7 @@ from automatika_embodied_agents.msg import (
     Video as ROSVideo,
     Tracking as ROSTracking,
     Trackings as ROSTrackings,
+    PointsOfInterest as ROSPointsOfInterest,
 )
 from .callbacks import ObjectDetectionCallback, RGBDCallback, VideoCallback
 
@@ -112,10 +113,10 @@ class Detection(SupportedType):
         boxes = []
         for bbox in output["bboxes"]:
             box = Bbox2D()
-            box.top_left_x = bbox[0]
-            box.top_left_y = bbox[1]
-            box.bottom_right_x = bbox[2]
-            box.bottom_right_y = bbox[3]
+            box.top_left_x = float(bbox[0])
+            box.top_left_y = float(bbox[1])
+            box.bottom_right_x = float(bbox[2])
+            box.bottom_right_y = float(bbox[3])
             boxes.append(box)
 
         msg.boxes = boxes
@@ -148,6 +149,44 @@ class Detections(SupportedType):
         for img, detection in zip(images, output):
             detections.append(Detection.convert(detection, img))
         msg.detections = detections
+        return msg
+
+
+class PointsOfInterest(SupportedType):
+    """PointsOfInterest."""
+
+    _ros_type = ROSPointsOfInterest
+    callback = None  # not defined
+
+    @classmethod
+    def convert(
+        cls,
+        output: List[Tuple[int, int]],
+        img: Union[ROSImage, ROSCompressedImage, np.ndarray],
+        **_,
+    ) -> ROSPointsOfInterest:
+        """
+        Takes points of interest on an image and converts it into a ROS message
+        of type PointsOfInterest
+        :return: PointsOfInterest
+        """
+        msg = ROSPointsOfInterest()
+        points = []
+        for p in output:
+            point = Point2D()
+            point.x = float(p[0])
+            point.y = float(p[1])
+            points.append(point)
+        msg.points = points
+
+        if isinstance(img, ROSCompressedImage):
+            msg.compressed_image = CompressedImage.convert(img)
+        # Handle RealSense RGBD msgs
+        elif hasattr(img, "depth"):
+            msg.image = Image.convert(img.rgb)
+            msg.depth = Image.convert(img.depth)
+        else:
+            msg.image = Image.convert(img)
         return msg
 
 
@@ -246,7 +285,15 @@ class RGBD(SupportedType):
         return RealSenseRGBD
 
 
-agent_types = [Video, Detection, Detections, Tracking, Trackings, RGBD]
+agent_types = [
+    Video,
+    Detection,
+    Detections,
+    Tracking,
+    Trackings,
+    RGBD,
+    PointsOfInterest,
+]
 
 
 add_additional_datatypes(agent_types)
