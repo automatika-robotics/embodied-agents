@@ -204,7 +204,7 @@ class TransformersMLLM(LLM):
 
 @define(kw_only=True)
 class RoboBrain2(Model):
-    """[RoboBrain 2.0 by BAAI](https://github.com/FlagOpen/RoboBrain2.0) supports interactive reasoning with long-horizon planning and closed-loop feedback, spatial perception for precise point and bbox prediction from complex instructions, temporal perception for future trajectory estimation, and scene reasoning through real-time structured memory construction and update.
+    """[RoboBrain 2.0 by BAAI](https://github.com/FlagOpen/RoboBrain2.0) supports interactive reasoning with long-horizon planning and closed-loop feedback, spatial perception for precise point and bbox prediction from complex instructions and temporal perception for future trajectory estimation.
         @article{RoboBrain2.0TechnicalReport,
         title={RoboBrain 2.0 Technical Report},
         author={BAAI RoboBrain Team},
