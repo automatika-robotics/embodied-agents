@@ -2,6 +2,15 @@
 Changelog for package automatika_embodied_agents
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+* (docs) Updates docs for using planning based MLLMs
+* (feature) Adds options to get RGBD array from rgbd message callback
+* (refactor) Breaks complex functions and fixes warmup result logging
+* (feature) Adds support for planning mllm models, starting with robobrain2.0
+* (docs) Adds streaming to conversational agent example
+* Contributors: ahr, mkabtoul
+
 0.4.0 (2025-06-18)
 ------------------
 * (docs) Adds international readme files
