@@ -2,8 +2,8 @@
 Changelog for package automatika_embodied_agents
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+0.4.1 (2025-07-10)
+------------------
 * (docs) Updates docs for using planning based MLLMs
 * (feature) Adds options to get RGBD array from rgbd message callback
 * (refactor) Breaks complex functions and fixes warmup result logging
