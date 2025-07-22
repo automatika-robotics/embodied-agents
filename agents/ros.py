@@ -102,7 +102,7 @@ class Detection(SupportedType):
     def convert(
         cls,
         output: Union[Dict, List[Dict]],
-        img: Union[
+        images: Union[
             ROSImage,
             ROSCompressedImage,
             np.ndarray,
@@ -117,10 +117,9 @@ class Detection(SupportedType):
         of type Detection2D
         :return: Detection2D
         """
-        # Only consider the first datapoint if a list is sent
         if isinstance(output, List):
             output = output[0]
-            img = img[0]
+            images = images[0]
         msg = Detection2D()
         msg.scores = output["scores"]
         msg.labels = output["labels"]
@@ -134,14 +133,14 @@ class Detection(SupportedType):
             boxes.append(box)
 
         msg.boxes = boxes
-        if isinstance(img, ROSCompressedImage):
-            msg.compressed_image = CompressedImage.convert(img)
+        if isinstance(images, ROSCompressedImage):
+            msg.compressed_image = CompressedImage.convert(images)
         # Handle RealSense RGBD msgs
-        elif hasattr(img, "depth"):
-            msg.image = Image.convert(img.rgb)
-            msg.depth = Image.convert(img.depth)
+        elif hasattr(images, "depth"):
+            msg.image = Image.convert(images.rgb)
+            msg.depth = Image.convert(images.depth)
         else:
-            msg.image = Image.convert(img)
+            msg.image = Image.convert(images)
         return msg
 
 
@@ -214,7 +213,7 @@ class Tracking(SupportedType):
     def convert(
         cls,
         output: Union[Dict, List[Dict]],
-        img: Union[
+        images: Union[
             ROSImage,
             ROSCompressedImage,
             np.ndarray,
@@ -231,7 +230,7 @@ class Tracking(SupportedType):
         # Only consider the first datapoint if a list is sent
         if isinstance(output, List):
             output = output[0]
-            img = img[0]
+            images = images[0]
         msg = ROSTracking()
         msg.ids = output.get("ids") or []
         msg.labels = output.get("tracked_labels") or []
@@ -264,14 +263,14 @@ class Tracking(SupportedType):
         msg.boxes = tracked_boxes
         msg.centroids = centroids
         msg.estimated_velocities = estimated_velocities
-        if isinstance(img, ROSCompressedImage):
-            msg.compressed_image = CompressedImage.convert(img)
+        if isinstance(images, ROSCompressedImage):
+            msg.compressed_image = CompressedImage.convert(images)
         # Handle RealSense RGBD msgs
-        elif hasattr(img, "depth"):
-            msg.image = Image.convert(img.rgb)
-            msg.depth = Image.convert(img.depth)
+        elif hasattr(images, "depth"):
+            msg.image = Image.convert(images.rgb)
+            msg.depth = Image.convert(images.depth)
         else:
-            msg.image = Image.convert(img)
+            msg.image = Image.convert(images)
         return msg
 
 
