@@ -100,13 +100,27 @@ class Detection(SupportedType):
 
     @classmethod
     def convert(
-        cls, output: Dict, img: Union[ROSImage, ROSCompressedImage, np.ndarray], **_
+        cls,
+        output: Union[Dict, List[Dict]],
+        img: Union[
+            ROSImage,
+            ROSCompressedImage,
+            np.ndarray,
+            List[ROSImage],
+            List[ROSCompressedImage],
+            List[np.ndarray],
+        ],
+        **_,
     ) -> Detection2D:
         """
         Takes object detection data and converts it into a ROS message
         of type Detection2D
         :return: Detection2D
         """
+        # Only consider the first datapoint if a list is sent
+        if isinstance(output, List):
+            output = output[0]
+            img = img[0]
         msg = Detection2D()
         msg.scores = output["scores"]
         msg.labels = output["labels"]
@@ -198,13 +212,26 @@ class Tracking(SupportedType):
 
     @classmethod
     def convert(
-        cls, output: Dict, img: Union[ROSImage, ROSCompressedImage, np.ndarray], **_
+        cls,
+        output: Union[Dict, List[Dict]],
+        img: Union[
+            ROSImage,
+            ROSCompressedImage,
+            np.ndarray,
+            List[ROSImage],
+            List[ROSCompressedImage],
+            List[np.ndarray],
+        ],
     ) -> ROSTracking:
         """
         Takes tracking data and converts it into a ROS message
         of type Tracking
         :return: ROSTracking
         """
+        # Only consider the first datapoint if a list is sent
+        if isinstance(output, List):
+            output = output[0]
+            img = img[0]
         msg = ROSTracking()
         msg.ids = output.get("ids") or []
         msg.labels = output.get("tracked_labels") or []

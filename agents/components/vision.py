@@ -8,6 +8,8 @@ from ..clients.model_base import ModelClient
 from ..config import VisionConfig
 from ..ros import (
     Detections,
+    Detection,
+    Tracking,
     FixedInput,
     Image,
     RGBD,
@@ -75,7 +77,7 @@ class Vision(ModelComponent):
     ):
         self.config: VisionConfig = config or VisionConfig()
         self.allowed_inputs = {"Required": [[Image, RGBD]]}
-        self.handled_outputs = [Detections, Trackings]
+        self.handled_outputs = [Detection, Tracking, Detections, Trackings]
 
         self._images: List[Union[np.ndarray, ROSImage, ROSCompressedImage]] = []
 
