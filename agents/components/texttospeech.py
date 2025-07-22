@@ -404,7 +404,8 @@ class TextToSpeech(ModelComponent):
         """Handle streaming output from a websocket client"""
         try:
             tokens = self.resp_queue.get(block=True)
-            self._play(tokens)
+            if self.config.play_on_device:
+                self._play(tokens)
             self._publish({"output": tokens})
         except Exception as e:
             self.get_logger().error(str(e))
