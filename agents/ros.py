@@ -119,7 +119,7 @@ class Detection(SupportedType):
         """
         if isinstance(output, List):
             output = output[0]
-            images = images[0]
+            images = images[0] if images else []
         msg = Detection2D()
         msg.scores = output["scores"]
         msg.labels = output["labels"]
@@ -133,14 +133,15 @@ class Detection(SupportedType):
             boxes.append(box)
 
         msg.boxes = boxes
-        if isinstance(images, ROSCompressedImage):
-            msg.compressed_image = CompressedImage.convert(images)
-        # Handle RealSense RGBD msgs
-        elif hasattr(images, "depth"):
-            msg.image = Image.convert(images.rgb)
-            msg.depth = Image.convert(images.depth)
-        else:
-            msg.image = Image.convert(images)
+        if images:
+            if isinstance(images, ROSCompressedImage):
+                msg.compressed_image = CompressedImage.convert(images)
+            # Handle RealSense RGBD msgs
+            elif hasattr(images, "depth"):
+                msg.image = Image.convert(images.rgb)
+                msg.depth = Image.convert(images.depth)
+            else:
+                msg.image = Image.convert(images)
         return msg
 
 
