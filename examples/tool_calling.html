@@ -1,0 +1,716 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta content="cQVj-BaADcGVOGB7GOvfbkgJjxni10C2fYWCZ03jOeo" name="google-site-verification" />
+
+    <title>Use Tool Calling in Go-to-X &#8212; EmbodiedAgents 0.4.1 documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=a746c00c" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../_static/custom.css?v=260ea625" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="../_static/documentation_options.js?v=a3cf13c8"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../_static/copybutton.js?v=f281be69"></script>
+    <script src="../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'examples/tool_calling';</script>
+    <link rel="canonical" href="https://automatika-robotics.github.io/embodied-agents/examples/tool_calling.html" />
+    <link rel="icon" href="../_static/favicon.png"/>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Create a semantic router to route text queries between different components" href="semantic_router.html" />
+    <link rel="prev" title="Create a Go-to-X component using map data" href="goto.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../index.html">
+  
+  
+  
+  
+  
+    
+    
+      
+    
+    
+    <img src="../_static/EMBODIED_AGENTS_LIGHT.png" class="logo__image only-light" alt="EmbodiedAgents 0.4.1 documentation - Home"/>
+    <script>document.write(`<img src="../_static/EMBODIED_AGENTS_DARK.png" class="logo__image only-dark" alt="EmbodiedAgents 0.4.1 documentation - Home"/>`);</script>
+  
+  
+</a></div>
+        <div class="sidebar-primary-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://automatikarobotics.com/" title="Automatika" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><img src="../_static/automatika-logo.png" class="icon-link-image" alt="Automatika"/></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/automatika-robotics/embodied-agents" title="GitHub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-github fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">GitHub</span></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://discord.gg/B9ZU6qjzND" title="Discord" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-discord fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">Discord</span></a>
+        </li>
+</ul></div>
+        <div class="sidebar-primary-item">
+
+ <script>
+ document.write(`
+   <button class="btn search-button-field search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass"></i>
+    <span class="search-button__default-text">Search</span>
+    <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+   </button>
+ `);
+ </script></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../intro.html">EmbodiedAgents 🤖</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../installation.html">Installation 🛠️</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../quickstart.html">Quick Start 🚀</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../basics/index.html">Basic Concepts 📚</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../basics/components.html">Components 🧩</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../basics/clients.html">Clients 🔌</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../basics/models.html">Models / Vector Databases 🧠</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 current active has-children"><a class="reference internal" href="index.html">Examples ✨</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="conversational.html">Create a conversational agent with audio</a></li>
+<li class="toctree-l2"><a class="reference internal" href="prompt_engineering.html">Prompt engineering for LLMs/MLLMs using vision models</a></li>
+<li class="toctree-l2"><a class="reference internal" href="semantic_map.html">Create a spatio-temporal semantic map</a></li>
+<li class="toctree-l2"><a class="reference internal" href="goto.html">Create a Go-to-X component using map data</a></li>
+<li class="toctree-l2 current active"><a class="current reference internal" href="#">Use Tool Calling in Go-to-X</a></li>
+<li class="toctree-l2"><a class="reference internal" href="semantic_router.html">Create a semantic router to route text queries between different components</a></li>
+<li class="toctree-l2"><a class="reference internal" href="complete.html">Bringing it all together 🤖</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multiprocessing.html">Making the System Robust And Production Ready</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../apidocs/index.html">API Reference</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../apidocs/agents/agents.html"><code class="xref py py-mod docutils literal notranslate"><span class="pre">agents</span></code></a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../apidocs/agents/agents.clients.html"><code class="xref py py-mod docutils literal notranslate"><span class="pre">agents.clients</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../apidocs/agents/agents.components.html"><code class="xref py py-mod docutils literal notranslate"><span class="pre">agents.components</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../apidocs/agents/agents.vectordbs.html"><code class="xref py py-mod docutils literal notranslate"><span class="pre">agents.vectordbs</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../apidocs/agents/agents.ros.html"><code class="xref py py-mod docutils literal notranslate"><span class="pre">agents.ros</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../apidocs/agents/agents.models.html"><code class="xref py py-mod docutils literal notranslate"><span class="pre">agents.models</span></code></a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-source-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Source repositories">
+    <i class="fab fa-github"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="https://github.com/automatika-robotics/embodied-agents/blob/main/docs/examples/tool_calling.md?plain=1" target="_blank"
+   class="btn btn-sm btn-source-file-button dropdown-item"
+   title="Show source"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-code"></i>
+  </span>
+<span class="btn__text-container">Show source</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/automatika-robotics/embodied-agents/edit/main/docs/examples/tool_calling.md" target="_blank"
+   class="btn btn-sm btn-source-edit-button dropdown-item"
+   title="Suggest edit"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-pencil-alt"></i>
+  </span>
+<span class="btn__text-container">Suggest edit</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/automatika-robotics/embodied-agents/issues/new?title=Issue%20on%20page%20%2Fexamples/tool_calling.html&body=Your%20issue%20content%20here." target="_blank"
+   class="btn btn-sm btn-source-issues-button dropdown-item"
+   title="Open an issue"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-lightbulb"></i>
+  </span>
+<span class="btn__text-container">Open issue</span>
+</a>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="../_sources/examples/tool_calling.md" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.md</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+<button class="sidebar-toggle secondary-toggle btn btn-sm" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>Use Tool Calling in Go-to-X</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#register-a-tool-function-to-be-called-by-the-llm">Register a tool (function) to be called by the LLM</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#launching-the-components">Launching the Components</a></li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section class="tex2jax_ignore mathjax_ignore" id="use-tool-calling-in-go-to-x">
+<h1>Use Tool Calling in Go-to-X<a class="headerlink" href="#use-tool-calling-in-go-to-x" title="Link to this heading">#</a></h1>
+<p>In the previous <a class="reference internal" href="goto.html"><span class="std std-doc">example</span></a> we created a Go-to-X component using basic text manipulation on LLM output. However, for models that have been specifically trained for tool calling, one can get better results for structured outputs by invoking tool calling. At the same time tool calling can be useful to generate responses which require intermediate use of tools by the LLM before providing a final answer. In this example we will utilize tool calling for the former utility of getting a better structured output from the LLM, by reimplementing the Go-to-X component.</p>
+<section id="register-a-tool-function-to-be-called-by-the-llm">
+<h2>Register a tool (function) to be called by the LLM<a class="headerlink" href="#register-a-tool-function-to-be-called-by-the-llm" title="Link to this heading">#</a></h2>
+<p>To utilize tool calling we will change our strategy of doing pre-processing to LLM text output, and instead ask the LLM to provide structured input to a function (tool). The output of this function will then be sent for publishing to the output topic. Lets see what this will look like in the following code snippets.</p>
+<p>First we will modify the component level prompt for our LLM.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># set a component prompt</span>
+<span class="n">goto</span><span class="o">.</span><span class="n">set_component_prompt</span><span class="p">(</span>
+    <span class="n">template</span><span class="o">=</span><span class="s2">&quot;&quot;&quot;What are the position coordinates in the given metadata?&quot;&quot;&quot;</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+<p>Next we will replace our pre-processing function, with a much simpler function that takes in a list and provides a numpy array. The LLM will be expected to call this function with the appropriate output. This strategy generally works better than getting text input from LLM and trying to parse it with an arbitrary function. To register the function as a tool, we will also need to create its description in a format that is explanatory for the LLM. This format has been specified by the <em>Ollama</em> client.</p>
+<div class="admonition caution">
+<p class="admonition-title">Caution</p>
+<p>Tool calling is currently available only when components utilize the OllamaClient.</p>
+</div>
+<div class="admonition seealso">
+<p class="admonition-title">See also</p>
+<p>To see a list of models that work for tool calling using the OllamaClient, check <a class="reference external" href="https://ollama.com/search?c=tools">here</a></p>
+</div>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># pre-process the output before publishing to a topic of msg_type PoseStamped</span>
+<span class="k">def</span> <span class="nf">get_coordinates</span><span class="p">(</span><span class="n">position</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">float</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Get position coordinates&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">position</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">)</span>
+
+
+<span class="n">function_description</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;function&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;function&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;get_coordinates&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;description&quot;</span><span class="p">:</span> <span class="s2">&quot;Get position coordinates&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;parameters&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;object&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;properties&quot;</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s2">&quot;position&quot;</span><span class="p">:</span> <span class="p">{</span>
+                    <span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;list[float]&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;description&quot;</span><span class="p">:</span> <span class="s2">&quot;The position coordinates in x, y and z&quot;</span><span class="p">,</span>
+                <span class="p">}</span>
+            <span class="p">},</span>
+        <span class="p">},</span>
+        <span class="s2">&quot;required&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;position&quot;</span><span class="p">],</span>
+    <span class="p">},</span>
+<span class="p">}</span>
+
+<span class="c1"># add the pre-processing function to the goal_point output topic</span>
+<span class="n">goto</span><span class="o">.</span><span class="n">register_tool</span><span class="p">(</span>
+    <span class="n">tool</span><span class="o">=</span><span class="n">get_coordinates</span><span class="p">,</span>
+    <span class="n">tool_description</span><span class="o">=</span><span class="n">function_description</span><span class="p">,</span>
+    <span class="n">send_tool_response_to_model</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+<p>In the code above, the flag <em>send_tool_response_to_model</em> has been set to False. This means that the function output will be sent directly for publication, since our usage of the tool in this example is limited to forcing the model to provide a structured output. If this flag was set to True, the output of the tool (function) will be sent back to the model to produce the final output, which will then be published. This latter usage is employed when a tool like a calculator, browser or code interpreter can be provided to the model for generating better answers.</p>
+</section>
+<section id="launching-the-components">
+<h2>Launching the Components<a class="headerlink" href="#launching-the-components" title="Link to this heading">#</a></h2>
+<p>And as before, we will launch our Go-to-X component.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">agents.ros</span> <span class="kn">import</span> <span class="n">Launcher</span>
+
+<span class="c1"># Launch the component</span>
+<span class="n">launcher</span> <span class="o">=</span> <span class="n">Launcher</span><span class="p">()</span>
+<span class="n">launcher</span><span class="o">.</span><span class="n">add_pkg</span><span class="p">(</span><span class="n">components</span><span class="o">=</span><span class="p">[</span><span class="n">goto</span><span class="p">])</span>
+<span class="n">launcher</span><span class="o">.</span><span class="n">bringup</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>The complete code for this example is given below:</p>
+<div class="literal-block-wrapper docutils container" id="id1">
+<div class="code-block-caption"><span class="caption-text">Go-to-X Component</span><a class="headerlink" href="#id1" title="Link to this code">#</a></div>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="linenos"> 1</span><span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="linenos"> 2</span><span class="kn">from</span> <span class="nn">agents.components</span> <span class="kn">import</span> <span class="n">LLM</span>
+<span class="linenos"> 3</span><span class="kn">from</span> <span class="nn">agents.models</span> <span class="kn">import</span> <span class="n">OllamaModel</span>
+<span class="linenos"> 4</span><span class="kn">from</span> <span class="nn">agents.vectordbs</span> <span class="kn">import</span> <span class="n">ChromaDB</span>
+<span class="linenos"> 5</span><span class="kn">from</span> <span class="nn">agents.config</span> <span class="kn">import</span> <span class="n">LLMConfig</span>
+<span class="linenos"> 6</span><span class="kn">from</span> <span class="nn">agents.clients</span> <span class="kn">import</span> <span class="n">ChromaClient</span><span class="p">,</span> <span class="n">OllamaClient</span>
+<span class="linenos"> 7</span><span class="kn">from</span> <span class="nn">agents.ros</span> <span class="kn">import</span> <span class="n">Launcher</span><span class="p">,</span> <span class="n">Topic</span>
+<span class="linenos"> 8</span>
+<span class="linenos"> 9</span><span class="c1"># Start a Llama3.1 based llm component using ollama client</span>
+<span class="linenos">10</span><span class="n">llama</span> <span class="o">=</span> <span class="n">OllamaModel</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;llama&quot;</span><span class="p">,</span> <span class="n">checkpoint</span><span class="o">=</span><span class="s2">&quot;llama3.2:3b&quot;</span><span class="p">)</span>
+<span class="linenos">11</span><span class="n">llama_client</span> <span class="o">=</span> <span class="n">OllamaClient</span><span class="p">(</span><span class="n">llama</span><span class="p">)</span>
+<span class="linenos">12</span>
+<span class="linenos">13</span><span class="c1"># Initialize a vector DB that will store our routes</span>
+<span class="linenos">14</span><span class="n">chroma</span> <span class="o">=</span> <span class="n">ChromaDB</span><span class="p">()</span>
+<span class="linenos">15</span><span class="n">chroma_client</span> <span class="o">=</span> <span class="n">ChromaClient</span><span class="p">(</span><span class="n">db</span><span class="o">=</span><span class="n">chroma</span><span class="p">)</span>
+<span class="linenos">16</span>
+<span class="linenos">17</span><span class="c1"># Define LLM input and output topics including goal_point topic of type PoseStamped</span>
+<span class="linenos">18</span><span class="n">goto_in</span> <span class="o">=</span> <span class="n">Topic</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;goto_in&quot;</span><span class="p">,</span> <span class="n">msg_type</span><span class="o">=</span><span class="s2">&quot;String&quot;</span><span class="p">)</span>
+<span class="linenos">19</span><span class="n">goal_point</span> <span class="o">=</span> <span class="n">Topic</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;goal_point&quot;</span><span class="p">,</span> <span class="n">msg_type</span><span class="o">=</span><span class="s2">&quot;PoseStamped&quot;</span><span class="p">)</span>
+<span class="linenos">20</span>
+<span class="linenos">21</span><span class="n">config</span> <span class="o">=</span> <span class="n">LLMConfig</span><span class="p">(</span>
+<span class="linenos">22</span>    <span class="n">enable_rag</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<span class="linenos">23</span>    <span class="n">collection_name</span><span class="o">=</span><span class="s2">&quot;map&quot;</span><span class="p">,</span>
+<span class="linenos">24</span>    <span class="n">distance_func</span><span class="o">=</span><span class="s2">&quot;l2&quot;</span><span class="p">,</span>
+<span class="linenos">25</span>    <span class="n">n_results</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+<span class="linenos">26</span>    <span class="n">add_metadata</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<span class="linenos">27</span><span class="p">)</span>
+<span class="linenos">28</span>
+<span class="linenos">29</span><span class="c1"># initialize the component</span>
+<span class="linenos">30</span><span class="n">goto</span> <span class="o">=</span> <span class="n">LLM</span><span class="p">(</span>
+<span class="linenos">31</span>    <span class="n">inputs</span><span class="o">=</span><span class="p">[</span><span class="n">goto_in</span><span class="p">],</span>
+<span class="linenos">32</span>    <span class="n">outputs</span><span class="o">=</span><span class="p">[</span><span class="n">goal_point</span><span class="p">],</span>
+<span class="linenos">33</span>    <span class="n">model_client</span><span class="o">=</span><span class="n">llama_client</span><span class="p">,</span>
+<span class="linenos">34</span>    <span class="n">db_client</span><span class="o">=</span><span class="n">chroma_client</span><span class="p">,</span>  <span class="c1"># check the previous example where we setup this database client</span>
+<span class="linenos">35</span>    <span class="n">trigger</span><span class="o">=</span><span class="n">goto_in</span><span class="p">,</span>
+<span class="linenos">36</span>    <span class="n">config</span><span class="o">=</span><span class="n">config</span><span class="p">,</span>
+<span class="linenos">37</span>    <span class="n">component_name</span><span class="o">=</span><span class="s2">&quot;go_to_x&quot;</span><span class="p">,</span>
+<span class="linenos">38</span><span class="p">)</span>
+<span class="linenos">39</span>
+<span class="linenos">40</span><span class="c1"># set a component prompt</span>
+<span class="linenos">41</span><span class="n">goto</span><span class="o">.</span><span class="n">set_component_prompt</span><span class="p">(</span>
+<span class="linenos">42</span>    <span class="n">template</span><span class="o">=</span><span class="s2">&quot;&quot;&quot;What are the position coordinates in the given metadata?&quot;&quot;&quot;</span>
+<span class="linenos">43</span><span class="p">)</span>
+<span class="linenos">44</span>
+<span class="linenos">45</span>
+<span class="linenos">46</span><span class="c1"># pre-process the output before publishing to a topic of msg_type PoseStamped</span>
+<span class="linenos">47</span><span class="k">def</span> <span class="nf">get_coordinates</span><span class="p">(</span><span class="n">position</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">float</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+<span class="linenos">48</span><span class="w">    </span><span class="sd">&quot;&quot;&quot;Get position coordinates&quot;&quot;&quot;</span>
+<span class="linenos">49</span>    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">position</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">)</span>
+<span class="linenos">50</span>
+<span class="linenos">51</span>
+<span class="linenos">52</span><span class="n">function_description</span> <span class="o">=</span> <span class="p">{</span>
+<span class="linenos">53</span>    <span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;function&quot;</span><span class="p">,</span>
+<span class="linenos">54</span>    <span class="s2">&quot;function&quot;</span><span class="p">:</span> <span class="p">{</span>
+<span class="linenos">55</span>        <span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;get_coordinates&quot;</span><span class="p">,</span>
+<span class="linenos">56</span>        <span class="s2">&quot;description&quot;</span><span class="p">:</span> <span class="s2">&quot;Get position coordinates&quot;</span><span class="p">,</span>
+<span class="linenos">57</span>        <span class="s2">&quot;parameters&quot;</span><span class="p">:</span> <span class="p">{</span>
+<span class="linenos">58</span>            <span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;object&quot;</span><span class="p">,</span>
+<span class="linenos">59</span>            <span class="s2">&quot;properties&quot;</span><span class="p">:</span> <span class="p">{</span>
+<span class="linenos">60</span>                <span class="s2">&quot;position&quot;</span><span class="p">:</span> <span class="p">{</span>
+<span class="linenos">61</span>                    <span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;list[float]&quot;</span><span class="p">,</span>
+<span class="linenos">62</span>                    <span class="s2">&quot;description&quot;</span><span class="p">:</span> <span class="s2">&quot;The position coordinates in x, y and z&quot;</span><span class="p">,</span>
+<span class="linenos">63</span>                <span class="p">}</span>
+<span class="linenos">64</span>            <span class="p">},</span>
+<span class="linenos">65</span>        <span class="p">},</span>
+<span class="linenos">66</span>        <span class="s2">&quot;required&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;position&quot;</span><span class="p">],</span>
+<span class="linenos">67</span>    <span class="p">},</span>
+<span class="linenos">68</span><span class="p">}</span>
+<span class="linenos">69</span>
+<span class="linenos">70</span><span class="c1"># add the pre-processing function to the goal_point output topic</span>
+<span class="linenos">71</span><span class="n">goto</span><span class="o">.</span><span class="n">register_tool</span><span class="p">(</span>
+<span class="linenos">72</span>    <span class="n">tool</span><span class="o">=</span><span class="n">get_coordinates</span><span class="p">,</span>
+<span class="linenos">73</span>    <span class="n">tool_description</span><span class="o">=</span><span class="n">function_description</span><span class="p">,</span>
+<span class="linenos">74</span>    <span class="n">send_tool_response_to_model</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+<span class="linenos">75</span><span class="p">)</span>
+<span class="linenos">76</span>
+<span class="linenos">77</span><span class="c1"># Launch the component</span>
+<span class="linenos">78</span><span class="n">launcher</span> <span class="o">=</span> <span class="n">Launcher</span><span class="p">()</span>
+<span class="linenos">79</span><span class="n">launcher</span><span class="o">.</span><span class="n">add_pkg</span><span class="p">(</span><span class="n">components</span><span class="o">=</span><span class="p">[</span><span class="n">goto</span><span class="p">])</span>
+<span class="linenos">80</span><span class="n">launcher</span><span class="o">.</span><span class="n">bringup</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="goto.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">Create a Go-to-X component using map data</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="semantic_router.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">Create a semantic router to route text queries between different components</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <div class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#register-a-tool-function-to-be-called-by-the-llm">Register a tool (function) to be called by the LLM</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#launching-the-components">Launching the Components</a></li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By Automatika Robotics
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2025, Automatika Robotics.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

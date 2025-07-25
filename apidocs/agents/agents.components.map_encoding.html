@@ -1,0 +1,707 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta content="cQVj-BaADcGVOGB7GOvfbkgJjxni10C2fYWCZ03jOeo" name="google-site-verification" />
+
+    <title>agents.components.map_encoding &#8212; EmbodiedAgents 0.4.1 documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="../../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=a746c00c" />
+    <link rel="stylesheet" type="text/css" href="../../_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="../../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../../_static/custom.css?v=260ea625" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="../../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="../../_static/documentation_options.js?v=a3cf13c8"></script>
+    <script src="../../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../../_static/copybutton.js?v=f281be69"></script>
+    <script src="../../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'apidocs/agents/agents.components.map_encoding';</script>
+    <link rel="canonical" href="https://automatika-robotics.github.io/embodied-agents/apidocs/agents/agents.components.map_encoding.html" />
+    <link rel="icon" href="../../_static/favicon.png"/>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+        
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../../index.html">
+  
+  
+  
+  
+  
+    
+    
+      
+    
+    
+    <img src="../../_static/EMBODIED_AGENTS_LIGHT.png" class="logo__image only-light" alt="EmbodiedAgents 0.4.1 documentation - Home"/>
+    <script>document.write(`<img src="../../_static/EMBODIED_AGENTS_DARK.png" class="logo__image only-dark" alt="EmbodiedAgents 0.4.1 documentation - Home"/>`);</script>
+  
+  
+</a></div>
+        <div class="sidebar-primary-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://automatikarobotics.com/" title="Automatika" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><img src="../../_static/automatika-logo.png" class="icon-link-image" alt="Automatika"/></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/automatika-robotics/embodied-agents" title="GitHub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-github fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">GitHub</span></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://discord.gg/B9ZU6qjzND" title="Discord" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-discord fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">Discord</span></a>
+        </li>
+</ul></div>
+        <div class="sidebar-primary-item">
+
+ <script>
+ document.write(`
+   <button class="btn search-button-field search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass"></i>
+    <span class="search-button__default-text">Search</span>
+    <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+   </button>
+ `);
+ </script></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../intro.html">EmbodiedAgents 🤖</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../installation.html">Installation 🛠️</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../quickstart.html">Quick Start 🚀</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../basics/index.html">Basic Concepts 📚</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../basics/components.html">Components 🧩</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../basics/clients.html">Clients 🔌</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../basics/models.html">Models / Vector Databases 🧠</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../examples/index.html">Examples ✨</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../examples/conversational.html">Create a conversational agent with audio</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples/prompt_engineering.html">Prompt engineering for LLMs/MLLMs using vision models</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples/semantic_map.html">Create a spatio-temporal semantic map</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples/goto.html">Create a Go-to-X component using map data</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples/tool_calling.html">Use Tool Calling in Go-to-X</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples/semantic_router.html">Create a semantic router to route text queries between different components</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples/complete.html">Bringing it all together 🤖</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples/multiprocessing.html">Making the System Robust And Production Ready</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../index.html">API Reference</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="agents.html"><code class="xref py py-mod docutils literal notranslate"><span class="pre">agents</span></code></a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="agents.clients.html"><code class="xref py py-mod docutils literal notranslate"><span class="pre">agents.clients</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="agents.components.html"><code class="xref py py-mod docutils literal notranslate"><span class="pre">agents.components</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="agents.vectordbs.html"><code class="xref py py-mod docutils literal notranslate"><span class="pre">agents.vectordbs</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="agents.ros.html"><code class="xref py py-mod docutils literal notranslate"><span class="pre">agents.ros</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="agents.models.html"><code class="xref py py-mod docutils literal notranslate"><span class="pre">agents.models</span></code></a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-source-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Source repositories">
+    <i class="fab fa-github"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="https://github.com/automatika-robotics/embodied-agents/blob/main/docs/apidocs/agents/agents.components.map_encoding.md?plain=1" target="_blank"
+   class="btn btn-sm btn-source-file-button dropdown-item"
+   title="Show source"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-code"></i>
+  </span>
+<span class="btn__text-container">Show source</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/automatika-robotics/embodied-agents/edit/main/docs/apidocs/agents/agents.components.map_encoding.md" target="_blank"
+   class="btn btn-sm btn-source-edit-button dropdown-item"
+   title="Suggest edit"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-pencil-alt"></i>
+  </span>
+<span class="btn__text-container">Suggest edit</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/automatika-robotics/embodied-agents/issues/new?title=Issue%20on%20page%20%2Fapidocs/agents/agents.components.map_encoding.html&body=Your%20issue%20content%20here." target="_blank"
+   class="btn btn-sm btn-source-issues-button dropdown-item"
+   title="Open an issue"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-lightbulb"></i>
+  </span>
+<span class="btn__text-container">Open issue</span>
+</a>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="../../_sources/apidocs/agents/agents.components.map_encoding.md" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.md</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+<button class="sidebar-toggle secondary-toggle btn btn-sm" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>agents.components.map_encoding</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#module-contents">Module Contents</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#classes">Classes</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#api">API</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#agents.components.map_encoding.MapEncoding"><code class="docutils literal notranslate"><span class="pre">MapEncoding</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#agents.components.map_encoding.MapEncoding.custom_on_configure"><code class="docutils literal notranslate"><span class="pre">MapEncoding.custom_on_configure()</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#agents.components.map_encoding.MapEncoding.custom_on_deactivate"><code class="docutils literal notranslate"><span class="pre">MapEncoding.custom_on_deactivate()</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#agents.components.map_encoding.MapEncoding.add_point"><code class="docutils literal notranslate"><span class="pre">MapEncoding.add_point()</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#agents.components.map_encoding.MapEncoding.custom_on_activate"><code class="docutils literal notranslate"><span class="pre">MapEncoding.custom_on_activate()</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#agents.components.map_encoding.MapEncoding.create_all_subscribers"><code class="docutils literal notranslate"><span class="pre">MapEncoding.create_all_subscribers()</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#agents.components.map_encoding.MapEncoding.activate_all_triggers"><code class="docutils literal notranslate"><span class="pre">MapEncoding.activate_all_triggers()</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#agents.components.map_encoding.MapEncoding.destroy_all_subscribers"><code class="docutils literal notranslate"><span class="pre">MapEncoding.destroy_all_subscribers()</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#agents.components.map_encoding.MapEncoding.trigger"><code class="docutils literal notranslate"><span class="pre">MapEncoding.trigger()</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#agents.components.map_encoding.MapEncoding.validate_topics"><code class="docutils literal notranslate"><span class="pre">MapEncoding.validate_topics()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section class="tex2jax_ignore mathjax_ignore" id="module-agents.components.map_encoding">
+<span id="agents-components-map-encoding"></span><h1><a class="reference internal" href="#module-agents.components.map_encoding" title="agents.components.map_encoding"><code class="xref py py-mod docutils literal notranslate"><span class="pre">agents.components.map_encoding</span></code></a><a class="headerlink" href="#module-agents.components.map_encoding" title="Link to this heading">#</a></h1>
+<section id="module-contents">
+<h2>Module Contents<a class="headerlink" href="#module-contents" title="Link to this heading">#</a></h2>
+<section id="classes">
+<h3>Classes<a class="headerlink" href="#classes" title="Link to this heading">#</a></h3>
+<div class="pst-scrollable-table-container"><table class="autosummary longtable table table-left">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#agents.components.map_encoding.MapEncoding" title="agents.components.map_encoding.MapEncoding"><code class="xref py py-obj docutils literal notranslate"><span class="pre">MapEncoding</span></code></a></p></td>
+<td><p>Map encoding component that encodes text information as a semantic map based on the robots localization.
+It takes in map layers, position topic, map occupancy grid topic, and a vector database client.
+Map layers can be arbitrary text based outputs from other components such as MLLMs or Vision.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="api">
+<h3>API<a class="headerlink" href="#api" title="Link to this heading">#</a></h3>
+<dl class="py class">
+<dt class="sig sig-object py" id="agents.components.map_encoding.MapEncoding">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">agents.components.map_encoding.</span></span><span class="sig-name descname"><span class="pre">MapEncoding</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">layers</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="agents.ros.html#agents.ros.MapLayer" title="agents.ros.MapLayer"><span class="pre">agents.ros.MapLayer</span></a><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">position</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="agents.ros.html#agents.ros.Topic" title="agents.ros.Topic"><span class="pre">agents.ros.Topic</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">map_topic</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="agents.ros.html#agents.ros.Topic" title="agents.ros.Topic"><span class="pre">agents.ros.Topic</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">config</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="agents.config.html#agents.config.MapConfig" title="agents.config.MapConfig"><span class="pre">agents.config.MapConfig</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">db_client</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">agents.clients.db_base.DBClient</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">trigger</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Union</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="agents.ros.html#agents.ros.Topic" title="agents.ros.Topic"><span class="pre">agents.ros.Topic</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">List</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="agents.ros.html#agents.ros.Topic" title="agents.ros.Topic"><span class="pre">agents.ros.Topic</span></a><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">10.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">component_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#agents.components.map_encoding.MapEncoding" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <code class="xref py py-obj docutils literal notranslate"><span class="pre">agents.components.component_base.Component</span></code></p>
+<p>Map encoding component that encodes text information as a semantic map based on the robots localization.
+It takes in map layers, position topic, map occupancy grid topic, and a vector database client.
+Map layers can be arbitrary text based outputs from other components such as MLLMs or Vision.</p>
+<dl class="myst field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>layers</strong> (<em>list</em><em>[</em><a class="reference internal" href="agents.ros.html#agents.ros.MapLayer" title="agents.ros.MapLayer"><em>MapLayer</em></a><em>]</em>) – A list of map layer objects to be encoded.</p></li>
+<li><p><strong>position</strong> (<a class="reference internal" href="agents.ros.html#agents.ros.Topic" title="agents.ros.Topic"><em>Topic</em></a>) – The topic for the current robot position.</p></li>
+<li><p><strong>map_topic</strong> (<a class="reference internal" href="agents.ros.html#agents.ros.Topic" title="agents.ros.Topic"><em>Topic</em></a>) – The OccupancyGrid topic for storing and retrieving map data.</p></li>
+<li><p><strong>config</strong> (<a class="reference internal" href="agents.config.html#agents.config.MapConfig" title="agents.config.MapConfig"><em>MapConfig</em></a>) – The configuration for the map encoding component.</p></li>
+<li><p><strong>db_client</strong> (<em>DBClient</em>) – A database client to store and retrieve map data.</p></li>
+<li><p><strong>trigger</strong> (<em>Union</em><em>[</em><a class="reference internal" href="agents.ros.html#agents.ros.Topic" title="agents.ros.Topic"><em>Topic</em></a><em>, </em><em>list</em><em>[</em><a class="reference internal" href="agents.ros.html#agents.ros.Topic" title="agents.ros.Topic"><em>Topic</em></a><em>]</em><em>, </em><em>float</em><em>]</em>) – An optional trigger value or topic that triggers the map encoding process.</p></li>
+<li><p><strong>component_name</strong> (<em>str</em>) – The name of the MapEncoding component.
+This should be a string.</p></li>
+<li><p><strong>kwargs</strong> – Additional keyword arguments.</p></li>
+</ul>
+</dd>
+</dl>
+<p>Example usage:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">position_topic</span> <span class="o">=</span> <span class="n">Topic</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;position&quot;</span><span class="p">,</span> <span class="n">msg_type</span><span class="o">=</span><span class="s2">&quot;Odometry&quot;</span><span class="p">)</span>
+<span class="n">map_topic</span> <span class="o">=</span> <span class="n">Topic</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;map&quot;</span><span class="p">,</span> <span class="n">msg_type</span><span class="o">=</span><span class="s2">&quot;OccupancyGrid&quot;</span><span class="p">)</span>
+<span class="n">config</span> <span class="o">=</span> <span class="n">MapConfig</span><span class="p">(</span><span class="n">map_name</span><span class="o">=</span><span class="s2">&quot;map&quot;</span><span class="p">)</span>
+<span class="n">db_client</span> <span class="o">=</span> <span class="n">DBClient</span><span class="p">(</span><span class="n">db</span><span class="o">=</span><span class="n">ChromaDB</span><span class="p">(</span><span class="s2">&quot;database_name&quot;</span><span class="p">))</span>
+<span class="n">layers</span> <span class="o">=</span> <span class="p">[</span><span class="n">MapLayer</span><span class="p">(</span><span class="n">subscribes_to</span><span class="o">=</span><span class="n">text1</span><span class="p">,</span> <span class="n">resolution_multiple</span><span class="o">=</span><span class="mi">3</span><span class="p">),</span>
+          <span class="n">MapLayer</span><span class="p">(</span><span class="n">subscribes_to</span><span class="o">=</span><span class="n">detections1</span><span class="p">,</span> <span class="n">temporal_change</span><span class="o">=</span><span class="kc">True</span><span class="p">)]</span>  <span class="c1"># text1 and detections1 are String topics that are being published on by other components</span>
+<span class="n">map_encoding_component</span> <span class="o">=</span> <span class="n">MapEncoding</span><span class="p">(</span>
+    <span class="n">layers</span><span class="o">=</span><span class="n">layers</span><span class="p">,</span>
+    <span class="n">position</span><span class="o">=</span><span class="n">position_topic</span><span class="p">,</span>
+    <span class="n">map_topic</span><span class="o">=</span><span class="n">map_topic</span><span class="p">,</span>
+    <span class="n">config</span><span class="o">=</span><span class="n">config</span><span class="p">,</span>
+    <span class="n">db_client</span><span class="o">=</span><span class="n">db_client</span><span class="p">,</span>
+    <span class="n">component_name</span><span class="o">=</span><span class="s2">&quot;semantic_map&quot;</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+<dl class="py method">
+<dt class="sig sig-object py" id="agents.components.map_encoding.MapEncoding.custom_on_configure">
+<span class="sig-name descname"><span class="pre">custom_on_configure</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#agents.components.map_encoding.MapEncoding.custom_on_configure" title="Link to this definition">#</a></dt>
+<dd><p>configure.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="agents.components.map_encoding.MapEncoding.custom_on_deactivate">
+<span class="sig-name descname"><span class="pre">custom_on_deactivate</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#agents.components.map_encoding.MapEncoding.custom_on_deactivate" title="Link to this definition">#</a></dt>
+<dd><p>deactivate.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="agents.components.map_encoding.MapEncoding.add_point">
+<span class="sig-name descname"><span class="pre">add_point</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">layer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="agents.ros.html#agents.ros.MapLayer" title="agents.ros.MapLayer"><span class="pre">agents.ros.MapLayer</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">point</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">numpy.ndarray</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#agents.components.map_encoding.MapEncoding.add_point" title="Link to this definition">#</a></dt>
+<dd><p>Component action to add a user defined point to the map collection.
+This action can be executed on an event.</p>
+<dl class="myst field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>layer</strong> (<a class="reference internal" href="agents.ros.html#agents.ros.MapLayer" title="agents.ros.MapLayer"><em>MapLayer</em></a>) – Layer to which the point should be added</p></li>
+<li><p><strong>point</strong> (<em>tuple</em><em>[</em><em>np.ndarray</em><em>, </em><em>str</em><em>]</em>) – A tuple of position (numpy array) and text data (str)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="agents.components.map_encoding.MapEncoding.custom_on_activate">
+<span class="sig-name descname"><span class="pre">custom_on_activate</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#agents.components.map_encoding.MapEncoding.custom_on_activate" title="Link to this definition">#</a></dt>
+<dd><p>Custom configuration for creating triggers.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="agents.components.map_encoding.MapEncoding.create_all_subscribers">
+<span class="sig-name descname"><span class="pre">create_all_subscribers</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#agents.components.map_encoding.MapEncoding.create_all_subscribers" title="Link to this definition">#</a></dt>
+<dd><p>Override to handle trigger topics and fixed inputs.
+Called by parent BaseComponent</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="agents.components.map_encoding.MapEncoding.activate_all_triggers">
+<span class="sig-name descname"><span class="pre">activate_all_triggers</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#agents.components.map_encoding.MapEncoding.activate_all_triggers" title="Link to this definition">#</a></dt>
+<dd><p>Activates component triggers by attaching execution step to callbacks</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="agents.components.map_encoding.MapEncoding.destroy_all_subscribers">
+<span class="sig-name descname"><span class="pre">destroy_all_subscribers</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#agents.components.map_encoding.MapEncoding.destroy_all_subscribers" title="Link to this definition">#</a></dt>
+<dd><p>Destroys all node subscribers</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="agents.components.map_encoding.MapEncoding.trigger">
+<span class="sig-name descname"><span class="pre">trigger</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">trigger</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Union</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="agents.ros.html#agents.ros.Topic" title="agents.ros.Topic"><span class="pre">agents.ros.Topic</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">List</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="agents.ros.html#agents.ros.Topic" title="agents.ros.Topic"><span class="pre">agents.ros.Topic</span></a><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#agents.components.map_encoding.MapEncoding.trigger" title="Link to this definition">#</a></dt>
+<dd><p>Set component trigger</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="agents.components.map_encoding.MapEncoding.validate_topics">
+<span class="sig-name descname"><span class="pre">validate_topics</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">topics</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">Union</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="agents.ros.html#agents.ros.Topic" title="agents.ros.Topic"><span class="pre">agents.ros.Topic</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference internal" href="agents.ros.html#agents.ros.FixedInput" title="agents.ros.FixedInput"><span class="pre">agents.ros.FixedInput</span></a><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">allowed_topic_types</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Optional</span><span class="p"><span class="pre">[</span></span><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">List</span><span class="p"><span class="pre">[</span></span><span class="pre">Union</span><span class="p"><span class="pre">[</span></span><span class="pre">Type</span><span class="p"><span class="pre">[</span></span><span class="pre">agents.ros.SupportedType</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">List</span><span class="p"><span class="pre">[</span></span><span class="pre">Type</span><span class="p"><span class="pre">[</span></span><span class="pre">agents.ros.SupportedType</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">topics_direction</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'Topics'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#agents.components.map_encoding.MapEncoding.validate_topics" title="Link to this definition">#</a></dt>
+<dd><p>Verify component specific inputs or outputs using allowed topics if provided</p>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <div class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#module-contents">Module Contents</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#classes">Classes</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#api">API</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#agents.components.map_encoding.MapEncoding"><code class="docutils literal notranslate"><span class="pre">MapEncoding</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#agents.components.map_encoding.MapEncoding.custom_on_configure"><code class="docutils literal notranslate"><span class="pre">MapEncoding.custom_on_configure()</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#agents.components.map_encoding.MapEncoding.custom_on_deactivate"><code class="docutils literal notranslate"><span class="pre">MapEncoding.custom_on_deactivate()</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#agents.components.map_encoding.MapEncoding.add_point"><code class="docutils literal notranslate"><span class="pre">MapEncoding.add_point()</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#agents.components.map_encoding.MapEncoding.custom_on_activate"><code class="docutils literal notranslate"><span class="pre">MapEncoding.custom_on_activate()</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#agents.components.map_encoding.MapEncoding.create_all_subscribers"><code class="docutils literal notranslate"><span class="pre">MapEncoding.create_all_subscribers()</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#agents.components.map_encoding.MapEncoding.activate_all_triggers"><code class="docutils literal notranslate"><span class="pre">MapEncoding.activate_all_triggers()</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#agents.components.map_encoding.MapEncoding.destroy_all_subscribers"><code class="docutils literal notranslate"><span class="pre">MapEncoding.destroy_all_subscribers()</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#agents.components.map_encoding.MapEncoding.trigger"><code class="docutils literal notranslate"><span class="pre">MapEncoding.trigger()</span></code></a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#agents.components.map_encoding.MapEncoding.validate_topics"><code class="docutils literal notranslate"><span class="pre">MapEncoding.validate_topics()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By Automatika Robotics
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2025, Automatika Robotics.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>
