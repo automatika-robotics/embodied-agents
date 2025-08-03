@@ -49,7 +49,7 @@ class LLM(ModelComponent):
     text0 = Topic(name="text0", msg_type="String")
     text1 = Topic(name="text1", msg_type="String")
     config = LLMConfig()
-    model = Llama3(name='llama')
+    model = OllamaModel(name='llama', checkpoint='llama3.2:3b')
     model_client = ModelClient(model=model)
     llm_component = LLM(inputs=[text0],
                         outputs=[text1],

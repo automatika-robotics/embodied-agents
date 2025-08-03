@@ -8,7 +8,7 @@ from agents.config import LLMConfig
 from agents.clients import ChromaClient, OllamaClient
 from agents.ros import Launcher, Topic
 
-# Start a Llama3.1 based llm component using ollama client
+# Start a Llama3.2 based llm component using ollama client
 llama = OllamaModel(name="llama", checkpoint="llama3.2:3b")
 llama_client = OllamaClient(llama)
 
