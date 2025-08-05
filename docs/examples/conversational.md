@@ -43,7 +43,7 @@ Check the available defaults and options for the SpeechToTextConfig [here](../ap
 To initialize the component we also need a model client for a speech to text model. We will be using the WebSocket client for RoboML for this purpose.
 
 ```{note}
-RoboML is a aggregator library that provides a model serving aparatus for locally serving opensource ML models useful in robotics. Learn about setting up RoboML [here](https://www.github.com/automatika-robotics/roboml).
+RoboML is an aggregator library that provides a model serving aparatus for locally serving opensource ML models useful in robotics. Learn about setting up RoboML [here](https://www.github.com/automatika-robotics/roboml).
 ```
 
 Additionally, we will use the client with a model called, Whisper, a popular opensource speech to text model from OpenAI. Lets see what the looks like in code.

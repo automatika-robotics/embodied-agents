@@ -2,7 +2,7 @@
 
 While semantic routing can be implemented with an LLM component, _EmbodiedAgents_ also provides a convenient SemanticRouter component that works directly with text encoding distances and can be utilized with a vector DB.
 
-In this example we will use the SemanticRouter component to route text queries between two components, a general purpose LLM and a Go-to-X component that we built in the previous [example](goto.md). Lets start by setting up our components.
+In this recipe we will use the SemanticRouter component to route text queries between two components, a general purpose LLM and a Go-to-X component that we built in the previous [example](goto.md). Lets start by setting up our components.
 
 ## Setting up the components
 

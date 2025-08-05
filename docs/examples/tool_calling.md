@@ -1,6 +1,6 @@
 # Use Tool Calling in Go-to-X
 
-In the previous [example](goto.md) we created a Go-to-X component using basic text manipulation on LLM output. However, for models that have been specifically trained for tool calling, one can get better results for structured outputs by invoking tool calling. At the same time tool calling can be useful to generate responses which require intermediate use of tools by the LLM before providing a final answer. In this example we will utilize tool calling for the former utility of getting a better structured output from the LLM, by reimplementing the Go-to-X component.
+In the previous [recipe](goto.md) we created a Go-to-X component using basic text manipulation on LLM output. However, for models that have been specifically trained for tool calling, one can get better results for structured outputs by invoking tool calling. At the same time tool calling can be useful to generate responses which require intermediate use of tools by the LLM before providing a final answer. In this example we will utilize tool calling for the former utility of getting a better structured output from the LLM, by reimplementing the Go-to-X component.
 
 ## Register a tool (function) to be called by the LLM
 To utilize tool calling we will change our strategy of doing pre-processing to LLM text output, and instead ask the LLM to provide structured input to a function (tool). The output of this function will then be sent for publishing to the output topic. Lets see what this will look like in the following code snippets.

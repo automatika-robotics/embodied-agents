@@ -1,8 +1,8 @@
-# Examples ✨
+# Recipes ✨
 
 Welcome to the **_EmbodiedAgents_ Examples** section!
 
-Here you’ll find a curated set of short, focused tutorials that demonstrate how to use **EmbodiedAgents** to build real-world robotic capabilities through its modular architecture. These examples illustrate how perception, language, planning, memory, and control can be integrated to build powerful embodied systems.
+Here you’ll find a curated set of short, focused tutorials that demonstrate how to use **EmbodiedAgents** to build real-world robotic capabilities through its modular architecture. These _recipes_ illustrate how perception, language, planning, memory, and control can be integrated to build powerful embodied systems.
 
 Each tutorial walks through one or more [components](../basics/components.md) (e.g., LLM, SpeechToText etc.), and is designed to be run end-to-end. We recommend going through them in order, especially if you're new to the framework.
 
@@ -27,11 +27,12 @@ tool_calling
 semantic_router
 complete
 multiprocessing
+planning_model
 ```
 
 ---
 
-Each example includes:
+Each recipe includes:
 
 - **Minimal working code**
 - **Explanation of design choices**
