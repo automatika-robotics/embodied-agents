@@ -20,7 +20,7 @@ Get started with the [Quickstart Guide](quickstart.md) 🚀
 
 Get familiar with [Basic Concepts](basics/index.md) 📚
 
-Dive right in with [Examples](examples/index.md) ✨
+Dive right in with [Examples Recipes](examples/index.md) ✨
 
 ## Contributions
 
