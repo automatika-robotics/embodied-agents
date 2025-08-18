@@ -21,7 +21,7 @@ Get started with the [Quickstart Guide](https://automatika-robotics.github.io/em
 
 Get familiar with [Basic Concepts](https://automatika-robotics.github.io/embodied-agents/basics.html) 📚
 
-Dive right in with [Examples](https://automatika-robotics.github.io/embodied-agents/examples/index.html) ✨
+Dive right in with [Example Recipes](https://automatika-robotics.github.io/embodied-agents/examples/index.html) ✨
 
 ## Installation 🛠️
 

@@ -1,6 +1,6 @@
 # Recipes ✨
 
-Welcome to the **_EmbodiedAgents_ Examples** section!
+Welcome to the **_EmbodiedAgents_ Recipes** section!
 
 Here you’ll find a curated set of short, focused tutorials that demonstrate how to use **EmbodiedAgents** to build real-world robotic capabilities through its modular architecture. These _recipes_ illustrate how perception, language, planning, memory, and control can be integrated to build powerful embodied systems.
 
