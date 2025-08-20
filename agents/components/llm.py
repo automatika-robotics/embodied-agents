@@ -140,7 +140,13 @@ class LLM(ModelComponent):
         if self.config.stream:
             self.result_partial: List = []
             self.result_complete: List = []
-            # issue a warning in case StreamingText type is not used
+            # issue a warning in case StreamingText type is not used in output
+            streaming_string_topics = any(
+                topic.msg_type is StreamingString for topic in self.out_topics
+            )
+            if not streaming_string_topics:
+                self.get_logger().warning("""Consider using `StreamingString` msg_type when streaming text responses from LLMs/MLLMs. Example:
+    output_topic = Topic(name='<topic_name>', msg_type='StreamingString')""")
 
     def custom_on_deactivate(self):
         # deactivate db client
