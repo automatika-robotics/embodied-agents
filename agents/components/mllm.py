@@ -8,6 +8,7 @@ from ..ros import (
     FixedInput,
     Image,
     String,
+    StreamingString,
     Topic,
     Detections,
     RGBD,
@@ -73,7 +74,7 @@ class MLLM(LLM):
         **kwargs,
     ):
         self.allowed_inputs = {
-            "Required": [String, [Image, RGBD]],
+            "Required": [[String, StreamingString], [Image, RGBD]],
             "Optional": [Detections],
         }
 
@@ -91,7 +92,7 @@ class MLLM(LLM):
             **kwargs,
         )
 
-        self.handled_outputs = [String, Detections, PointsOfInterest]
+        self.handled_outputs = [String, StreamingString, Detections, PointsOfInterest]
         self._images: List[Union[np.ndarray, ROSImage, ROSCompressedImage]] = []
 
     def custom_on_configure(self):
@@ -108,7 +109,7 @@ class MLLM(LLM):
 
             # Loop through the list of topics and categorize them
             for topic in self.out_topics:
-                if topic.msg_type is String:
+                if topic.msg_type in [String, StreamingString]:
                     self._string_publishers.append(topic.name)
                 elif topic.msg_type is PointsOfInterest:
                     self._poi_publishers.append(topic.name)
@@ -140,7 +141,7 @@ class MLLM(LLM):
                 continue
             msg_type = i.input_topic.msg_type
             # set trigger equal to a topic with type String if trigger not found
-            if msg_type is String:
+            if msg_type in [String, StreamingString]:
                 if not query:
                     query = item
                 context[i.input_topic.name] = item

@@ -9,7 +9,7 @@ from ..clients.db_base import DBClient
 from ..clients.model_base import ModelClient
 from ..clients import OllamaClient, GenericHTTPClient
 from ..config import LLMConfig
-from ..ros import FixedInput, String, Topic, Detections
+from ..ros import FixedInput, String, Topic, Detections, StreamingString
 from ..utils import get_prompt_template, validate_func_args
 from .model_component import ModelComponent
 from .component_base import ComponentRunType
@@ -77,9 +77,9 @@ class LLM(ModelComponent):
         self.allowed_inputs = (
             kwargs["allowed_inputs"]
             if kwargs.get("allowed_inputs")
-            else {"Required": [String], "Optional": [Detections]}
+            else {"Required": [[String, StreamingString]], "Optional": [Detections]}
         )
-        self.handled_outputs = [String]
+        self.handled_outputs = [String, StreamingString]
 
         self.model_client = model_client
 
@@ -140,6 +140,7 @@ class LLM(ModelComponent):
         if self.config.stream:
             self.result_partial: List = []
             self.result_complete: List = []
+            # issue a warning in case StreamingText type is not used
 
     def custom_on_deactivate(self):
         # deactivate db client
@@ -336,7 +337,7 @@ class LLM(ModelComponent):
                 continue
             msg_type = i.input_topic.msg_type
             # set trigger equal to a topic with type String if trigger not found
-            if msg_type is String:
+            if msg_type in [String, StreamingString]:
                 if not query:
                     query = item
                 context[i.input_topic.name] = item
@@ -381,11 +382,17 @@ class LLM(ModelComponent):
             self.result_partial.append(token)
             if self.config.break_character in token:
                 self.result_complete += self.result_partial
-                self._publish({"output": "".join(self.result_partial)})
+                self._publish(
+                    {"output": "".join(self.result_partial)}, stream=True, done=False
+                )
                 self.result_partial = []
         else:
             self.result_complete.append(token)
-            self._publish({"output": token})
+            # Publish tokens as they arrive
+            # If the token is empty, indicate that the stream is finished
+            self._publish(
+                {"output": token}, stream=True, done=(False if token else True)
+            )
             self.result_partial = []
 
     def __finalize_stream(self):
@@ -394,10 +401,15 @@ class LLM(ModelComponent):
         appending the complete message to the message history.
         """
         # Send remaining result after break character or termination if any
-        if self.result_partial:
-            self.result_complete += self.result_partial
-            self._publish({"output": "".join(self.result_partial)})
-            self.result_partial = []
+        if self.config.break_character:
+            if self.result_partial:
+                self.result_complete += self.result_partial
+                self._publish({"output": "".join(self.result_partial)}, stream=True)
+                self.result_partial = []
+            else:
+                # Publish an empty msg to mark the end of stream
+                # (useful only with StreamingText)
+                self._publish({"output": ""}, stream=True)
 
         self.messages.append({
             "role": "assistant",
@@ -421,9 +433,10 @@ class LLM(ModelComponent):
         """Handle streaming output"""
         try:
             for token in result["output"]:
-                # Handle ollama client streaming format
+                # Handle ollama client result format
                 if isinstance(self.model_client, OllamaClient):
                     token = token["message"]["content"]
+                # Handle OpenAI style API result format
                 elif isinstance(self.model_client, GenericHTTPClient):
                     token = token["choices"][0]["delta"]["content"]
                 self.__process_stream_token(token)

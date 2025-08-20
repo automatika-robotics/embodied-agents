@@ -9,7 +9,7 @@ import time
 from ..clients.model_base import ModelClient
 from ..clients import RoboMLWSClient, RoboMLRESPClient
 from ..config import TextToSpeechConfig
-from ..ros import Audio, String, Topic
+from ..ros import Audio, String, Topic, StreamingString
 from ..utils import validate_func_args
 from .model_component import ModelComponent
 from .component_base import ComponentRunType
@@ -66,7 +66,7 @@ class TextToSpeech(ModelComponent):
         **kwargs,
     ):
         self.config: TextToSpeechConfig = config or TextToSpeechConfig()
-        self.allowed_inputs = {"Required": [String]}
+        self.allowed_inputs = {"Required": [[String, StreamingString]]}
         self.handled_outputs = [Audio]
 
         if isinstance(trigger, float):
