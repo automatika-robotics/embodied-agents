@@ -12,11 +12,6 @@ from ros_client import ClientNode
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
-
-# Mount the 'static' directory to serve CSS and JS files
-app.mount("/static", StaticFiles(directory="frontend/static"), name="static")
-
 # Initialize ROS2 in the main thread
 rclpy.init()
 
@@ -57,6 +52,12 @@ async def lifespan(app: FastAPI):
     logger.info("ROS2 node shut down completely.")
 
 
+app = FastAPI(lifespan=lifespan)
+
+# Mount the 'static' directory to serve CSS and JS files
+app.mount("/static", StaticFiles(directory="frontend/static"), name="static")
+
+
 @app.get("/")
 async def get_index():
     """Serves the main index.html file."""
@@ -82,6 +83,7 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             # Wait for a message from the client
             data = await websocket.receive_json()
+            logger.info(f"Received data from WebSocket: {data}")
 
             # Pass the message to the ROS node
             if ros_node:
