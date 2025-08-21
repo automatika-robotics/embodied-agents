@@ -1,6 +1,7 @@
 from io import BytesIO
 from typing import Union, Optional, List
 from enum import Enum
+import threading
 
 import chainlit as cl
 from chainlit.element import ElementBased
@@ -9,12 +10,14 @@ from chainlit.input_widget import TextInput
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import ByteMultiArray, String
+from automatika_embodied_agents.msg import StreamingString
 
 
 class Status(Enum):
-    INIT = 0
-    RECEIVED_TEXT = 1
-    RECEIVED_AUDIO = 2
+    INIT_TEXT = 0
+    INIT_AUDIO = 1
+    RECEIVED_TEXT = 3
+    RECEIVED_AUDIO = 4
     TIMEOUT = 3
 
 
@@ -33,47 +36,64 @@ class ClientNode(Node):
         self.set_trigger("text0", "audio0")
         self.set_target("text1", "audio1")
 
-    def publish(self, prompt: Union[str, bytes]) -> None:
+    def publish_text(self, prompt: str) -> None:
         """
-        Publish to the trigger topics and listen to the target topics
+        Publish text to the trigger topics and listen on the target topics
 
         :param      prompt:  The prompt/question
-        :type       prompt:  {str, bytes}
+        :type       prompt:  str
 
         :returns:   None
         :rtype:     None
         """
 
         # set timeout flag
-        self.msg_received = Status.INIT
+        self.msg_received = Status.INIT_TEXT
         # Check for publishers on available topic and quit if none available
-        if isinstance(prompt, bytes):
-            if not self.count_subscribers(self.audio_trigger) > 0:
-                self.get_logger().info(
-                    f"No one is listening to {self.audio_trigger}, so I am timing out"
-                )
-                self.timer = self.create_timer(0, self.timer_callback)
-                return None
-            msg = ByteMultiArray()
-            msg.data = prompt
-            self.audio_publisher.publish(msg)
-            self.get_logger().info(f"Publishing to {self.audio_trigger}")
-        else:
-            if not self.count_subscribers(self.text_trigger) > 0:
-                self.get_logger().info(
-                    f"No one is listening to {self.text_trigger}, so I am timing out"
-                )
-                self.timer = self.create_timer(0, self.timer_callback)
-                return None
-            # Create and publish message
-            msg = String()
-            msg.data = prompt
-            self.text_publisher.publish(msg)
-            self.get_logger().info(f"Publishing to {self.text_trigger}")
+        if not self.count_subscribers(self.text_trigger) > 0:
+            self.get_logger().info(
+                f"No one is listening to {self.text_trigger}, so I am timing out"
+            )
+            self.timer = self.create_timer(0, self.timer_callback)
+            return None
+        # Create and publish message
+        msg = String()
+        msg.data = prompt
+        self.text_publisher.publish(msg)
+        self.get_logger().info(f"Publishing to {self.text_trigger}")
 
         self.get_logger().info("Now listening..")
 
-    def listener_callback(self, msg: Union[String, ByteMultiArray]) -> None:
+    def publish_audio(self, prompt: bytes) -> None:
+        """
+        Publish audio to the trigger topic and listen on the target topic
+
+        :param      prompt:  The prompt/question
+        :type       prompt:  bytes
+
+        :returns:   None
+        :rtype:     None
+        """
+
+        # set timeout flag
+        self.msg_received = Status.INIT_AUDIO
+        # Check for publishers on available topic and quit if none available
+        if not self.count_subscribers(self.audio_trigger) > 0:
+            self.get_logger().info(
+                f"No one is listening to {self.audio_trigger}, so I am timing out"
+            )
+            self.timer = self.create_timer(0, self.timer_callback)
+            return None
+        msg = ByteMultiArray()
+        msg.data = prompt
+        self.audio_publisher.publish(msg)
+        self.get_logger().info(f"Publishing to {self.audio_trigger}")
+
+        self.get_logger().info("Now listening..")
+
+    def listener_callback(
+        self, msg: Union[StreamingString, String, ByteMultiArray]
+    ) -> None:
         """
         Listener callback
 
@@ -84,7 +104,22 @@ class ClientNode(Node):
             self.msg_received = Status.RECEIVED_TEXT
             self.get_logger().info(f"A: {msg.data}")
             self.msg = msg.data
+        elif isinstance(msg, StreamingString):
+            # Append or replace depending on design
+            if not hasattr(self, "partial_text"):
+                self.partial_text = ""
+            self.partial_text += msg.data
+
+            # Store last chunk
+            self.msg = self.partial_text
+
+            # Push to Chainlit stream handler
+            if not msg.done:
+                cl.run_sync(self.push_stream_update(msg.data))
+            else:
+                cl.run_sync(self.finalize_stream())
         elif isinstance(msg, ByteMultiArray):
+            self.msg_received = Status.RECEIVED_TEXT
             self.msg_received = Status.RECEIVED_AUDIO
             self.get_logger().info("A: Audio bytes")
             self.msg = b"".join(msg.data)
@@ -125,7 +160,7 @@ class ClientNode(Node):
             self.destroy_subscription(self.text_subscription)
         self.text_target = text_target
         self.text_subscription = self.create_subscription(
-            String, self.text_target, self.listener_callback, 1
+            StreamingString, self.text_target, self.listener_callback, 1
         )
 
         if hasattr(self, "audio_subscription"):
@@ -135,15 +170,48 @@ class ClientNode(Node):
             ByteMultiArray, self.audio_target, self.listener_callback, 1
         )
 
+    async def start_stream(self):
+        self.current_message = cl.Message(author="Robot", content="")
+        await self.current_message.send()
+
+    async def push_stream_update(self, token: str):
+        if self.current_message:
+            await self.current_message.stream_token(token)
+
+    async def finalize_stream(self):
+        if self.current_message:
+            await self.current_message.update()
+            self.current_message = None
+
+
+def start_ros_spin(node: Node):
+    executor = rclpy.executors.SingleThreadedExecutor()
+    executor.add_node(node)
+    try:
+        executor.spin()
+    finally:
+        executor.shutdown()
+        node.destroy_node()
+
 
 @cl.on_chat_start
 async def on_chat_start():
     """
     On chat start, specify default settings
     """
-    # Init rclpy
+    # Init rclpy and start ros node
     if not rclpy.ok():
         rclpy.init()
+        client: ClientNode = ClientNode()
+        cl.user_session.set("client", client)
+
+        # spin in background thread
+        ros_thread = threading.Thread(
+            target=start_ros_spin, args=(client,), daemon=True
+        )
+        ros_thread.start()
+        cl.user_session.set("ros_thread", ros_thread)
+
     await cl.ChatSettings([
         TextInput(
             id="text_trigger",
@@ -171,7 +239,7 @@ async def on_chat_start():
     client: ClientNode = ClientNode()
     cl.user_session.set("client", client)
     await cl.Message(
-        content="Welcome to Leibniz ROS client. Set the input/output topics in settings. Then type your message or press `P` to send audio!"
+        content="Welcome to EmbodiedAgents tiny web client. Set the input/output topics in settings. Then type your message or press `P` to send audio!"
     ).send()
 
 
@@ -188,28 +256,41 @@ async def setup_ros_node(settings):
     cl.user_session.set("timeout", int(settings["timeout"]))
 
 
-@cl.step(type="run")
-def publish_on_ros(msg: Union[str, bytes]):
+@cl.step(type="run", show_input=False)
+async def publish_text_on_ros(msg: str):
+    """Publish input to the ROS Client node.
+    :param msg:
+    :type msg: Union[str, bytes]
+    """
+    client: ClientNode = cl.user_session.get("client")
+    client.publish_text(msg)
+
+
+@cl.step(type="run", show_input=False)
+async def publish_audio_on_ros(msg: bytes):
     """Publish input to the ROS Client node.
     :param msg:
     :type msg: Union[str, bytes]
     """
     timeout: int = cl.user_session.get("timeout")
     client: ClientNode = cl.user_session.get("client")
-    client.publish(msg)
+    client.publish_audio(msg)
     rclpy.spin_once(client, timeout_sec=timeout)
 
 
-@cl.step(type="run")
 async def handle_output(msg_type: type):
     """Handle Output from the ROS Client node.
     :param msg_type:
     :type msg_type: type
     """
     client: ClientNode = cl.user_session.get("client")
-    if client.msg_received is Status.INIT:
+    if client.msg_received is Status.INIT_TEXT:
         await cl.Message(
-            content=f"I did not receive a message on **{client.text_target}** or **{client.audio_target}**. Timedout.",
+            content=f"I did not receive a message on **{client.text_target}**. Timedout.",
+        ).send()
+    elif client.msg_received is Status.INIT_AUDIO:
+        await cl.Message(
+            content=f"I did not receive a message on **{client.audio_target}**. Timedout.",
         ).send()
     elif client.msg_received is Status.RECEIVED_TEXT:
         await cl.Message(
@@ -235,15 +316,15 @@ async def on_message(msg: cl.Message):
     """
     On message, handle text message
     """
-    publish_on_ros(msg.content)
-    await handle_output(type(msg))
+    await publish_text_on_ros(msg.content)
+    # await handle_output(type(msg))
 
 
 @cl.on_audio_chunk
-async def on_audio_chunk(chunk: cl.AudioChunk):
+async def on_audio_chunk(chunk: cl.InputAudioChunk):
     """Receive audio chunks
     :param chunk:
-    :type chunk: cl.AudioChunk
+    :type chunk: cl.InputAudioChunk
     """
     if chunk.isStart:
         # Initialize new audio buffer
@@ -279,7 +360,7 @@ async def on_audio_end(elements: List[ElementBased]):
     ).send()
 
     # publish using ROS client
-    publish_on_ros(audio_bytes)
+    await publish_audio_on_ros(audio_bytes)
     await handle_output(type(audio_bytes))
 
 

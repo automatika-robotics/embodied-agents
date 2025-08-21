@@ -8,7 +8,7 @@ def main():
     """Run from ROS"""
     # TODO: Add chainlit option handling via ROS
 
-    root_path = Path(__file__).parent / Path("app.py")
+    root_path = Path(__file__).parent / Path("chainlit_client/app.py")
 
     # Set general config options
     config.run.headless = True
