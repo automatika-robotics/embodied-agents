@@ -34,9 +34,9 @@ scripts/executable
 scripts/tiny_web_client
 DESTINATION lib/${PROJECT_NAME}
 )
-# Add chainlit accompaniments
+# Add webclient accompaniments
 install(DIRECTORY
-scripts/chainlit_client
+scripts/web_client
 DESTINATION lib/${PROJECT_NAME}
 )
 

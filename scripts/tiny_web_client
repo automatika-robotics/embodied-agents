@@ -1,26 +1,86 @@
 #!/usr/bin/env python3
+import uvicorn
 from pathlib import Path
-from chainlit.cli import run_chainlit
-from chainlit.config import config
+import os
+import sys
 
 
 def main():
-    """Run from ROS"""
-    # TODO: Add chainlit option handling via ROS
+    """
+    Launches the FastAPI-based web client for EmbodiedAgents.
+    This script is intended to be run via `ros2 run`.
+    """
+    try:
+        # Get the directory of the current script
+        script_dir = Path(__file__).parent.resolve()
+        # Get directory of the web_client (resolve symlinks)
+        web_client_dir = (script_dir / "web_client").resolve()
 
-    root_path = Path(__file__).parent / Path("chainlit_client/app.py")
+        # Check if the web_client directory exists
+        if not web_client_dir.is_dir():
+            print(
+                f"Error: Web client directory not found at '{web_client_dir}'",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
-    # Set general config options
-    config.run.headless = True
-    config.project.enable_telemetry = False
-    config.root = str(root_path.parent)
+        sys.path.insert(0, str(web_client_dir))
 
-    # Set audio config options
-    config.features.audio.sample_rate = 16000  # type: ignore
-    config.features.audio.initial_silence_timeout = 2000  # type: ignore
-    config.features.audio.silence_timeout = 1000  # type: ignore
+        # Change the current working directory to the web_client directory.
+        # This is crucial for FastAPI/Uvicorn to find relative paths for static
+        # files ('frontend/') and SSL certificates.
+        os.chdir(web_client_dir)
 
-    run_chainlit(str(root_path))
+        # Define paths for SSL certificates
+        keyfile_path = "key.pem"
+        certfile_path = "cert.pem"
+
+        # Check if SSL certificates exist
+        if not (Path(keyfile_path).exists() and Path(certfile_path).exists()):
+            print("\n" + "=" * 80)
+            print("WARNING: SSL certificates (key.pem, cert.pem) not found.")
+            print(
+                "Microphone access will not work when accessing from another machine."
+            )
+            print(
+                "To enable microphone over the network, generate certificates by running"
+            )
+            print(f"the following command in the '{web_client_dir}' directory:")
+            print(
+                '\nopenssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -sha256 -days 365 -nodes -subj "/CN=localhost"\n'
+            )
+            print("=" * 80 + "\n")
+
+            # Run without HTTPS
+            ssl_keyfile = None
+            ssl_certfile = None
+            protocol = "http"
+        else:
+            # Run with HTTPS
+            ssl_keyfile = keyfile_path
+            ssl_certfile = certfile_path
+            protocol = "https"
+
+        print("Starting tiny web client server...")
+        print(
+            f"Access it at: {protocol}://localhost:8080 if you are running it on your machine or {protocol}://<IP_ADDRESS_OF_THE_ROBOT>:8080 if you have run it on the robot."
+        )
+
+        # run the uvicorn server
+        uvicorn.run(
+            "main:app",
+            host="0.0.0.0",  # Bind to all network interfaces
+            port=8080,
+            ssl_keyfile=ssl_keyfile,
+            ssl_certfile=ssl_certfile,
+            log_level="info",
+        )
+
+    except KeyboardInterrupt:
+        print("\nTiny web client server stopped.")
+    except Exception as e:
+        print(f"\nAn error occurred: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

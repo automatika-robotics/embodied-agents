@@ -145,7 +145,7 @@ class LLM(ModelComponent):
                 topic.msg_type is StreamingString for topic in self.out_topics
             )
             if not streaming_string_topics:
-                self.get_logger().warning("""Consider using `StreamingString` msg_type when streaming text responses from LLMs/MLLMs. Example:
+                self.get_logger().warning("""Consider using `StreamingString` msg_type in output topic(s) when streaming text responses from LLMs/MLLMs. Example:
     output_topic = Topic(name='<topic_name>', msg_type='StreamingString')""")
 
     def custom_on_deactivate(self):
