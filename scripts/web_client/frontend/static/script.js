@@ -161,40 +161,56 @@ closeVideoButton.addEventListener('click', () => {
 let mediaRecorder;
 let audioChunks = [];
 let isRecording = false;
+let recordingIndicatorEl = null; // reference to the indicator message in DOM
 
-recordButton.addEventListener('click', async () => {
+
+recordButton.addEventListener("click", async () => {
+    recordButton.classList.toggle("recording");
+
     if (isRecording) {
         mediaRecorder.stop();
+        recordButton.innerHTML = `<i class="fa fa-microphone"></i>`;
     } else {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             mediaRecorder = new MediaRecorder(stream);
+            audioChunks = [];
 
-            mediaRecorder.onstart = () => { /* ... */ };
-            mediaRecorder.ondataavailable = (event) => { audioChunks.push(event.data); };
+            mediaRecorder.onstart = () => {
+                isRecording = true;
+                recordButton.innerHTML = `<i class="fa fa-stop"></i> <span>Stop</span> <span class="record-tooltip">End Recording</span>`;
+
+                // ✅ Add "Recording..." indicator to chat
+                recordingIndicatorEl = addMessage("🎙 Recording...", "user-message recording-indicator", "You", getCurrentTime());
+            };
+
+            mediaRecorder.ondataavailable = (event) => {
+                audioChunks.push(event.data);
+            };
 
             mediaRecorder.onstop = () => {
-                recordButton.textContent = 'Record';
-                recordButton.classList.remove('recording');
                 isRecording = false;
 
-                const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                const audioBlob = new Blob(audioChunks, { type: "audio/wav" });
                 const audioUrl = URL.createObjectURL(audioBlob);
-                addAudioMessage(audioUrl, 'user-message', 'You', getCurrentTime()); // Add timestamp here
+
+                // ✅ Replace indicator with audio message
+                if (recordingIndicatorEl) {
+                    recordingIndicatorEl.remove(); // remove indicator bubble
+                    recordingIndicatorEl = null;
+                }
+                addAudioMessage(audioUrl, "user-message", "You", getCurrentTime());
 
                 const reader = new FileReader();
                 reader.readAsDataURL(audioBlob);
                 reader.onloadend = () => {
-                    const base64Audio = reader.result.split(',')[1];
-                    ws.send(JSON.stringify({ type: 'audio', payload: base64Audio }));
+                    const base64Audio = reader.result.split(",")[1];
+                    ws.send(JSON.stringify({ type: "audio", payload: base64Audio }));
                 };
+                recordButton.innerHTML = `<i class="fa fa-microphone"></i> <span class="record-tooltip">Record</span>`;
             };
 
             mediaRecorder.start();
-            recordButton.textContent = 'Stop';
-            recordButton.classList.add('recording');
-            isRecording = true;
-
         } catch (error) {
             console.error("Error accessing microphone:", error);
             addErrorMessage("Error: Could not access the microphone. Please grant permission.");
@@ -213,7 +229,11 @@ function getCurrentTime() {
 function addMessage(text, type, label, date) {
     const wrapper = document.createElement("div");
     wrapper.className = "message-wrapper";
-    wrapper.style.alignSelf = type === "user-message" ? "flex-end" : "flex-start";
+    if (type.includes("user-message")) {
+        wrapper.style.alignSelf = "flex-end";
+    } else {
+        wrapper.style.alignSelf = "flex-start";
+    }
 
     if (label) {
         const lbl = document.createElement("div");
@@ -242,14 +262,14 @@ function addMessage(text, type, label, date) {
 
 function addAudioMessage(audioUrl, className, label, timestamp) {
     const wrapper = document.createElement('div');
-    wrapper.className = `message-wrapper ${className}`;
+    wrapper.className = `audio-message-wrapper-${className}`;
 
     const labelElement = document.createElement('div');
-    labelElement.className = 'message-label';
+    labelElement.className = 'audio-message-label';
     labelElement.innerHTML = `<span>${label}</span><span>${timestamp}</span>`;
 
     const messageElement = document.createElement('div');
-    messageElement.className = `message`;
+    messageElement.className = `audio-message`;
 
     const audioPlayer = document.createElement('audio');
     audioPlayer.controls = true;

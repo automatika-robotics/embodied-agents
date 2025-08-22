@@ -6,6 +6,7 @@
     <title>EmbodiedAgents Client</title>
     <link rel="icon" href="https://raw.githubusercontent.com/automatika-robotics/embodied-agents/main/docs/_static/favicon.png" type="image/png">
     <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
 </head>
 <body>
     <div class="main-container">
@@ -67,7 +68,10 @@
                 <form id="message-form">
                     <input type="text" id="message-text" placeholder="Type your message..." autocomplete="off">
                     <button type="submit">Send</button>
-                    <button type="button" id="record-button">Record</button>
+                     <button type="button" id="record-button">
+                        <span class="mic-label"><i class="fa fa-microphone"></i></span>
+                        <span class="record-tooltip">Record</span>
+                    </button>
                 </form>
             </div>
         </div>
