@@ -3,10 +3,10 @@ import base64
 import cv2
 from rclpy.node import Node
 from std_msgs.msg import String, ByteMultiArray
-from sensor_msgs.msg import CompressedImage
+from sensor_msgs.msg import CompressedImage, Image
 from automatika_embodied_agents.msg import StreamingString
 from typing import Union, Callable
-from ros_sugar.io.utils import read_compressed_image
+from ros_sugar.io.utils import read_compressed_image, image_pre_processing
 
 
 class ClientNode(Node):
@@ -29,7 +29,7 @@ class ClientNode(Node):
         # Initialize placeholders
         self.text_subscription = None
         self.string_subscription = None
-        self.compressed_image_subscription = None
+        self.image_subscription = None
         self.video_stream_active = False
 
         self.set_topics(
@@ -37,7 +37,7 @@ class ClientNode(Node):
             text_target="text1",
             audio_trigger="audio0",
             audio_target="audio1",
-            video_stream_topic="image_raw/compressed",
+            video_stream_topic="image_raw",
             enable_streaming=False,
         )
         self.create_timer(2.0, self.check_video_publisher)
@@ -123,9 +123,13 @@ class ClientNode(Node):
         except Exception as e:
             self.get_logger().error(f"Failed to encode and send image frame: {e}")
 
-    def compressed_image_callback(self, msg: CompressedImage):
+    def image_callback(self, msg: Union[Image, CompressedImage]):
         try:
-            cv_image = read_compressed_image(msg)
+            if isinstance(msg, Image):
+                cv_image = image_pre_processing(msg)
+            else:
+                cv_image = read_compressed_image(msg)
+
             if cv_image is not None:
                 self._process_and_send_image(cv_image)
             else:
@@ -215,14 +219,24 @@ class ClientNode(Node):
             ByteMultiArray, self.audio_target, self.listener_callback, 10
         )
 
-        if self.compressed_image_subscription:
-            self.destroy_subscription(self.compressed_image_subscription)
-        self.compressed_image_subscription = self.create_subscription(
-            CompressedImage,
-            self.video_stream_topic,
-            self.compressed_image_callback,
-            10,
-        )
+        if self.image_subscription:
+            self.destroy_subscription(self.image_subscription)
+
+        # Create Image or Compressed image listener based on topic name
+        if "compressed" in self.video_stream_topic:
+            self.image_subscription = self.create_subscription(
+                CompressedImage,
+                self.video_stream_topic,
+                self.image_callback,
+                10,
+            )
+        else:
+            self.image_subscription = self.create_subscription(
+                Image,
+                self.video_stream_topic,
+                self.image_callback,
+                10,
+            )
 
         self.video_stream_active = False
 
@@ -233,6 +247,4 @@ class ClientNode(Node):
         )
         self.get_logger().info(f"  - Audio Output (Pub): {self.audio_trigger}")
         self.get_logger().info(f"  - Audio Input (Sub): {self.audio_target}")
-        self.get_logger().info(
-            f"  - Video Input (Sub): {self.video_stream_topic} (Compressed)"
-        )
+        self.get_logger().info(f"  - Video Input (Sub): {self.video_stream_topic}")
