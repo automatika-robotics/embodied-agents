@@ -3,6 +3,7 @@ import uvicorn
 from pathlib import Path
 import os
 import sys
+import argparse
 
 
 def main():
@@ -10,6 +11,22 @@ def main():
     Launches the FastAPI-based web client for EmbodiedAgents.
     This script is intended to be run via `ros2 run`.
     """
+    # parse arguments
+    parser = argparse.ArgumentParser(
+        description="Launch the EmbodiedAgents web client.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--host",
+        type=str,
+        default="0.0.0.0",  # Bind to all addresses
+        help="The host IP address to bind the server to.",
+    )
+    parser.add_argument(
+        "--port", type=int, default=8080, help="The port to run the server on."
+    )
+    args = parser.parse_args()
+
     try:
         # Get the directory of the current script
         script_dir = Path(__file__).parent.resolve()
@@ -62,15 +79,17 @@ def main():
             protocol = "https"
 
         print("Starting tiny web client server...")
+
+        access_host = "localhost" if args.host == "0.0.0.0" else args.host
         print(
-            f"Access it at: {protocol}://localhost:8080 if you are running it on your machine or {protocol}://<IP_ADDRESS_OF_THE_ROBOT>:8080 if you have run it on the robot."
+            f"Access it at: {protocol}://{access_host}:{args.port} if you are running it on your machine or {protocol}://<IP_ADDRESS_OF_THE_ROBOT>:{args.port} if you have run it on the robot."
         )
 
         # run the uvicorn server
         uvicorn.run(
             "main:app",
-            host="0.0.0.0",  # Bind to all network interfaces
-            port=8080,
+            host=args.host,
+            port=args.port,
             ssl_keyfile=ssl_keyfile,
             ssl_certfile=ssl_certfile,
             log_level="info",
