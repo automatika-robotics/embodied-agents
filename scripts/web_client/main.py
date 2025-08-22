@@ -83,7 +83,6 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             # Wait for a message from the client
             data = await websocket.receive_json()
-            logger.info(f"Received data from WebSocket: {data}")
 
             # Pass the message to the ROS node
             if ros_node:
