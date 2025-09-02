@@ -219,14 +219,16 @@ launcher.bringup()
 
 ## Web Based Client for Interacting with the Robot
 
-To interact with text and audio based topics on the robot, _EmbodiedAgents_ includes a tiny browser based client made with [chainlit](https://chainlit.io/). This is useful if the robot does not have a microphone/speaker interface or if one wants to communicate with it remotely. The client can be launched as follows:
+To interact with text and audio based topics on the robot, _EmbodiedAgents_ includes a tiny browser based client. This is useful if the robot does not have a microphone/speaker interface or if one wants to communicate with it remotely. In the code above, we can set `enable_vad` and `enable_wakeword` options in `s2t_config` to `False` and set `play_on_device` option in `t2s_config` to `False`. Now we are ready to use our browser based config.
+
+```{note}
+In order to run the client you will need to install FastAPI with `pip install "fastapi[standard-no-fastapi-cloud-cli]"`
+```
+
+We can launch the client as follows:
 
 ```shell
 ros2 run automatika_embodied_agents tiny_web_client
 ```
 
-The client displays a web UI on http://localhost:8000. Open this address from browser. ROS input and output topic settings for text and audio topics can be configured from the web UI by pressing the settings icon.
-
-```{seealso}
-To customize the webapp, checkout how to set the configuration options for the [app](https://docs.chainlit.io/backend/config/overview) and the [UI](https://docs.chainlit.io/customisation/overview)
-```
+The client displays a web UI on http://localhost:8080. Open this address from browser. ROS input and output topic settings for text and audio topics can be configured from the web UI by pressing the settings icon.
