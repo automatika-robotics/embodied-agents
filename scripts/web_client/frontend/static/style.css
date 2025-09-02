@@ -53,6 +53,7 @@ h4 {
     transition: color var(--transition-speed);
     position: relative;
     padding-bottom: 0.5rem;
+    font-size: clamp(1rem, 2vw, 1.5rem);
 }
 
 h4::after {
@@ -69,9 +70,11 @@ h4::after {
 
 .main-container {
     display: flex;
+    flex-direction: row;
     width: 90%;
     max-width: 1200px;
-    height: 90vh;
+    height: auto;
+    min-height: 80vh;
     background-color: #1A1F22;
     border-radius: 16px;
     overflow: hidden;
@@ -137,7 +140,7 @@ h4::after {
 }
 
 .header-title span {
-    font-size: 1.6rem;
+    font-size: clamp(1.2rem, 2vw, 1.6rem);
     color: var(--text-color);
     font-weight: 600;
 }
@@ -389,10 +392,11 @@ h4::after {
     border: 1px solid var(--border-color);
     background-color: #1C1F24;
     color: var(--text-color);
+    flex: 1 1 auto;
+    min-width: 0;
 }
 
 button {
-    padding: 10px 18px;
     border: none;
     border-radius: 12px;
     background-color: var(--color-blue);
@@ -400,6 +404,9 @@ button {
     font-weight: 600;
     cursor: pointer;
     transition: background-color var(--transition-speed), transform 0.2s;
+    flex-shrink: 0;
+    padding: 0.6rem 1rem;
+    font-size: clamp(0.8rem, 1.2vw, 1rem);
 }
 
 button:hover {
@@ -606,5 +613,39 @@ button:hover {
 @supports(selector(:has(*))) {
     .main-container:has(.video-panel[style*="display: flex"]) .chat-container .message {
         max-width: 90%;
+    }
+}
+
+@media (max-width: 900px) {
+    .main-container {
+        flex-direction: column;
+        height: auto;
+    }
+
+    .video-panel,
+    .chat-container {
+        flex: 1 1 100%;
+        max-width: 100%;
+        border: none;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .chat-container {
+        border-left: none;
+    }
+}
+
+@media (max-width: 600px) {
+    .header-title span {
+        font-size: 1.2rem;
+    }
+
+    h4 {
+        font-size: 1rem;
+    }
+
+    button {
+        width: 100%;
+        /* buttons stack full width */
     }
 }
