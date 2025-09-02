@@ -222,8 +222,10 @@ launcher.bringup()
 To interact with text and audio based topics on the robot, _EmbodiedAgents_ includes a tiny browser based client. This is useful if the robot does not have a microphone/speaker interface or if one wants to communicate with it remotely. In the code above, we can set `enable_vad` and `enable_wakeword` options in `s2t_config` to `False` and set `play_on_device` option in `t2s_config` to `False`. Now we are ready to use our browser based config.
 
 ```{note}
-In order to run the client you will need to install FastAPI with `pip install "fastapi[standard-no-fastapi-cloud-cli]"`
-```
+In order to run the client you will need to install FastAPI with
+```shell
+pip install "fastapi[standard-no-fastapi-cloud-cli]"`
+````
 
 We can launch the client as follows:
 
