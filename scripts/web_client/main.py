@@ -31,7 +31,7 @@ def spin_ros():
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_: FastAPI):
     """
     Manages the startup and shutdown of the ROS2 node.
     """

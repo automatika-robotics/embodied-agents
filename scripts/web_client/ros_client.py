@@ -70,11 +70,17 @@ class ClientNode(Node):
             return
 
         msg = ByteMultiArray()
-        msg.data = audio_bytes
-        self.audio_publisher.publish(msg)
-        self.get_logger().info(
-            f'Publishing {len(audio_bytes)} audio bytes to topic "{self.audio_trigger}"'
-        )
+        try:
+            msg.data = [bytes([b]) for b in audio_bytes]
+
+            self.audio_publisher.publish(msg)
+            self.get_logger().info(
+                f'Successfully published {len(audio_bytes)} audio bytes to topic "{self.audio_trigger}"'
+            )
+        except Exception as e:
+            self.get_logger().error(
+                f"Failed to create or publish ByteMultiArray message: {e}"
+            )
 
     def listener_callback(self, msg: Union[StreamingString, String, ByteMultiArray]):
         """Callback for received ROS messages."""
@@ -93,7 +99,7 @@ class ClientNode(Node):
                 f'Received {len(msg.data)} audio bytes from "{self.audio_target}"'
             )
             # Encode audio bytes to base64 to send as a JSON string
-            encoded_audio = base64.b64encode(msg.data).decode("utf-8")
+            encoded_audio = base64.b64encode(b"".join(msg.data)).decode("utf-8")
             payload = {"type": "audio", "payload": encoded_audio}
         else:
             self.get_logger().error("Received message of unknown type.")
