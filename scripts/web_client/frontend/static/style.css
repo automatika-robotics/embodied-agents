@@ -73,7 +73,7 @@ h4::after {
     flex-direction: row;
     width: 90%;
     max-width: 1200px;
-    height: auto;
+    height: 90%;
     min-height: 80vh;
     background-color: #1A1F22;
     border-radius: 16px;
