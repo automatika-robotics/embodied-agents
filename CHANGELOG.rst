@@ -2,8 +2,8 @@
 Changelog for package automatika_embodied_agents
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+0.4.2 (2025-09-03)
+------------------
 * (feature) Adds udp streaming to IP:PORT as an option to TextToStream component when play_on_device is enabled
 * (docs) Updates docs to use new web based client
 * (feature) Adds processing of audio messages in web client

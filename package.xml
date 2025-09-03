@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>automatika_embodied_agents</name>
-  <version>0.4.1</version>
+  <version>0.4.2</version>
   <description>agents</description>
   <maintainer email="contact@automatikarobotics.com">Automatika Robotics</maintainer>
   <url type="website">https://github.com/automatika-robotics/embodied-agents</url>
