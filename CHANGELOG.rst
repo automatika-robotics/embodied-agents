@@ -2,6 +2,23 @@
 Changelog for package automatika_embodied_agents
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+* (feature) Adds udp streaming to IP:PORT as an option to TextToStream component when play_on_device is enabled
+* (docs) Updates docs to use new web based client
+* (feature) Adds processing of audio messages in web client
+* (chore) Removes chainlit based client
+* (feature) Adds a custom webclient to replace chainlit
+* (feature) Adds persistent ros node in web client for async stream handling
+* (feature) Adds warning when not using streaming string msg_type with streaming enabled in components
+* (feature) Adds streaming string msg for managing streams in external clients
+* (docs) Adds recipe for vision guided point navigation
+* (fix) Fixes empty image input for Detection2D msg publication
+* (fix) Fixes websocket receiving in text to speech
+* (fix) Fixes keyword argument in detection and tracking publishing
+* (feature) Adds publishing a singular detection or tracking message from the vision component
+* Contributors: ahr, mkabtoul
+
 0.4.1 (2025-07-10)
 ------------------
 * (docs) Updates docs for using planning based MLLMs
