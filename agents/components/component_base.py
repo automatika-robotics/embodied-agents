@@ -143,7 +143,7 @@ class Component(BaseComponent):
             # Set component loop_rate (Hz)
             self.config.loop_rate = 1 / trigger
 
-        self.trig_topic: Union[Topic, list[Topic], float] = trigger
+        self.trig_topic: Union[Topic, List[Topic], float] = trigger
 
     def validate_topics(
         self,
