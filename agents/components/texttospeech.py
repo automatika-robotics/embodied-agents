@@ -1,4 +1,5 @@
 import queue
+import socket
 import threading
 from io import BytesIO
 from typing import Any, Union, Optional, List, Dict, Tuple
@@ -9,7 +10,7 @@ import time
 from ..clients.model_base import ModelClient
 from ..clients import RoboMLWSClient, RoboMLRESPClient
 from ..config import TextToSpeechConfig
-from ..ros import Audio, String, Topic
+from ..ros import Audio, String, Topic, StreamingString
 from ..utils import validate_func_args
 from .model_component import ModelComponent
 from .component_base import ComponentRunType
@@ -66,7 +67,7 @@ class TextToSpeech(ModelComponent):
         **kwargs,
     ):
         self.config: TextToSpeechConfig = config or TextToSpeechConfig()
-        self.allowed_inputs = {"Required": [String]}
+        self.allowed_inputs = {"Required": [[String, StreamingString]]}
         self.handled_outputs = [Audio]
 
         if isinstance(trigger, float):
@@ -96,6 +97,13 @@ class TextToSpeech(ModelComponent):
             self._stop_event = threading.Event()
             self._playback_thread: Optional[threading.Thread] = None
             self._thread_lock = threading.Lock()
+
+            if self.config.stream_to_ip and self.config.stream_to_port:
+                self.get_logger().info(
+                    f"""UDP streaming configured for target {self.config.stream_to_ip}:{self.config.stream_to_port}. Stream can be played at the target machine with gstreamer or ffmpeg, audio format example with gstreamer is shown below:
+        gst-launch-1.0 -v udpsrc port={self.config.stream_to_port} caps="audio/x-raw,format=F32LE,channels=1,rate=16000" ! queue ! audioconvert ! audioresample ! alsasink
+        """
+                )
 
         # Get bytes as output from server if using appropriate client
         if isinstance(self.model_client, (RoboMLWSClient, RoboMLRESPClient)):
@@ -248,19 +256,76 @@ class TextToSpeech(ModelComponent):
         else:
             return chunk
 
-    def _playback_audio(self):
-        """Creates a stream to play audio on device
+    def _stream_audio_udp(self):
+        """Streams audio chunks to a target IP and port over UDP."""
+        # import package
+        try:
+            from soundfile import SoundFile
+        except ModuleNotFoundError as e:
+            raise ModuleNotFoundError(
+                "UDP streaming for TextToSpeech component requires the soundfile module to be installed. Please install it with `pip install soundfile`"
+            ) from e
 
-        :param output:
-        :type output: bytes
-        """
+        sock = None
+        try:
+            # Create socket
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+            while not self._stop_event.is_set():
+                try:
+                    # Wait for a new chunk with a timeout.
+                    chunk = self._incoming_queue.get(
+                        timeout=self.config.thread_shutdown_timeout
+                    )
+                    if chunk is None:
+                        break
+                except queue.Empty:
+                    self.get_logger().debug(
+                        f"No new audio for {self.config.thread_shutdown_timeout}s. "
+                        "Gracefully shutting down UDP streaming thread."
+                    )
+                    break
+
+                # change str to bytes if output is str
+                output_bytes = self.__get_audio_bytes(chunk)
+                if not output_bytes:
+                    continue
+
+                try:
+                    with SoundFile(BytesIO(output_bytes)) as f:
+                        # request float32 from soundfile
+                        blocks = f.blocks(
+                            self.config.block_size, dtype="float32", always_2d=True
+                        )
+                        for block in blocks:
+                            if self._stop_event.is_set():
+                                break
+                            # Convert to raw bytes (float32 LE)
+                            byte_block = block.tobytes()
+                            sock.sendto(
+                                byte_block,
+                                (self.config.stream_to_ip, self.config.stream_to_port),
+                            )
+                except Exception as e:
+                    self.get_logger().error(
+                        f"Error processing of streaming audio chunk: {e}"
+                    )
+                    continue
+        finally:
+            self.get_logger().debug("Cleaning up UDP streaming resources.")
+            if sock:
+                sock.close()
+            self.get_logger().debug("UDP streaming thread has finished.")
+
+    def _playback_audio_local(self):
+        """Creates a stream to play audio on local device"""
         # import packages
         try:
             from soundfile import SoundFile
             import pyaudio
         except ModuleNotFoundError as e:
             raise ModuleNotFoundError(
-                "play_on_device device configuration for TextToSpeech component requires soundfile and pyaudio modules to be installed. Please install them with `pip install soundfile pyaudio`"
+                "play_on_device local device configuration for TextToSpeech component requires soundfile and pyaudio modules to be installed. Please install them with `pip install soundfile pyaudio`"
             ) from e
 
         # Create pyaudio interface and define stream params
@@ -360,8 +425,26 @@ class TextToSpeech(ModelComponent):
                     "Playback thread is not active. Starting a new one."
                 )
                 self._stop_event.clear()
+                # Decide which worker to start based on config
+                is_streaming_configured = (
+                    self.config.stream_to_ip and self.config.stream_to_port
+                )
+                if is_streaming_configured:
+                    target_func = self._stream_audio_udp
+                    thread_name = "TTS-UDP-Streamer"
+                    self.get_logger().debug(
+                        "Playback thread is not active. Starting a new UDP streaming thread."
+                    )
+                else:
+                    target_func = self._playback_audio_local
+                    thread_name = "TTS-Local-Playback"
+                    self.get_logger().debug(
+                        "Playback thread is not active. Starting a new local playback thread."
+                    )
+
+                # Create and start thread
                 self._playback_thread = threading.Thread(
-                    target=self._playback_audio, daemon=True
+                    target=target_func, name=thread_name, daemon=True
                 )
                 self._playback_thread.start()
 

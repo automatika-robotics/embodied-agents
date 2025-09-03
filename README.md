@@ -7,7 +7,7 @@
 
 🇨🇳 [简体中文](docs/README.zh.md) | 🇯🇵 [日本語](docs/README.ja.md)
 
-**_EmbodiedAgents_** is a fully-loaded framework, written in pure ROS2, for creating interactive physical agents that can understand, remember, and act upon contextual information from their environment.
+**_EmbodiedAgents_** is a fully-loaded ROS2 based framework for creating interactive physical agents that can understand, remember, and act upon contextual information from their environment.
 
 - **Production Ready Physical Agents:** Designed to be used with autonomous robot systems that operate in real world dynamic environments. _EmbodiedAgents_ makes it simple to create systems that make use of Physical AI.
 - **Intuitive API**: Simple pythonic API to utilize local or cloud based ML models (specifically **Multimodal LLMs** and other **transformer based architectures**) on robots, with all the benefits of component lifecycle management, health monitoring and fallback mechanisms to make your agents robust.

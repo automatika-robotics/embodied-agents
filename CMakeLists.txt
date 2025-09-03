@@ -27,12 +27,16 @@ ament_export_dependencies(rosidl_default_runtime)
 
 # Install Python module
 ament_python_install_package(agents)
-# Add executables
+
+# Add executables and clients
 install(PROGRAMS
 scripts/executable
-scripts/chainlit_client/tiny_web_client
-scripts/chainlit_client/app.py # chainlit app definition
-scripts/chainlit_client/chainlit.md # readme picked by chainlit client
+scripts/tiny_web_client
+DESTINATION lib/${PROJECT_NAME}
+)
+# Add webclient accompaniments
+install(DIRECTORY
+scripts/web_client
 DESTINATION lib/${PROJECT_NAME}
 )
 

@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EmbodiedAgents Client</title>
+    <link rel="icon" href="https://raw.githubusercontent.com/automatika-robotics/embodied-agents/main/docs/_static/favicon.png" type="image/png">
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+</head>
+<body>
+    <div class="main-container">
+        <div id="video-panel" class="video-panel">
+            <div style="flex-direction: row;">
+                <button id="close-video-button">&times;</button>
+                <h4>Camera Stream</h4>
+            </div>
+            <img id="video-frame" src="" alt="Robot camera feed">
+        </div>
+
+        <div class="chat-container">
+            <div class="header">
+                <div class="header-title">
+                    <img src="https://automatika-robotics.github.io/embodied-agents/_static/EMBODIED_AGENTS_DARK.png" alt="EmbodiedAgents" class="header-logo">
+                    <span>Client</span>
+                </div>
+                <button id="settings-button">Settings</button>
+            </div>
+            <div id="settings-modal" class="settings-modal">
+                <div id="settings-panel" class="settings-panel">
+                    <form id="settings-form">
+                    <h4>ROS Topics</h4>
+                        <label for="text_trigger">Text Output:</label>
+                        <input type="text" id="text_trigger" value="text0">
+
+                        <label for="text_target">Text Input:</label>
+                        <input type="text" id="text_target" value="text1">
+
+                        <div class="checkbox-container">
+                            <input type="checkbox" class="styled-checkbox" id="enable_streaming">
+                            <label for="enable_streaming" id="setting-check-label">Enable Streaming</label>
+                        </div>
+                        <small id="streaming-note" class="streaming-note">
+                            Note: Ensure your agent publishes to a `StreamingString` topic.
+                        </small>
+
+                        <label for="audio_trigger">Audio Output:</label>
+                        <input type="text" id="audio_trigger" value="audio0">
+
+                        <label for="audio_target">Audio Input:</label>
+                        <input type="text" id="audio_target" value="audio1">
+
+                        <label for="video_stream_topic">Video Stream Topic:</label>
+                        <input type="text" id="video_stream_topic" value="image_raw">
+
+                        <div class="checkbox-container">
+                            <input type="checkbox" class="styled-checkbox" id="show_video">
+                            <label for="show_video" id="setting-check-label">Show Video Stream</label>
+                        </div>
+                        <button type="submit" id="save-button">Save</button>
+                    </form>
+                </div>
+            </div>
+            <div id="chat-box" class="chat-box message-wrapper">
+                <div class="message server-message">Welcome! Configure ROS topics in settings if needed.</div>
+            </div>
+            <div class="chat-input-area">
+                <form id="message-form">
+                    <input type="text" id="message-text" placeholder="Type your message..." autocomplete="off">
+                    <button type="submit">Send</button>
+                     <button type="button" id="record-button">
+                        <span class="mic-label"><i class="fa fa-microphone"></i></span>
+                        <span class="record-tooltip">Record</span>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+    <script src="/static/script.js"></script>
+</body>
+</html>
