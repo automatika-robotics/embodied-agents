@@ -265,7 +265,11 @@ class TextToSpeechConfig(ModelComponentConfig):
     :param play_on_device: Whether to play the audio on available audio device (default: False).
     :type play_on_device: bool
     :param device: Optional device id (int) for playing the audio. Only effective if play_on_device is True (default: None).
-    :type play_on_device: bool
+    :type device: int
+    :param stream_to_ip: If set, streams the audio to this IP address via UDP instead of playing locally. Requires `play_on_device` to be True.
+    :type stream_to_ip: Optional[str]
+    :param stream_to_port: The target port for UDP streaming. Must be set if `stream_to_ip` is set.
+    :type stream_to_port: Optional[int]
     :param buffer_size: Size of the buffer for playing audio on device. Only effective if play_on_device is True (default: 20).
     :type buffer_size: int
     :param block_size: Size of the audio block to be read for playing audio on device. Only effective if play_on_device is True (default: 1024).
@@ -275,15 +279,21 @@ class TextToSpeechConfig(ModelComponentConfig):
     :param stream: Stram output when used with WebSocketClient. Useful when model output is large and broken into chunks by the server. (default: True).
     :type thread_shutdown_timeout: int
 
-
-    Example of usage:
+    Example of usage for local playback:
     ```python
-    config = TextToSpeechConfig(play_on_device=True, get_bytes=False)
+    config = TextToSpeechConfig(play_on_device=True)
+    ```
+
+    Example of usage for UDP streaming:
+    ```python
+    config = TextToSpeechConfig(play_on_device=True, stream_to_ip="192.168.1.100", stream_to_port=12345)
     ```
     """
 
     play_on_device: bool = field(default=False)
     device: Optional[int] = field(default=None)
+    stream_to_ip: Optional[str] = field(default=None)
+    stream_to_port: Optional[int] = field(default=None)
     buffer_size: int = field(default=20)
     block_size: int = field(default=1024)
     thread_shutdown_timeout: int = field(default=5)
@@ -295,6 +305,30 @@ class TextToSpeechConfig(ModelComponentConfig):
         :rtype: dict
         """
         return {"get_bytes": self._get_bytes}
+
+    @stream_to_ip.validator
+    def _check_stream_to_ip(self, _, value):
+        """Stream to IP validator"""
+        if value and not self.play_on_device:
+            raise ValueError(
+                "play_on_device must be set to True when stream_to_ip and stream_to_port are set."
+            )
+        if value and not self.stream_to_port:
+            raise ValueError(
+                "stream_to_ip is set, but stream_to_port is not. stream_to_port must be set."
+            )
+
+    @stream_to_port.validator
+    def _check_stream_to_port(self, _, value):
+        """Stream to Port validator"""
+        if value and not self.play_on_device:
+            raise ValueError(
+                "play_on_device must be set to True when stream_to_ip and stream_to_port are set."
+            )
+        if value and not self.stream_to_ip:
+            raise ValueError(
+                "stream_to_port is set, but stream_to_ip is not. stream_to_ip must be set."
+            )
 
 
 @define(kw_only=True)
