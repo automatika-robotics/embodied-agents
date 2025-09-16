@@ -13,6 +13,7 @@
   <depend>sensor_msgs</depend>
   <depend>python3-tqdm</depend>
   <depend>python3-httpx</depend>
+  <depend>python3-websockets</depend>
   <depend>python3-platformdirs</depend>
   <depend>automatika_ros_sugar</depend>
 

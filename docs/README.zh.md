@@ -45,7 +45,7 @@ _EmbodiedAgents_ 的核心与具体的模型部署平台无关。目前支持的
 #### 安装依赖项
 
 ```bash
-pip install numpy opencv-python-headless 'attrs>=23.2.0' jinja2 httpx setproctitle msgpack msgpack-numpy platformdirs tqdm
+pip install numpy opencv-python-headless 'attrs>=23.2.0' jinja2 httpx setproctitle msgpack msgpack-numpy platformdirs tqdm websockets
 ```
 
 克隆 Sugarcoat🍬：
