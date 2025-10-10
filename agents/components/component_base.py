@@ -96,7 +96,7 @@ class Component(BaseComponent):
         if hasattr(self, "trig_callbacks"):
             for callback in self.trig_callbacks.values():
                 # Add execution step of the node as a post callback function
-                callback.on_callback_execute(self._execution_step)
+                callback.on_callback_execute(self._execution_step, get_processed=False)
 
     def destroy_all_subscribers(self) -> None:
         """
