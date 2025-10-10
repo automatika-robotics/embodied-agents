@@ -7,14 +7,14 @@ import cv2
 from ..clients.model_base import ModelClient
 from ..config import VisionConfig
 from ..ros import (
+    DetectionsMultiSource,
     Detections,
-    Detection,
-    Tracking,
+    Trackings,
     FixedInput,
     Image,
     RGBD,
     Topic,
-    Trackings,
+    TrackingsMultiSource,
     ROSImage,
     ROSCompressedImage,
 )
@@ -77,7 +77,12 @@ class Vision(ModelComponent):
     ):
         self.config: VisionConfig = config or VisionConfig()
         self.allowed_inputs = {"Required": [[Image, RGBD]]}
-        self.handled_outputs = [Detection, Tracking, Detections, Trackings]
+        self.handled_outputs = [
+            Detections,
+            Trackings,
+            DetectionsMultiSource,
+            TrackingsMultiSource,
+        ]
 
         self._images: List[Union[np.ndarray, ROSImage, ROSCompressedImage]] = []
 

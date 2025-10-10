@@ -116,9 +116,9 @@ class RGBDCallback(GenericCallback):
                 return rgb
 
 
-class ObjectDetectionCallback(GenericCallback):
+class DetectionsMultiSourceCallback(GenericCallback):
     """
-    Object detection Callback class.
+    Object detection Callback class for Detections2DMultiSource msg
     Its get method returns the bounding box data
     """
 
@@ -150,5 +150,41 @@ class ObjectDetectionCallback(GenericCallback):
             label_list = [
                 label for detection in self.msg.detections for label in detection.labels
             ]
+            detections_string = create_detection_context(label_list)
+            return detections_string
+
+
+class DetectionsCallback(GenericCallback):
+    """
+    Object detection Callback class for Detections2DMultiSource msg
+    Its get method returns the bounding box data
+    """
+
+    def __init__(self, input_topic, node_name: Optional[str] = None) -> None:
+        """
+        Constructs a new instance.
+
+        :param      input_topic:  Subscription topic
+        :type       input_topic:  str
+        """
+        super().__init__(input_topic, node_name)
+        self.msg = input_topic.fixed if hasattr(input_topic, "fixed") else None
+
+    def _get_output(self, **_) -> Optional[str]:
+        """
+        Processes labels and returns a context string for
+        prompt engineering
+
+        :returns:   Comma separated classnames
+        :rtype:     str
+        """
+        if not self.msg:
+            return None
+        # send fixed list of labels if it exists
+        if isinstance(self.msg, list):
+            return create_detection_context(self.msg)
+        # send labels from ROS message
+        else:
+            label_list = list(self.msg.labels)
             detections_string = create_detection_context(label_list)
             return detections_string
