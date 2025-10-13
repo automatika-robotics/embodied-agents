@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 import json
 import argparse
-from typing import List, Dict, Union, Tuple
+import importlib
+from typing import List, Dict, Union, Tuple, Optional
 
 import rclpy
 import setproctitle
@@ -11,7 +12,7 @@ from rclpy.utilities import try_shutdown
 from agents import config as all_configs
 from agents import components as all_components
 from agents import clients
-from agents.ros import Topic, FixedInput, MapLayer, Route
+from agents.ros import Topic, FixedInput, MapLayer, Route, QoSConfig, SupportedType
 
 
 def _parse_args() -> Tuple[argparse.Namespace, List[str]]:
@@ -76,6 +77,12 @@ def _parse_args() -> Tuple[argparse.Namespace, List[str]]:
         type=str,
         help="External processors associated with the component input and output topics",
     )
+    parser.add_argument(
+        "--additional_types",
+        type=str,
+        help="Additional type modules from derived packages",
+    )
+
     return parser.parse_known_args()
 
 
@@ -106,6 +113,21 @@ def _parse_component_config(
     return config
 
 
+def _parse_additional_types(value: str):
+    """Get additional types"""
+    serialized_types = json.loads(value)
+    _additional_types = []
+    for s_t in serialized_types:
+        module_name, _, class_name = s_t.rpartition(".")
+        if not module_name:
+            continue
+        module = importlib.import_module(module_name)
+        new_type = getattr(module, class_name)
+        if issubclass(new_type, SupportedType):
+            _additional_types.append(new_type)
+    return _additional_types
+
+
 def _parse_trigger(trigger_str: str) -> Union[Topic, List[Topic], float]:
     """Parse component trigger json string
 
@@ -115,6 +137,7 @@ def _parse_trigger(trigger_str: str) -> Union[Topic, List[Topic], float]:
     :return: Trigger topics or float
     :rtype: Topic | List[Topic] | float
     """
+    # TODO: Handle additional types here
     trigger_json = json.loads(trigger_str)
     if isinstance(trigger_json, List):
         return [Topic(**json.loads(t)) for t in trigger_json]
@@ -125,9 +148,19 @@ def _parse_trigger(trigger_str: str) -> Union[Topic, List[Topic], float]:
         return trigger_json
 
 
-def _deserialize_topics(serialized_topics: str) -> List[Dict]:
+def _deserialize_topics(
+    serialized_topics: str, additional_types: Optional[List] = None
+) -> List[Dict]:
     list_of_str = json.loads(serialized_topics)
-    return [json.loads(t) for t in list_of_str]
+    topic_dicts = []
+    for t in list_of_str:
+        topic_dict = json.loads(t)
+        topic_dict["qos_profile"] = QoSConfig(**topic_dict.get("qos_profile", {}))
+        topic_dict["additional_types"] = (
+            additional_types if additional_types else []
+        )  # Add any additional types
+        topic_dicts.append(topic_dict)
+    return topic_dicts
 
 
 def _parse_ros_args(args_names: List[str]) -> List[str]:
@@ -193,27 +226,34 @@ def main():
     # Get Yaml config file if provided
     config_file = args.config_file or None
 
+    additional_types = (
+        _parse_additional_types(args.additional_types)
+        if args.additional_types
+        else None
+    )
     # Get inputs/outputs/layers/routes
     inputs = (
         [
             FixedInput(**i) if i.get("fixed") else Topic(**i)
-            for i in _deserialize_topics(args.inputs)
+            for i in _deserialize_topics(args.inputs, additional_types)
         ]
         if args.inputs
         else None
     )
     outputs = (
-        [Topic(**o) for o in _deserialize_topics(args.outputs)]
+        [Topic(**o) for o in _deserialize_topics(args.outputs, additional_types)]
         if args.outputs
         else None
     )
     layers = (
-        [MapLayer(**i) for i in _deserialize_topics(args.layers)]
+        [MapLayer(**i) for i in _deserialize_topics(args.layers, additional_types)]
         if args.layers
         else None
     )
     routes = (
-        [Route(**r) for r in _deserialize_topics(args.routes)] if args.routes else None
+        [Route(**r) for r in _deserialize_topics(args.routes, additional_types)]
+        if args.routes
+        else None
     )
 
     # Get triggers
