@@ -7,7 +7,6 @@ from importlib.util import find_spec
 
 # FROM SUGARCOAT
 from ros_sugar.supported_types import (
-    add_additional_datatypes,
     SupportedType,
     Audio,
     Image,
@@ -17,8 +16,9 @@ from ros_sugar.supported_types import (
     String,
     ROSImage,
     ROSCompressedImage,
+    add_additional_datatypes,
 )
-from ros_sugar.io import Topic as BaseTopic
+from ros_sugar.io.topic import QoSConfig, Topic as BaseTopic
 
 from ros_sugar.config import (
     BaseComponentConfig,
@@ -28,7 +28,7 @@ from ros_sugar.config import (
 )
 from ros_sugar.core import BaseComponent
 from ros_sugar.core.component import MutuallyExclusiveCallbackGroup
-from ros_sugar import Launcher
+from ros_sugar import Launcher, UI_EXTENSIONS
 from ros_sugar.utils import component_action
 
 # AGENTS TYPES
@@ -62,6 +62,7 @@ __all__ = [
     "OccupancyGrid",
     "Odometry",
     "Topic",
+    "QoSConfig",
     "FixedInput",
     "base_validators",
     "BaseAttrs",
@@ -363,6 +364,15 @@ agent_types = [
 
 
 add_additional_datatypes(agent_types)
+
+
+def augment_ui():
+    from .ui_elements import INPUT_ELEMENTS, OUTPUT_ELEMENTS
+
+    return INPUT_ELEMENTS, OUTPUT_ELEMENTS
+
+
+UI_EXTENSIONS["agents"] = augment_ui
 
 
 @define(kw_only=True)

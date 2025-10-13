@@ -8,9 +8,15 @@ from ros_sugar.io import (
     get_logger,
 )
 
-from ros_sugar.io.utils import image_pre_processing, read_compressed_image
+from ros_sugar.io.utils import (
+    image_pre_processing,
+    process_encoding,
+    read_compressed_image,
+    parse_format,
+    convert_img_to_jpeg_str,
+)
 
-from .utils import create_detection_context
+from .utils import create_detection_context, draw_detection_bounding_boxes
 
 __all__ = ["GenericCallback", "TextCallback"]
 
@@ -131,6 +137,7 @@ class DetectionsMultiSourceCallback(GenericCallback):
         """
         super().__init__(input_topic, node_name)
         self.msg = input_topic.fixed if hasattr(input_topic, "fixed") else None
+        self.encoding = None
 
     def _get_output(self, **_) -> Optional[str]:
         """
@@ -153,6 +160,48 @@ class DetectionsMultiSourceCallback(GenericCallback):
             detections_string = create_detection_context(label_list)
             return detections_string
 
+    def _get_ui_content(self, **_) -> str:
+        """Get UI content for the first Detections2D msg in Detections2DMultiSource: draw bounding boxes and labels on the image."""
+        if not self.msg:
+            return ""
+
+        # If msg is a list, return precomputed detection context
+        if isinstance(self.msg, list):
+            return create_detection_context(self.msg)
+
+        detections = self.msg.detections
+        if not detections:
+            return ""
+
+        img = None
+
+        # Decode image or compressed image
+        # NOTE: Only checks first detections source
+        if self.msg.detections[0].compressed_image.data:
+            compressed = self.msg.compressed_image
+            if not getattr(self, "encoding", None):
+                self.encoding = parse_format(compressed.format)
+            img = read_compressed_image(compressed, self.encoding)
+
+        elif self.msg.detections[0].image.data:
+            image = self.msg.image
+            if not getattr(self, "encoding", None):
+                self.encoding = process_encoding(image.encoding)
+            img = image_pre_processing(image, *self.encoding)
+
+        # Ensure image exists
+        if img is None:
+            # Create blank white canvas if no image is available
+            img = np.ones((480, 640, 3), dtype=np.uint8) * 255
+
+        # Extract bounding boxes and labels
+        bounding_boxes = getattr(detections[0], "boxes", [])
+        labels = getattr(detections[0], "labels", [])
+
+        img = draw_detection_bounding_boxes(img, bounding_boxes, labels)
+
+        return convert_img_to_jpeg_str(img, getattr(self, "node_name", "ui"))
+
 
 class DetectionsCallback(GenericCallback):
     """
@@ -169,6 +218,7 @@ class DetectionsCallback(GenericCallback):
         """
         super().__init__(input_topic, node_name)
         self.msg = input_topic.fixed if hasattr(input_topic, "fixed") else None
+        self.encoding = None
 
     def _get_output(self, **_) -> Optional[str]:
         """
@@ -188,3 +238,40 @@ class DetectionsCallback(GenericCallback):
             label_list = list(self.msg.labels)
             detections_string = create_detection_context(label_list)
             return detections_string
+
+    def _get_ui_content(self, **_) -> str:
+        """Get UI content for Detections2D: draw bounding boxes and labels on the image."""
+        if not self.msg:
+            return ""
+
+        # If msg is a list, return precomputed detection context
+        if isinstance(self.msg, list):
+            return create_detection_context(self.msg)
+
+        img = None
+
+        # Decode image or compressed image
+        if self.msg.compressed_image.data:
+            compressed = self.msg.compressed_image
+            if not getattr(self, "encoding", None):
+                self.encoding = parse_format(compressed.format)
+            img = read_compressed_image(compressed, self.encoding)
+
+        elif self.msg.image.data:
+            image = self.msg.image
+            if not getattr(self, "encoding", None):
+                self.encoding = process_encoding(image.encoding)
+            img = image_pre_processing(image, *self.encoding)
+
+        # Ensure image exists
+        if img is None:
+            # Create blank white canvas if no image is available
+            img = np.ones((480, 640, 3), dtype=np.uint8) * 255
+
+        # Extract bounding boxes and labels
+        bounding_boxes = getattr(self.msg, "boxes", [])
+        labels = getattr(self.msg, "labels", [])
+
+        img = draw_detection_bounding_boxes(img, bounding_boxes, labels)
+
+        return convert_img_to_jpeg_str(img, getattr(self, "node_name", "ui"))
