@@ -25,6 +25,57 @@ from jinja2.environment import Template
 from .pluralize import pluralize
 
 
+def draw_detection_bounding_boxes(
+    img: np.ndarray, bounding_boxes: List, labels: List
+) -> np.ndarray:
+    """Draw bounding boxes and labels"""
+
+    for i, bbox in enumerate(bounding_boxes):
+        # Bounding box expected format: (x1, y1, x2, y2)
+        bbox_points = [
+            bbox.top_left_x,
+            bbox.top_left_y,
+            bbox.bottom_right_x,
+            bbox.bottom_right_y,
+        ]  # reading from BBox2D msg
+        x1, y1, x2, y2 = map(int, bbox_points)
+
+        # Choose color based on label if available
+        if labels and i < len(labels):
+            label_text = str(labels[i])
+            color_seed = abs(hash(label_text)) % 0xFFFFFF
+            color = (
+                color_seed & 255,
+                (color_seed >> 8) & 255,
+                (color_seed >> 16) & 255,
+            )
+        else:
+            label_text = ""
+            color = (0, 255, 0)
+
+        # Draw rectangle
+        cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
+
+        # Draw label text background and text
+        if label_text:
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 0.5
+            thickness = 1
+            (tw, th), _ = cv2.getTextSize(label_text, font, font_scale, thickness)
+            cv2.rectangle(img, (x1, y1 - th - 4), (x1 + tw + 4, y1), color, -1)
+            cv2.putText(
+                img,
+                label_text,
+                (x1 + 2, y1 - 2),
+                font,
+                font_scale,
+                (255, 255, 255),
+                thickness,
+                cv2.LINE_AA,
+            )
+    return img
+
+
 def create_detection_context(obj_list: Optional[List]) -> str:
     """
     Creates a context prompt based on detections.

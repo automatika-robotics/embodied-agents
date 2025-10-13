@@ -1,5 +1,6 @@
 from .utils import (
     create_detection_context,
+    draw_detection_bounding_boxes,
     validate_kwargs_from_default,
     validate_func_args,
     PDFReader,
@@ -16,6 +17,7 @@ __all__ = [
     "_LANGUAGE_CODES",
     "flatten",
     "create_detection_context",
+    "draw_detection_bounding_boxes",
     "validate_kwargs_from_default",
     "validate_func_args",
     "PDFReader",
