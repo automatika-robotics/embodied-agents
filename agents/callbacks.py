@@ -16,7 +16,11 @@ from ros_sugar.io.utils import (
     convert_img_to_jpeg_str,
 )
 
-from .utils import create_detection_context, draw_detection_bounding_boxes
+from .utils import (
+    create_detection_context,
+    draw_detection_bounding_boxes,
+    draw_points_2d,
+)
 
 __all__ = ["GenericCallback", "TextCallback"]
 
@@ -217,7 +221,7 @@ class DetectionsMultiSourceCallback(GenericCallback):
 
 class DetectionsCallback(GenericCallback):
     """
-    Object detection Callback class for Detections2DMultiSource msg
+    Object detection Callback class for Detections2D msg
     Its get method returns the bounding box data
     """
 
@@ -286,5 +290,75 @@ class DetectionsCallback(GenericCallback):
         labels = getattr(self.msg, "labels", [])
 
         img = draw_detection_bounding_boxes(img, bounding_boxes, labels)
+
+        return convert_img_to_jpeg_str(img, getattr(self, "node_name", "ui"))
+
+
+class PointsOfInterestCallback(GenericCallback):
+    """
+    Callback class for PointsOfInterest msg
+    Its get method returns the bounding box data
+    """
+
+    def __init__(self, input_topic, node_name: Optional[str] = None) -> None:
+        """
+        Constructs a new instance.
+
+        :param      input_topic:  Subscription topic
+        :type       input_topic:  str
+        """
+        super().__init__(input_topic, node_name)
+        self.msg = input_topic.fixed if hasattr(input_topic, "fixed") else None
+        self.encoding = None
+
+    def _get_output(self, **_) -> Optional[np.ndarray]:
+        """
+        Processes labels and returns a context string for
+        prompt engineering
+
+        :returns:   Comma separated classnames
+        :rtype:     str
+        """
+        if not self.msg:
+            return None
+
+        # send fixed list of points if it exists
+        if isinstance(self.msg, list):
+            return np.array(self.msg)
+
+        # send points from ROS message
+        points = []
+        for point in self.msg.points:
+            points.append([point.x, point.y])
+        return np.array(points)
+
+    def _get_ui_content(self, **_) -> str:
+        """Get UI content for PointsOfInterest: draw points on the image."""
+
+        if not self.msg:
+            return ""
+
+        points = self.get_output()
+
+        img = None
+        # Decode image or compressed image
+        if self.msg.compressed_image.data:
+            compressed = self.msg.compressed_image
+            if not getattr(self, "encoding", None):
+                self.encoding = parse_format(compressed.format)
+            img = read_compressed_image(compressed, self.encoding)
+
+        elif self.msg.image.data:
+            image = self.msg.image
+            if not getattr(self, "encoding", None):
+                self.encoding = process_encoding(image.encoding)
+            img = image_pre_processing(image, *self.encoding)
+
+        # Ensure image exists
+        if img is None:
+            # Create blank white canvas if no image is available
+            img = np.ones((480, 640, 3), dtype=np.uint8) * 255
+
+        img = draw_points_2d(img, points)  # draw points as red circles
 
         return convert_img_to_jpeg_str(img, getattr(self, "node_name", "ui"))

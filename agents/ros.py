@@ -48,6 +48,7 @@ from automatika_embodied_agents.msg import (
 from .callbacks import (
     DetectionsCallback,
     DetectionsMultiSourceCallback,
+    PointsOfInterestCallback,
     RGBDCallback,
     VideoCallback,
     TextCallback,
@@ -209,7 +210,7 @@ class PointsOfInterest(SupportedType):
     """Custom Message: PointsOfInterest."""
 
     _ros_type = ROSPointsOfInterest
-    callback = None  # not defined
+    callback = PointsOfInterestCallback  # not defined
 
     @classmethod
     def convert(

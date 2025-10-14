@@ -26,19 +26,20 @@ from .pluralize import pluralize
 
 
 def draw_detection_bounding_boxes(
-    img: np.ndarray, bounding_boxes: List, labels: List
+    img: np.ndarray, bounding_boxes: List, labels: List, handle_bbox2d_msg: bool = True
 ) -> np.ndarray:
     """Draw bounding boxes and labels"""
 
     for i, bbox in enumerate(bounding_boxes):
         # Bounding box expected format: (x1, y1, x2, y2)
-        bbox_points = [
-            bbox.top_left_x,
-            bbox.top_left_y,
-            bbox.bottom_right_x,
-            bbox.bottom_right_y,
-        ]  # reading from BBox2D msg
-        x1, y1, x2, y2 = map(int, bbox_points)
+        if handle_bbox2d_msg:
+            bbox = [
+                bbox.top_left_x,
+                bbox.top_left_y,
+                bbox.bottom_right_x,
+                bbox.bottom_right_y,
+            ]  # reading from BBox2D msg
+        x1, y1, x2, y2 = map(int, bbox)
 
         # Choose color based on label if available
         if labels and i < len(labels):
@@ -73,6 +74,22 @@ def draw_detection_bounding_boxes(
                 thickness,
                 cv2.LINE_AA,
             )
+    return img
+
+
+def draw_points_2d(img: np.ndarray, points: np.ndarray, radius: int = 3) -> np.ndarray:
+    """Draw 2D points on an image."""
+    if points is None or len(points) == 0:
+        return img
+
+    # Ensure points is a np array of shape (N, 2)
+    points = np.asarray(points)
+    if points.ndim != 2 or points.shape[1] != 2:
+        raise ValueError(f"Expected points of shape (N, 2), got {points.shape}")
+
+    for x, y in points:
+        cv2.circle(img, (int(x), int(y)), radius, (255, 0, 0), -1)  # red filled circle
+
     return img
 
 

@@ -18,7 +18,12 @@ from ..ros import (
     ROSImage,
     ROSCompressedImage,
 )
-from ..utils import validate_func_args, load_model
+from ..utils import (
+    validate_func_args,
+    load_model,
+    draw_points_2d,
+    draw_detection_bounding_boxes,
+)
 from ..utils.vision import LocalVisionModel
 from .model_component import ModelComponent
 from .component_base import ComponentRunType
@@ -163,29 +168,16 @@ class Vision(ModelComponent):
             )  # as cv2 expects a BGR
 
             bounding_boxes = data["output"][0].get("bboxes", [])
+            labels = data["output"][0].get("labels", [])
             tracked_objects = data["output"][0].get("tracked_points", [])
 
-            for bbox in bounding_boxes:
-                # Assuming bbox format: (x1, y1, x2, y2)
-                cv2.rectangle(
-                    image,
-                    (int(bbox[0]), int(bbox[1])),
-                    (int(bbox[2]), int(bbox[3])),
-                    (0, 255, 0),
-                    2,
-                )
+            image = draw_detection_bounding_boxes(
+                image, bounding_boxes, labels, handle_bbox2d_msg=False
+            )
 
             for point_list in tracked_objects:
                 # Each point_list is a list of points on one tracked object
-                for point in point_list:
-                    # Assuming point format: (x, y)
-                    cv2.circle(
-                        image,
-                        (int(point[0]), int(point[1])),
-                        radius=4,
-                        color=(0, 0, 255),
-                        thickness=-1,
-                    )
+                image = draw_points_2d(image, point_list)
 
             cv2.imshow(self.node_name, image)
 
