@@ -75,9 +75,13 @@ class VideoCallback(GenericCallback):
             # pre-process in case of weird encodings and reshape ROS topic
             video = []
             for img in self.msg.frames:
-                video.append(image_pre_processing(img))
+                if not getattr(self, "image_encoding", None):
+                    self.image_encoding = process_encoding(img.encoding)
+                video.append(image_pre_processing(img, *self.image_encoding))
             for img in self.msg.compressed_frames:
-                video.append(read_compressed_image(img))
+                if not getattr(self, "compressed_encoding", None):
+                    self.compressed_encoding = parse_format(img.format)
+                video.append(read_compressed_image(img, self.compressed_encoding))
             return np.array(video)
 
 
@@ -111,9 +115,13 @@ class RGBDCallback(GenericCallback):
 
         else:
             # pre-process and reshape the RGB image
-            rgb = image_pre_processing(self.msg.rgb)
+            if not getattr(self, "rgb_encoding", None):
+                self.rgb_encoding = process_encoding(self.msg.rgb.encoding)
+            rgb = image_pre_processing(self.msg.rgb, *self.rgb_encoding)
             if get_depth:
-                depth = image_pre_processing(self.msg.depth)
+                if not getattr(self, "depth_encoding", None):
+                    self.depth_encoding = process_encoding(self.msg.depth.encoding)
+                depth = image_pre_processing(self.msg.depth, *self.depth_encoding)
                 # Ensure depth has shape (H, W, 1)
                 depth_expanded = np.expand_dims(depth, axis=-1)
                 # Concatenate along the channel axis and return rgbd
