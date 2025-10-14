@@ -119,7 +119,7 @@ class MLLM(LLM):
                     self._string_publishers.append(topic.name)
                 elif topic.msg_type is PointsOfInterest:
                     self._poi_publishers.append(topic.name)
-                elif topic.msg_type is DetectionsMultiSource:
+                elif topic.msg_type in [Detections, DetectionsMultiSource]:
                     self._detections_publishers.append(topic.name)
                 else:
                     pass
@@ -143,6 +143,7 @@ class MLLM(LLM):
 
         # aggregate all inputs that are available
         for i in self.callbacks.values():
+            msg = i.msg
             if (item := i.get_output()) is None:
                 continue
             msg_type = i.input_topic.msg_type
@@ -156,8 +157,8 @@ class MLLM(LLM):
             # get images from image topics
             if issubclass(msg_type, (Image, RGBD)):
                 images.append(item)
-                if i.msg:
-                    self._images.append(i.msg)  # Collect all images for publishing
+                if msg:
+                    self._images.append(msg)  # Collect all images for publishing
 
         if not query or not images:
             return None
