@@ -96,6 +96,7 @@ class MLLM(LLM):
         self.handled_outputs = [
             String,
             StreamingString,
+            Detections,
             DetectionsMultiSource,
             PointsOfInterest,
         ]
