@@ -11,6 +11,7 @@ from ..ros import (
     String,
     Topic,
     Detections,
+    DetectionsMultiSource,
     MapLayer,
     component_action,
 )
@@ -75,7 +76,7 @@ class MapEncoding(Component):
         self.config: MapConfig = config
         self.allowed_inputs = {
             "Required": [Odometry, OccupancyGrid],
-            "Optional": [String, Detections],
+            "Optional": [String, Detections, DetectionsMultiSource],
         }
         self.db_client = db_client
 

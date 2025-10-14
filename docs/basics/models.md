@@ -14,7 +14,7 @@ Clients mentioned earlier take as input a **model** or **vector database (DB)** 
   - Description
 
 * - **[OllamaModel](../apidocs/agents/agents.models.md#classes)**
-  - A LLM/MLLM model loaded from an Ollama checkpoint. Supports configurable generation and deployment options available in Ollama API. Complete list of Ollama models [here](https://ollama.com/library). This wrapper can be used with the OllamaClient.
+  - A LLM/VLM model loaded from an Ollama checkpoint. Supports configurable generation and deployment options available in Ollama API. Complete list of Ollama models [here](https://ollama.com/library). This wrapper can be used with the OllamaClient.
 
 * - **[TransformersLLM](../apidocs/agents/agents.models.md#classes)**
   - LLM models from HuggingFace/ModelScope based checkpoints. Supports quantization ("4bit", "8bit") specification. This model wrapper can be used with the GenericHTTPClient or any of the RoboML clients.

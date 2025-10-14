@@ -75,7 +75,7 @@ Unlike other ROS package, _EmbodiedAgents_ provides a pure pythonic way of descr
 
 ```python
 from agents.clients.ollama import OllamaClient
-from agents.components import MLLM
+from agents.components import VLM
 from agents.models import OllamaModel
 from agents.ros import Topic, Launcher
 
@@ -85,11 +85,12 @@ image0 = Topic(name="image_raw", msg_type="Image")
 text1 = Topic(name="text1", msg_type="String")
 
 # Define a model client (working with Ollama in this case)
+# OllamaModel is a generic wrapper for all Ollama models
 llava = OllamaModel(name="llava", checkpoint="llava:latest")
 llava_client = OllamaClient(llava)
 
-# Define an MLLM component (A component represents a node with a particular functionality)
-mllm = MLLM(
+# Define an VLM component (A component represents a node with a particular functionality)
+mllm = VLM(
     inputs=[text0, image0],
     outputs=[text1],
     model_client=llava_client,

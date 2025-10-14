@@ -3,7 +3,14 @@ from abc import abstractmethod
 from copy import deepcopy
 from typing import Optional, Sequence, Union, List, Dict, Type
 
-from ..ros import BaseComponent, ComponentRunType, FixedInput, SupportedType, Topic
+from ..ros import (
+    BaseComponent,
+    ComponentRunType,
+    FixedInput,
+    SupportedType,
+    Topic,
+    BaseTopic,
+)
 from ..config import BaseComponentConfig
 from ..utils import flatten
 
@@ -96,7 +103,7 @@ class Component(BaseComponent):
         if hasattr(self, "trig_callbacks"):
             for callback in self.trig_callbacks.values():
                 # Add execution step of the node as a post callback function
-                callback.on_callback_execute(self._execution_step)
+                callback.on_callback_execute(self._execution_step, get_processed=False)
 
     def destroy_all_subscribers(self) -> None:
         """
@@ -117,14 +124,13 @@ class Component(BaseComponent):
         Set component trigger
         """
         if isinstance(trigger, list):
+            self.run_type = ComponentRunType.EVENT
+            self.trig_callbacks = {}
             for t in trigger:
                 if t.name not in self.callbacks:
                     raise TypeError(
                         f"Invalid configuration for component trigger {t.name} - A trigger needs to be one of the inputs already defined in component inputs."
                     )
-            self.run_type = ComponentRunType.EVENT
-            self.trig_callbacks = {}
-            for t in trigger:
                 self.trig_callbacks[t.name] = self.callbacks[t.name]
                 # remove trigger inputs from self.callbacks
                 del self.callbacks[t.name]
@@ -157,7 +163,7 @@ class Component(BaseComponent):
         Verify component specific inputs or outputs using allowed topics if provided
         """
         # type validation
-        correct_type = all(isinstance(i, (Topic, FixedInput)) for i in topics)
+        correct_type = all(isinstance(i, (BaseTopic, FixedInput)) for i in topics)
         if not correct_type:
             raise TypeError(
                 f"{topics_direction} to a component can only be of type Topic"

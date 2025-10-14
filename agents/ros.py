@@ -7,7 +7,6 @@ from importlib.util import find_spec
 
 # FROM SUGARCOAT
 from ros_sugar.supported_types import (
-    add_additional_datatypes,
     SupportedType,
     Audio,
     Image,
@@ -17,8 +16,9 @@ from ros_sugar.supported_types import (
     String,
     ROSImage,
     ROSCompressedImage,
+    add_additional_datatypes,
 )
-from ros_sugar.io import Topic as BaseTopic
+from ros_sugar.io.topic import QoSConfig, Topic as BaseTopic
 
 from ros_sugar.config import (
     BaseComponentConfig,
@@ -28,20 +28,27 @@ from ros_sugar.config import (
 )
 from ros_sugar.core import BaseComponent
 from ros_sugar.core.component import MutuallyExclusiveCallbackGroup
-from ros_sugar import Launcher
+from ros_sugar import Launcher, UI_EXTENSIONS
 from ros_sugar.utils import component_action
 
 # AGENTS TYPES
-from automatika_embodied_agents.msg import Point2D, Bbox2D, Detection2D, Detections2D
+from automatika_embodied_agents.msg import (
+    Point2D,
+    Bbox2D,
+    Detections2D,
+    Detections2DMultiSource,
+)
 from automatika_embodied_agents.msg import (
     StreamingString as ROSStreamingString,
     Video as ROSVideo,
-    Tracking as ROSTracking,
     Trackings as ROSTrackings,
+    TrackingsMultiSource as ROSTrackingsMultiSource,
     PointsOfInterest as ROSPointsOfInterest,
 )
 from .callbacks import (
-    ObjectDetectionCallback,
+    DetectionsCallback,
+    DetectionsMultiSourceCallback,
+    PointsOfInterestCallback,
     RGBDCallback,
     VideoCallback,
     TextCallback,
@@ -56,6 +63,7 @@ __all__ = [
     "OccupancyGrid",
     "Odometry",
     "Topic",
+    "QoSConfig",
     "FixedInput",
     "base_validators",
     "BaseAttrs",
@@ -124,11 +132,11 @@ class Video(SupportedType):
         return msg
 
 
-class Detection(SupportedType):
+class Detections(SupportedType):
     """Custom Message: Detection."""
 
-    _ros_type = Detection2D
-    callback = None  # not defined
+    _ros_type = Detections2D
+    callback = DetectionsCallback
 
     @classmethod
     def convert(
@@ -143,7 +151,7 @@ class Detection(SupportedType):
             List[np.ndarray],
         ],
         **_,
-    ) -> Detection2D:
+    ) -> Detections2D:
         """
         Takes object detection data and converts it into a ROS message
         of type Detection2D
@@ -152,7 +160,7 @@ class Detection(SupportedType):
         if isinstance(output, List):
             output = output[0]
             images = images[0] if images else []
-        msg = Detection2D()
+        msg = Detections2D()
         msg.scores = output["scores"]
         msg.labels = output["labels"]
         boxes = []
@@ -177,23 +185,23 @@ class Detection(SupportedType):
         return msg
 
 
-class Detections(SupportedType):
+class DetectionsMultiSource(SupportedType):
     """Custom Message: Detections."""
 
-    _ros_type = Detections2D
-    callback = ObjectDetectionCallback
+    _ros_type = Detections2DMultiSource
+    callback = DetectionsMultiSourceCallback
 
     @classmethod
-    def convert(cls, output: List, images: List, **_) -> Detections2D:
+    def convert(cls, output: List, images: List, **_) -> Detections2DMultiSource:
         """
         Takes object detections data and converts it into a ROS message
         of type Detections2D
         :return: Detections2D
         """
-        msg = Detections2D()
+        msg = Detections2DMultiSource()
         detections = []
         for img, detection in zip(images, output):
-            detections.append(Detection.convert(detection, img))
+            detections.append(Detections.convert(detection, img))
         msg.detections = detections
         return msg
 
@@ -202,7 +210,7 @@ class PointsOfInterest(SupportedType):
     """Custom Message: PointsOfInterest."""
 
     _ros_type = ROSPointsOfInterest
-    callback = None  # not defined
+    callback = PointsOfInterestCallback  # not defined
 
     @classmethod
     def convert(
@@ -236,10 +244,10 @@ class PointsOfInterest(SupportedType):
         return msg
 
 
-class Tracking(SupportedType):
+class Trackings(SupportedType):
     """Custom Message: Tracking."""
 
-    _ros_type = ROSTracking
+    _ros_type = ROSTrackings
     callback = None  # Not defined in EmbodiedAgents
 
     @classmethod
@@ -254,7 +262,7 @@ class Tracking(SupportedType):
             List[ROSCompressedImage],
             List[np.ndarray],
         ],
-    ) -> ROSTracking:
+    ) -> ROSTrackings:
         """
         Takes tracking data and converts it into a ROS message
         of type Tracking
@@ -264,7 +272,7 @@ class Tracking(SupportedType):
         if isinstance(output, List):
             output = output[0]
             images = images[0]
-        msg = ROSTracking()
+        msg = ROSTrackings()
         msg.ids = output.get("ids") or []
         msg.labels = output.get("tracked_labels") or []
 
@@ -307,23 +315,23 @@ class Tracking(SupportedType):
         return msg
 
 
-class Trackings(SupportedType):
+class TrackingsMultiSource(SupportedType):
     """Custom Message: Trackings."""
 
-    _ros_type = ROSTrackings
+    _ros_type = ROSTrackingsMultiSource
     callback = None  # Not defined
 
     @classmethod
-    def convert(cls, output: List, images: List, **_) -> ROSTrackings:
+    def convert(cls, output: List, images: List, **_) -> ROSTrackingsMultiSource:
         """
         Takes trackings data and converts it into a ROS message
         of type ROSTrackings
         :return: ROSTrackings
         """
-        msg = ROSTrackings()
+        msg = ROSTrackingsMultiSource()
         trackings = []
         for img, tracking in zip(images, output):
-            trackings.append(Tracking.convert(tracking, img))
+            trackings.append(Trackings.convert(tracking, img))
         msg.trackings = trackings
         return msg
 
@@ -347,16 +355,25 @@ class RGBD(SupportedType):
 agent_types = [
     StreamingString,
     Video,
-    Detection,
     Detections,
-    Tracking,
+    DetectionsMultiSource,
     Trackings,
+    TrackingsMultiSource,
     PointsOfInterest,
     RGBD,
 ]
 
 
 add_additional_datatypes(agent_types)
+
+
+def augment_ui():
+    from .ui_elements import INPUT_ELEMENTS, OUTPUT_ELEMENTS
+
+    return INPUT_ELEMENTS, OUTPUT_ELEMENTS
+
+
+UI_EXTENSIONS["agents"] = augment_ui
 
 
 @define(kw_only=True)

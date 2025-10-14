@@ -10,6 +10,7 @@ from ..ros import (
     String,
     StreamingString,
     Topic,
+    DetectionsMultiSource,
     Detections,
     RGBD,
     PointsOfInterest,
@@ -75,7 +76,7 @@ class MLLM(LLM):
     ):
         self.allowed_inputs = {
             "Required": [[String, StreamingString], [Image, RGBD]],
-            "Optional": [Detections],
+            "Optional": [DetectionsMultiSource, Detections],
         }
 
         config = config or MLLMConfig()
@@ -92,7 +93,13 @@ class MLLM(LLM):
             **kwargs,
         )
 
-        self.handled_outputs = [String, StreamingString, Detections, PointsOfInterest]
+        self.handled_outputs = [
+            String,
+            StreamingString,
+            Detections,
+            DetectionsMultiSource,
+            PointsOfInterest,
+        ]
         self._images: List[Union[np.ndarray, ROSImage, ROSCompressedImage]] = []
 
     def custom_on_configure(self):
@@ -113,7 +120,7 @@ class MLLM(LLM):
                     self._string_publishers.append(topic.name)
                 elif topic.msg_type is PointsOfInterest:
                     self._poi_publishers.append(topic.name)
-                elif topic.msg_type is Detections:
+                elif topic.msg_type in [Detections, DetectionsMultiSource]:
                     self._detections_publishers.append(topic.name)
                 else:
                     pass
@@ -137,6 +144,7 @@ class MLLM(LLM):
 
         # aggregate all inputs that are available
         for i in self.callbacks.values():
+            msg = i.msg
             if (item := i.get_output()) is None:
                 continue
             msg_type = i.input_topic.msg_type
@@ -145,13 +153,13 @@ class MLLM(LLM):
                 if not query:
                     query = item
                 context[i.input_topic.name] = item
-            elif msg_type is Detections:
+            elif msg_type in [DetectionsMultiSource, Detections]:
                 context[i.input_topic.name] = item
             # get images from image topics
             if issubclass(msg_type, (Image, RGBD)):
                 images.append(item)
-                if i.msg:
-                    self._images.append(i.msg)  # Collect all images for publishing
+                if msg:
+                    self._images.append(msg)  # Collect all images for publishing
 
         if not query or not images:
             return None
@@ -317,3 +325,7 @@ class MLLM(LLM):
             )
         else:
             self.get_logger().error("Model inference failed during warmup.")
+
+
+# Alias
+VLM = MLLM

@@ -9,7 +9,14 @@ from ..clients.db_base import DBClient
 from ..clients.model_base import ModelClient
 from ..clients import OllamaClient, GenericHTTPClient
 from ..config import LLMConfig
-from ..ros import FixedInput, String, Topic, Detections, StreamingString
+from ..ros import (
+    FixedInput,
+    String,
+    Topic,
+    DetectionsMultiSource,
+    Detections,
+    StreamingString,
+)
 from ..utils import get_prompt_template, validate_func_args
 from .model_component import ModelComponent
 from .component_base import ComponentRunType
@@ -77,7 +84,10 @@ class LLM(ModelComponent):
         self.allowed_inputs = (
             kwargs["allowed_inputs"]
             if kwargs.get("allowed_inputs")
-            else {"Required": [[String, StreamingString]], "Optional": [Detections]}
+            else {
+                "Required": [[String, StreamingString]],
+                "Optional": [DetectionsMultiSource, Detections],
+            }
         )
         self.handled_outputs = [String, StreamingString]
 
@@ -347,7 +357,7 @@ class LLM(ModelComponent):
                 if not query:
                     query = item
                 context[i.input_topic.name] = item
-            elif msg_type is Detections:
+            elif msg_type in [DetectionsMultiSource, Detections]:
                 context[i.input_topic.name] = item
 
         if query is None:

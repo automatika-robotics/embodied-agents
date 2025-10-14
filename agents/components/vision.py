@@ -7,18 +7,23 @@ import cv2
 from ..clients.model_base import ModelClient
 from ..config import VisionConfig
 from ..ros import (
+    DetectionsMultiSource,
     Detections,
-    Detection,
-    Tracking,
+    Trackings,
     FixedInput,
     Image,
     RGBD,
     Topic,
-    Trackings,
+    TrackingsMultiSource,
     ROSImage,
     ROSCompressedImage,
 )
-from ..utils import validate_func_args, load_model
+from ..utils import (
+    validate_func_args,
+    load_model,
+    draw_points_2d,
+    draw_detection_bounding_boxes,
+)
 from ..utils.vision import LocalVisionModel
 from .model_component import ModelComponent
 from .component_base import ComponentRunType
@@ -77,7 +82,12 @@ class Vision(ModelComponent):
     ):
         self.config: VisionConfig = config or VisionConfig()
         self.allowed_inputs = {"Required": [[Image, RGBD]]}
-        self.handled_outputs = [Detection, Tracking, Detections, Trackings]
+        self.handled_outputs = [
+            Detections,
+            Trackings,
+            DetectionsMultiSource,
+            TrackingsMultiSource,
+        ]
 
         self._images: List[Union[np.ndarray, ROSImage, ROSCompressedImage]] = []
 
@@ -158,29 +168,16 @@ class Vision(ModelComponent):
             )  # as cv2 expects a BGR
 
             bounding_boxes = data["output"][0].get("bboxes", [])
+            labels = data["output"][0].get("labels", [])
             tracked_objects = data["output"][0].get("tracked_points", [])
 
-            for bbox in bounding_boxes:
-                # Assuming bbox format: (x1, y1, x2, y2)
-                cv2.rectangle(
-                    image,
-                    (int(bbox[0]), int(bbox[1])),
-                    (int(bbox[2]), int(bbox[3])),
-                    (0, 255, 0),
-                    2,
-                )
+            image = draw_detection_bounding_boxes(
+                image, bounding_boxes, labels, handle_bbox2d_msg=False
+            )
 
             for point_list in tracked_objects:
                 # Each point_list is a list of points on one tracked object
-                for point in point_list:
-                    # Assuming point format: (x, y)
-                    cv2.circle(
-                        image,
-                        (int(point[0]), int(point[1])),
-                        radius=4,
-                        color=(0, 0, 255),
-                        thickness=-1,
-                    )
+                image = draw_points_2d(image, point_list)
 
             cv2.imshow(self.node_name, image)
 
@@ -199,17 +196,18 @@ class Vision(ModelComponent):
         self._images = []
         # set one image topic as query for event based trigger
         if trigger := kwargs.get("topic"):
-            images = [self.trig_callbacks[trigger.name].get_output()]
-            if msg := kwargs.get("msg"):
+            if msg := self.trig_callbacks[trigger.name].msg:
                 self._images.append(msg)
+            images = [self.trig_callbacks[trigger.name].get_output(clear_last=True)]
         else:
             images = []
 
             for i in self.callbacks.values():
+                msg = i.msg
                 if (item := i.get_output(clear_last=True)) is not None:
                     images.append(item)
-                    if i.msg:
-                        self._images.append(i.msg)  # Collect all images for publishing
+                    if msg:
+                        self._images.append(msg)
 
         if not images:
             return None
