@@ -10,7 +10,7 @@ A Component is the main execution unit in _EmbodiedAgents_ and in essence each c
 * - **[LLM](agents.components.llm.md)**
   - Uses large language models (e.g., LLaMA) to process text input. Can be used for reasoning, tool calling, instruction following, or dialogue. It can also utilize vector DBs for storing and retreiving contextual information.
 
-* - **[MLLM](agents.components.mllm.md)**
+* - **[VLM](agents.components.mllm.md)**
   - Leverages multimodal LLMs (e.g., Llava) for understanding and processing both text and image data. Inherits all functionalities of the LLM component.
 
 * - **[SpeechToText](agents.components.speechtotext.md)**
@@ -37,7 +37,7 @@ from .component_base import Component
 from .imagestovideo import VideoMessageMaker
 from .llm import LLM
 from .map_encoding import MapEncoding
-from .mllm import MLLM
+from .mllm import MLLM, VLM
 from .model_component import ModelComponent
 from .semantic_router import SemanticRouter
 from .speechtotext import SpeechToText
@@ -49,6 +49,7 @@ __all__ = [
     "ModelComponent",
     "MapEncoding",
     "MLLM",
+    "VLM",
     "LLM",
     "SpeechToText",
     "TextToSpeech",

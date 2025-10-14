@@ -19,7 +19,7 @@ _EmbodiedAgents_ provides a suite of ready-to-use components. These can be compo
 * - **[LLM](../apidocs/agents/agents.components.llm)**
   - Uses large language models (e.g., LLaMA) to process text input. Can be used for reasoning, tool calling, instruction following, or dialogue. It can also utilize vector DBs for storing and retreiving contextual information.
 
-* - **[MLLM](../apidocs/agents/agents.components.mllm)**
+* - **[VLM](../apidocs/agents/agents.components.mllm)**
   - Leverages multimodal LLMs (e.g., Llava) for understanding and processing both text and image data. Inherits all functionalities of the LLM component. It can also utilize multimodal LLM based planning models for task specific outputs (e.g. pointing, grounding, affordance etc.)
 
 * - **[SpeechToText](../apidocs/agents/agents.components.speechtotext)**

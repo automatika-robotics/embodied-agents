@@ -325,3 +325,7 @@ class MLLM(LLM):
             )
         else:
             self.get_logger().error("Model inference failed during warmup.")
+
+
+# Alias
+VLM = MLLM

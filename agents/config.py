@@ -10,6 +10,7 @@ from .utils.vision import _MS_COCO_LABELS
 __all__ = [
     "LLMConfig",
     "MLLMConfig",
+    "VLMConfig",
     "SpeechToTextConfig",
     "TextToSpeechConfig",
     "SemanticRouterConfig",
@@ -127,9 +128,9 @@ class LLMConfig(ModelComponentConfig):
 @define(kw_only=True)
 class MLLMConfig(LLMConfig):
     """
-    Configuration for the Multi-Modal Large Language Model (MLLM) component.
+    Configuration for the Multi-Modal LLM (VLM) component.
 
-    It defines various settings that control how the LLM component operates, including
+    It defines various settings that control how the VLM component operates, including
     whether to enable chat history, retreival augmented generation (RAG) and more.
 
     :param enable_rag: Enables or disables Retreival Augmented Generation.
@@ -163,7 +164,7 @@ class MLLMConfig(LLMConfig):
     :param response_terminator: A string token marking that the end of a single response from the model. This token is only used in case of a persistent clients, such as a websocket client and when stream is set to True. It is not published. This value cannot be an empty string.
         Default is '<<Response Ended>>'
     :type response_terminator: str
-     :param task: The specific task the MLLM should perform. This can help tailor model behavior and is useful when the multimodal LLM being used with the component has been trained on specific tasks. For an example of such a model check out RoboBrain2 in models.
+     :param task: The specific task the VLM should perform. This can help tailor model behavior and is useful when the VLM being used with the component has been trained on specific tasks. For an example of such a model check out RoboBrain2 in models.
         Supported values are: "general", "pointing", "affordance", "trajectory", and "grounding".
         Default is None.
     :type task: Optional[Literal["general", "pointing", "affordance", "trajectory", "grounding"]]
@@ -192,6 +193,10 @@ class MLLMConfig(LLMConfig):
         """
         llm_params = super()._get_inference_params()
         return {**llm_params, "task": self.task} if self.task else llm_params
+
+
+# Alias
+VLMConfig = MLLMConfig
 
 
 @define(kw_only=True)

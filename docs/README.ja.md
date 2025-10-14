@@ -76,27 +76,33 @@ _EmbodiedAgents_ は、他の ROS パッケージと異なり、[Sugarcoat🍬](
 
 ```python
 from agents.clients.ollama import OllamaClient
-from agents.components import MLLM
+from agents.components import VLM
 from agents.models import OllamaModel
 from agents.ros import Topic, Launcher
 
+# Define input and output topics (pay attention to msg_type)
 text0 = Topic(name="text0", msg_type="String")
 image0 = Topic(name="image_raw", msg_type="Image")
 text1 = Topic(name="text1", msg_type="String")
 
+# Define a model client (working with Ollama in this case)
+# OllamaModel is a generic wrapper for all Ollama models
 llava = OllamaModel(name="llava", checkpoint="llava:latest")
 llava_client = OllamaClient(llava)
 
-mllm = MLLM(
+# Define an VLM component (A component represents a node with a particular functionality)
+mllm = VLM(
     inputs=[text0, image0],
     outputs=[text1],
     model_client=llava_client,
     trigger=[text0],
     component_name="vqa"
 )
+# Additional prompt settings
 mllm.set_topic_prompt(text0, template="""You are an amazing and funny robot.
     Answer the following about this image: {{ text0 }}"""
 )
+# Launch the component
 launcher = Launcher()
 launcher.add_pkg(components=[mllm])
 launcher.bringup()
