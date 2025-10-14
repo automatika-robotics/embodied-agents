@@ -84,7 +84,7 @@ from agents.config import MLLMConfig
 robobrain = RoboBrain2(name="robobrain")
 robobrain_client = RoboMLHTTPClient(robobrain)
 
-# Define MLLM output topic
+# Define MLLM input/output topics
 rgbd0 = Topic(name="rgbd0", msg_type="RGBD")
 grounding_output = Topic(name="grounding_output", msg_type="Detections")
 
@@ -93,7 +93,7 @@ config = MLLMConfig(task="grounding")
 
 # initialize the component
 go_to_x = MLLM(
-    inputs=[llm_output],
+    inputs=[llm_output, rgbd],
     outputs=[grounding_output],
     model_client=robobrain_client,
     trigger=llm_output,
@@ -248,7 +248,7 @@ sentence_parser = LLM(
 robobrain = RoboBrain2(name="robobrain")
 robobrain_client = RoboMLHTTPClient(robobrain)
 
-# Define MLLM output topic
+# Define MLLM input/output topics
 rgbd0 = Topic(name="rgbd0", msg_type="RGBD")
 grounding_output = Topic(name="grounding_output", msg_type="Detections")
 
@@ -257,7 +257,7 @@ config = MLLMConfig(task="grounding")
 
 # initialize the component
 go_to_x = MLLM(
-    inputs=[llm_output],
+    inputs=[llm_output, rgbd0],
     outputs=[grounding_output],
     model_client=robobrain_client,
     trigger=llm_output,
