@@ -71,18 +71,18 @@ class VideoCallback(GenericCallback):
         # return np.ndarray if fixed video has been read
         if isinstance(self.msg, np.ndarray):
             return self.msg
-        else:
-            # pre-process in case of weird encodings and reshape ROS topic
-            video = []
-            for img in self.msg.frames:
-                if not getattr(self, "image_encoding", None):
-                    self.image_encoding = process_encoding(img.encoding)
-                video.append(image_pre_processing(img, *self.image_encoding))
-            for img in self.msg.compressed_frames:
-                if not getattr(self, "compressed_encoding", None):
-                    self.compressed_encoding = parse_format(img.format)
-                video.append(read_compressed_image(img, self.compressed_encoding))
-            return np.array(video)
+
+        # pre-process in case of weird encodings and reshape ROS topic
+        video = []
+        for img in self.msg.frames:
+            if not getattr(self, "image_encoding", None):
+                self.image_encoding = process_encoding(img.encoding)
+            video.append(image_pre_processing(img, *self.image_encoding))
+        for img in self.msg.compressed_frames:
+            if not getattr(self, "compressed_encoding", None):
+                self.compressed_encoding = parse_format(img.format)
+            video.append(read_compressed_image(img, self.compressed_encoding))
+        return np.array(video)
 
 
 class RGBDCallback(GenericCallback):
@@ -113,21 +113,25 @@ class RGBDCallback(GenericCallback):
         if not self.msg:
             return None
 
+        # pre-process and reshape the RGB image
+        if not getattr(self, "rgb_encoding", None):
+            self.rgb_encoding = process_encoding(self.msg.rgb.encoding)
+        rgb = image_pre_processing(self.msg.rgb, *self.rgb_encoding)
+        if get_depth:
+            if not getattr(self, "depth_encoding", None):
+                self.depth_encoding = process_encoding(self.msg.depth.encoding)
+            depth = image_pre_processing(self.msg.depth, *self.depth_encoding)
+            # Ensure depth has shape (H, W, 1)
+            depth_expanded = np.expand_dims(depth, axis=-1)
+            # Concatenate along the channel axis and return rgbd
+            return np.concatenate((rgb, depth_expanded), axis=-1)
         else:
-            # pre-process and reshape the RGB image
-            if not getattr(self, "rgb_encoding", None):
-                self.rgb_encoding = process_encoding(self.msg.rgb.encoding)
-            rgb = image_pre_processing(self.msg.rgb, *self.rgb_encoding)
-            if get_depth:
-                if not getattr(self, "depth_encoding", None):
-                    self.depth_encoding = process_encoding(self.msg.depth.encoding)
-                depth = image_pre_processing(self.msg.depth, *self.depth_encoding)
-                # Ensure depth has shape (H, W, 1)
-                depth_expanded = np.expand_dims(depth, axis=-1)
-                # Concatenate along the channel axis and return rgbd
-                return np.concatenate((rgb, depth_expanded), axis=-1)
-            else:
-                return rgb
+            return rgb
+
+    def _get_ui_content(self, **_) -> str:
+        """Get ui content for image"""
+        output = self.get_output()
+        return convert_img_to_jpeg_str(output, self.node_name)
 
 
 class DetectionsMultiSourceCallback(GenericCallback):
@@ -160,13 +164,13 @@ class DetectionsMultiSourceCallback(GenericCallback):
         # send fixed list of labels if it exists
         if isinstance(self.msg, list):
             return create_detection_context(self.msg)
+
         # send labels from ROS message
-        else:
-            label_list = [
-                label for detection in self.msg.detections for label in detection.labels
-            ]
-            detections_string = create_detection_context(label_list)
-            return detections_string
+        label_list = [
+            label for detection in self.msg.detections for label in detection.labels
+        ]
+        detections_string = create_detection_context(label_list)
+        return detections_string
 
     def _get_ui_content(self, **_) -> str:
         """Get UI content for the first Detections2D msg in Detections2DMultiSource: draw bounding boxes and labels on the image."""
@@ -238,14 +242,15 @@ class DetectionsCallback(GenericCallback):
         """
         if not self.msg:
             return None
+
         # send fixed list of labels if it exists
         if isinstance(self.msg, list):
             return create_detection_context(self.msg)
+
         # send labels from ROS message
-        else:
-            label_list = list(self.msg.labels)
-            detections_string = create_detection_context(label_list)
-            return detections_string
+        label_list = list(self.msg.labels)
+        detections_string = create_detection_context(label_list)
+        return detections_string
 
     def _get_ui_content(self, **_) -> str:
         """Get UI content for Detections2D: draw bounding boxes and labels on the image."""
