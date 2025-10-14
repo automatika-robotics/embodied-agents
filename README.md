@@ -89,7 +89,7 @@ text1 = Topic(name="text1", msg_type="String")
 llava = OllamaModel(name="llava", checkpoint="llava:latest")
 llava_client = OllamaClient(llava)
 
-# Define an VLM component (A component represents a node with a particular functionality)
+# Define a VLM component (A component represents a node with a particular functionality)
 mllm = VLM(
     inputs=[text0, image0],
     outputs=[text1],
