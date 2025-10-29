@@ -19,7 +19,7 @@ Checkout [Installation Instructions](https://automatika-robotics.github.io/embod
 
 Get started with the [Quickstart Guide](https://automatika-robotics.github.io/embodied-agents/quickstart.html) 🚀
 
-Get familiar with [Basic Concepts](https://automatika-robotics.github.io/embodied-agents/basics.html) 📚
+Get familiar with [Basic Concepts](https://automatika-robotics.github.io/embodied-agents/basics/index.html) 📚
 
 Dive right in with [Example Recipes](https://automatika-robotics.github.io/embodied-agents/examples/index.html) ✨
 

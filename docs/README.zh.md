@@ -17,7 +17,7 @@
 
 查看 [安装说明](https://automatika-robotics.github.io/embodied-agents/installation.html) 🛠️
 立即开始 [快速上手](https://automatika-robotics.github.io/embodied-agents/quickstart.html) 🚀
-了解 [基本概念](https://automatika-robotics.github.io/embodied-agents/basics.html) 📚
+了解 [基本概念](https://automatika-robotics.github.io/embodied-agents/basics/index.html) 📚
 参考 [示例代码](https://automatika-robotics.github.io/embodied-agents/examples/index.html) ✨
 
 ## 安装 🛠️
