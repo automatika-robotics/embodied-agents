@@ -51,7 +51,7 @@ from .callbacks import (
     PointsOfInterestCallback,
     RGBDCallback,
     VideoCallback,
-    TextCallback,
+    StreamingStringCallback,
 )
 
 __all__ = [
@@ -81,7 +81,7 @@ __all__ = [
 class StreamingString(SupportedType):
     """Custom Message: StreamingString"""
 
-    callback = TextCallback
+    callback = StreamingStringCallback
     _ros_type = ROSStreamingString
 
     @classmethod
