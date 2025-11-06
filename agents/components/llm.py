@@ -85,7 +85,7 @@ class LLM(ModelComponent):
             kwargs["allowed_inputs"]
             if kwargs.get("allowed_inputs")
             else {
-                "Required": [[String, StreamingString]],
+                "Required": [String],
                 "Optional": [DetectionsMultiSource, Detections],
             }
         )
@@ -353,7 +353,7 @@ class LLM(ModelComponent):
                 continue
             msg_type = i.input_topic.msg_type
             # set trigger equal to a topic with type String if trigger not found
-            if msg_type in [String, StreamingString]:
+            if msg_type == String:
                 if not query:
                     query = item
                 context[i.input_topic.name] = item

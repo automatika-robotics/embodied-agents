@@ -75,7 +75,7 @@ class MLLM(LLM):
         **kwargs,
     ):
         self.allowed_inputs = {
-            "Required": [[String, StreamingString], [Image, RGBD]],
+            "Required": [String, [Image, RGBD]],
             "Optional": [DetectionsMultiSource, Detections],
         }
 
@@ -149,7 +149,7 @@ class MLLM(LLM):
                 continue
             msg_type = i.input_topic.msg_type
             # set trigger equal to a topic with type String if trigger not found
-            if msg_type in [String, StreamingString]:
+            if msg_type == String:
                 if not query:
                     query = item
                 context[i.input_topic.name] = item
