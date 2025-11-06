@@ -28,15 +28,9 @@ ament_export_dependencies(rosidl_default_runtime)
 # Install Python module
 ament_python_install_package(agents)
 
-# Add executables and clients
+# Add executable
 install(PROGRAMS
 scripts/executable
-scripts/tiny_web_client
-DESTINATION lib/${PROJECT_NAME}
-)
-# Add webclient accompaniments
-install(DIRECTORY
-scripts/web_client
 DESTINATION lib/${PROJECT_NAME}
 )
 
