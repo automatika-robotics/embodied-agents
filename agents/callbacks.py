@@ -25,6 +25,27 @@ from .utils import (
 __all__ = ["GenericCallback", "TextCallback"]
 
 
+class StreamingStringCallback(TextCallback):
+    def _get_output(self, **_) -> Optional[str]:
+        """Gets text.
+        :rtype: str | None
+        """
+
+        if not self.msg:
+            return None
+
+        # return str if fixed str has been read
+        if isinstance(self.msg, str):
+            return self.msg
+        # return ROS message data
+        else:
+            if self._template:
+                get_logger(self.node_name).warning(
+                    "StreamingString topics cannot render templated strings. Discarding template."
+                )
+            return self.msg.data
+
+
 class VideoCallback(GenericCallback):
     """
     Video Callback class. Its get method saves a video as an array of arrays
