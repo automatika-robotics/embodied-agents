@@ -30,8 +30,8 @@ from agents.config import SpeechToTextConfig
 audio_in = Topic(name="audio0", msg_type="Audio")
 text_query = Topic(name="text0", msg_type="String")
 
-s2t_config = SpeechToTextConfig(enable_vad=True,     # option to listen for speech through the microphone
-                                enable_wakeword=True) # option to invoke the component with a wakeword like 'hey jarvis'
+s2t_config = SpeechToTextConfig(enable_vad=True,     # option to listen for speech through the microphone, set to False if usign web UI
+                                enable_wakeword=True) # option to invoke the component with a wakeword like 'hey jarvis', set to False if using web UI
 ```
 ```{warning}
 The _enable_wakeword_ option cannot be enabled without the _enable_vad_ option.
@@ -125,12 +125,16 @@ from agents.config import TextToSpeechConfig
 from agents.models import SpeechT5
 
 # config for asynchronously playing audio on device
-t2s_config = TextToSpeechConfig(play_on_device=True, stream=True)
+t2s_config = TextToSpeechConfig(play_on_device=True, stream=True)  # Set play_on_device to false if using the web UI
+
+# Uncomment the following line for receiving output on the web UI
+# audio_out = Topic(name="audio_out", msg_type="Audio")
 
 speecht5 = SpeechT5(name="speecht5")
 roboml_speecht5 = RoboMLWSClient(speecht5)
 text_to_speech = TextToSpeech(
     inputs=[text_answer],
+    outputs=[],  # use outputs=[audio_out] for receiving answers on web UI
     trigger=text_answer,
     model_client=roboml_speecht5,
     config=t2s_config,
@@ -138,13 +142,14 @@ text_to_speech = TextToSpeech(
 )
 ```
 ## Launching the Components
-The final step in this example is to launch the components. This is done by passing the defined components to the launcher and calling the **bringup** method.
+The final step in this example is to launch the components. This is done by passing the defined components to the launcher and calling the **bringup** method. _EmbodiedAgents_ also allows us to create a web-based UI for interacting with our conversational agent recipe.
 
 ```python
 from agents.ros import Launcher
 
 # Launch the components
 launcher = Launcher()
+launcher.enable_ui(inputs=[audio_in, text_query], outputs=[image0])  # specify topics
 launcher.add_pkg(
     components=[speech_to_text, mllm, text_to_speech]
     )
@@ -168,10 +173,9 @@ text_query = Topic(name="text0", msg_type="String")
 whisper = Whisper(name="whisper")  # Custom model init params can be provided here
 roboml_whisper = RoboMLWSClient(whisper)
 
-s2t_config = SpeechToTextConfig(
-    enable_vad=True,  # option to listen for speech through the microphone
-    enable_wakeword=True,  # option to invoke the component with a wakeword like 'hey jarvis'
-)
+s2t_config = SpeechToTextConfig(enable_vad=True,     # option to listen for speech through the microphone, set to False if usign web UI
+                                enable_wakeword=True) # option to invoke the component with a wakeword like 'hey jarvis', set to False if using web UI
+
 speech_to_text = SpeechToText(
     inputs=[audio_in],
     outputs=[text_query],
@@ -197,40 +201,38 @@ mllm = MLLM(
     component_name="vqa",
 )
 
-# config for asynchronously playing audio on device
-t2s_config = TextToSpeechConfig(play_on_device=True, stream=True)
+t2s_config = TextToSpeechConfig(play_on_device=True, stream=True)  # Set play_on_device to false if using the web UI
+
+# Uncomment the following line for receiving output on the web UI
+# audio_out = Topic(name="audio_out", msg_type="Audio")
 
 speecht5 = SpeechT5(name="speecht5")
 roboml_speecht5 = RoboMLWSClient(speecht5)
 text_to_speech = TextToSpeech(
     inputs=[text_answer],
+    outputs=[],  # use outputs=[audio_out] for receiving answers on web UI
     trigger=text_answer,
     model_client=roboml_speecht5,
     config=t2s_config,
-    component_name="text_to_speech",
+    component_name="text_to_speech"
 )
 
 launcher = Launcher()
-launcher.add_pkg(
-    components=[speech_to_text, mllm, text_to_speech],
-)
+launcher.enable_ui(inputs=[audio_in, text_query], outputs=[image0])  # specify topics
+launcher.add_pkg(components=[speech_to_text, mllm, text_to_speech])
 launcher.bringup()
 ```
 
-## Web Based Client for Interacting with the Robot
+## Web Based UI for Interacting with the Robot
 
-To interact with text and audio based topics on the robot, _EmbodiedAgents_ includes a tiny browser based client. This is useful if the robot does not have a microphone/speaker interface or if one wants to communicate with it remotely. In the code above, we can set `enable_vad` and `enable_wakeword` options in `s2t_config` to `False` and set `play_on_device` option in `t2s_config` to `False`. Now we are ready to use our browser based config.
+To interact with topics on the robot, _EmbodiedAgents_ can create dynamically specified UIs. This is useful if the robot does not have a microphone/speaker interface or if one wants to communicate with it remotely. We will also like to see the images coming in from the robots camera to have more context of its answers.
 
-```{note}
-In order to run the client you will need to install FastAPI with
+In the code above, we already specified the input and output topics for the UI by calling the function `launcher.enable_ui`. Furthermore, we can set `enable_vad` and `enable_wakeword` options in `s2t_config` to `False` and set `play_on_device` option in `t2s_config` to `False`. Now we are ready to use our browser based UI.
+
+````{note}
+In order to run the client you will need to install [FastHTML](https://www.fastht.ml/) and [MonsterUI](https://github.com/AnswerDotAI/MonsterUI) with
 ```shell
-pip install "fastapi[standard-no-fastapi-cloud-cli]"`
+pip install python-fasthtml monsterui
 ````
 
-We can launch the client as follows:
-
-```shell
-ros2 run automatika_embodied_agents tiny_web_client
-```
-
-The client displays a web UI on http://localhost:8080. Open this address from browser. ROS input and output topic settings for text and audio topics can be configured from the web UI by pressing the settings icon.
+The client displays a web UI on **http://localhost:5001** if you have run it on your machine. Or you can access it at **http://<IP_ADDRESS_OF_THE_ROBOT>:5001** if you have run it on the robot.

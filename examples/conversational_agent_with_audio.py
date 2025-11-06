@@ -42,12 +42,18 @@ mllm = MLLM(
 )
 
 # config for asynchronously playing audio on device
-t2s_config = TextToSpeechConfig(play_on_device=True, stream=True)
+t2s_config = TextToSpeechConfig(
+    play_on_device=True, stream=True
+)  # Set play_on_device to false if using the web UI
+
+# Uncomment the following line for receiving output on the web UI
+# audio_out = Topic(name="audio_out", msg_type="Audio")
 
 speecht5 = SpeechT5(name="speecht5")
 roboml_speecht5 = RoboMLWSClient(speecht5)
 text_to_speech = TextToSpeech(
     inputs=[text_answer],
+    outputs=[],  # use outputs=[audio_out] for web UI
     trigger=text_answer,
     model_client=roboml_speecht5,
     config=t2s_config,
@@ -55,7 +61,6 @@ text_to_speech = TextToSpeech(
 )
 
 launcher = Launcher()
-launcher.add_pkg(
-    components=[speech_to_text, mllm, text_to_speech],
-)
+launcher.enable_ui(inputs=[audio_in, text_query], outputs=[image0])  # specify topics
+launcher.add_pkg(components=[speech_to_text, mllm, text_to_speech])
 launcher.bringup()
