@@ -114,6 +114,27 @@ launcher.bringup()
   <img alt="Elaborate Agent" src="_static/complete_dark.png">
 </picture>
 
+## EmbodiedAgent 配方的动态网页界面
+
+借助底层 [**Sugarcoat**](https://github.com/automatika-robotics/sugarcoat) 框架的强大功能，***EmbodiedAgents*** 为每个配方提供了一个**完全动态、自动生成的网页界面（Web UI）**。
+该功能基于 **FastHTML** 构建，彻底消除了手动开发图形界面的需求，并能即时提供一个用于控制和可视化的响应式界面。
+
+该界面会自动生成以下内容：
+
+* 配方中所使用的所有组件的设置界面
+* 组件输入/输出的实时数据可视化与控制
+* 针对所有支持的消息类型的基于 WebSocket 的数据流传输
+
+### 示例：VLM Agent 界面
+
+系统会为 VLM 问答（Q&A）代理（类似快速入门示例）自动生成完整的界面，提供简洁的设置控制，并显示实时的文本输入/输出。
+
+<p align="center">
+<picture align="center">
+  <img alt="EmbodiedAgents UI Example GIF" src="docs/_static/agents_ui.gif" width="60%">
+</picture>
+</p>
+
 ## 版权信息
 
 除非另有明确说明，本发行版中的代码版权归 2024 [Automatika Robotics](https://automatikarobotics.com/) 所有。

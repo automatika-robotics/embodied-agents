@@ -120,6 +120,27 @@ launcher.bringup()
   <img alt="高度なエージェント" src="_static/complete_dark.png">
 </picture>
 
+## EmbodiedAgentレシピの動的Web UI
+
+基盤となる[**Sugarcoat**](https://github.com/automatika-robotics/sugarcoat)フレームワークの強力な機能を活用し、***EmbodiedAgents***は各レシピに対して**完全に動的で自動生成されるWeb UI**を提供します。
+この機能は**FastHTML**によって構築されており、手動でのGUI開発を不要にし、制御や可視化のためのレスポンシブなインターフェースを即座に提供します。
+
+このUIは自動的に以下を生成します：
+
+* レシピ内で使用されるすべてのコンポーネントに対する設定インターフェース
+* コンポーネントの入出力に対するリアルタイムデータの可視化と制御
+* すべての対応メッセージ型に対するWebSocketベースのデータストリーミング
+
+### 例：VLMエージェントUI
+
+VLM Q&Aエージェント（クイックスタート例と類似）のための完全なインターフェースが自動生成され、設定用のシンプルなコントロールやリアルタイムのテキスト入出力表示を提供します。
+
+<p align="center">
+<picture align="center">
+  <img alt="EmbodiedAgents UI Example GIF" src="docs/_static/agents_ui.gif" width="60%">
+</picture>
+</p>
+
 ## 著作権情報
 
 本配布物に含まれるコードは、特に明記されていない限り、すべて © 2024 [Automatika Robotics](https://automatikarobotics.com/) に著作権があります。
