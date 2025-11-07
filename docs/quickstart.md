@@ -79,7 +79,7 @@ Now we are ready to setup our component.
 
 ```python
 # Define an MLLM component (A component represents a node with a particular functionality)
-mllm = MLLM(
+mllm = VLM(
     inputs=[text0, image0],
     outputs=[text1],
     model_client=llava_client,
