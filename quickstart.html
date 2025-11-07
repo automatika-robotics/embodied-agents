@@ -1,0 +1,653 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="./" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta content="cQVj-BaADcGVOGB7GOvfbkgJjxni10C2fYWCZ03jOeo" name="google-site-verification" />
+
+    <title>Quick Start 🚀 &#8212; EmbodiedAgents 0.4.3 documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=a746c00c" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="_static/custom.css?v=260ea625" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="_static/documentation_options.js?v=0f4711b3"></script>
+    <script src="_static/doctools.js?v=9bcbadda"></script>
+    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="_static/copybutton.js?v=f281be69"></script>
+    <script src="_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'quickstart';</script>
+    <link rel="canonical" href="https://automatika-robotics.github.io/embodied-agents/quickstart.html" />
+    <link rel="icon" href="_static/favicon.png"/>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Basic Concepts 📚" href="basics/index.html" />
+    <link rel="prev" title="Installation 🛠️" href="installation.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="index.html">
+  
+  
+  
+  
+  
+    
+    
+      
+    
+    
+    <img src="_static/EMBODIED_AGENTS_LIGHT.png" class="logo__image only-light" alt="EmbodiedAgents 0.4.3 documentation - Home"/>
+    <script>document.write(`<img src="_static/EMBODIED_AGENTS_DARK.png" class="logo__image only-dark" alt="EmbodiedAgents 0.4.3 documentation - Home"/>`);</script>
+  
+  
+</a></div>
+        <div class="sidebar-primary-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://automatikarobotics.com/" title="Automatika" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><img src="_static/automatika-logo.png" class="icon-link-image" alt="Automatika"/></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/automatika-robotics/embodied-agents" title="GitHub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-github fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">GitHub</span></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://discord.gg/B9ZU6qjzND" title="Discord" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-discord fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">Discord</span></a>
+        </li>
+</ul></div>
+        <div class="sidebar-primary-item">
+
+ <script>
+ document.write(`
+   <button class="btn search-button-field search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass"></i>
+    <span class="search-button__default-text">Search</span>
+    <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+   </button>
+ `);
+ </script></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="intro.html">EmbodiedAgents 🤖</a></li>
+<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation 🛠️</a></li>
+<li class="toctree-l1 current active"><a class="current reference internal" href="#">Quick Start 🚀</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="basics/index.html">Basic Concepts 📚</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="basics/components.html">Components 🧩</a></li>
+<li class="toctree-l2"><a class="reference internal" href="basics/clients.html">Clients 🔌</a></li>
+<li class="toctree-l2"><a class="reference internal" href="basics/models.html">Models / Vector Databases 🧠</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="examples/index.html">Recipes ✨</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="examples/conversational.html">Create a conversational agent with audio</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples/prompt_engineering.html">Prompt engineering for LLMs/MLLMs using vision models</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples/semantic_map.html">Create a spatio-temporal semantic map</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples/goto.html">Create a Go-to-X component using map data</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples/tool_calling.html">Use Tool Calling in Go-to-X</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples/semantic_router.html">Create a semantic router to route text queries between different components</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples/complete.html">Bringing it all together 🤖</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples/multiprocessing.html">Making the System Robust And Production Ready</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples/planning_model.html">Use a MultiModal Planning Model for Vision Guided Navigation</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="apidocs/index.html">API Reference</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="apidocs/agents/agents.html"><code class="xref py py-mod docutils literal notranslate"><span class="pre">agents</span></code></a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="apidocs/agents/agents.components.html"><code class="xref py py-mod docutils literal notranslate"><span class="pre">agents.components</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="apidocs/agents/agents.clients.html"><code class="xref py py-mod docutils literal notranslate"><span class="pre">agents.clients</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="apidocs/agents/agents.vectordbs.html"><code class="xref py py-mod docutils literal notranslate"><span class="pre">agents.vectordbs</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="apidocs/agents/agents.ros.html"><code class="xref py py-mod docutils literal notranslate"><span class="pre">agents.ros</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="apidocs/agents/agents.models.html"><code class="xref py py-mod docutils literal notranslate"><span class="pre">agents.models</span></code></a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-source-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Source repositories">
+    <i class="fab fa-github"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="https://github.com/automatika-robotics/embodied-agents/blob/main/docs/quickstart.md?plain=1" target="_blank"
+   class="btn btn-sm btn-source-file-button dropdown-item"
+   title="Show source"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-code"></i>
+  </span>
+<span class="btn__text-container">Show source</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/automatika-robotics/embodied-agents/edit/main/docs/quickstart.md" target="_blank"
+   class="btn btn-sm btn-source-edit-button dropdown-item"
+   title="Suggest edit"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-pencil-alt"></i>
+  </span>
+<span class="btn__text-container">Suggest edit</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/automatika-robotics/embodied-agents/issues/new?title=Issue%20on%20page%20%2Fquickstart.html&body=Your%20issue%20content%20here." target="_blank"
+   class="btn btn-sm btn-source-issues-button dropdown-item"
+   title="Open an issue"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-lightbulb"></i>
+  </span>
+<span class="btn__text-container">Open issue</span>
+</a>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="_sources/quickstart.md" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.md</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>Quick Start 🚀</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section class="tex2jax_ignore mathjax_ignore" id="quick-start">
+<h1>Quick Start 🚀<a class="headerlink" href="#quick-start" title="Link to this heading">#</a></h1>
+<p>Unlike other ROS package, <em>EmbodiedAgents</em> provides a pure pythonic way of describing the node graph using <a class="reference external" href="https://automatika-robotics.github.io/sugarcoat/">Sugarcoat🍬</a>. Copy the following code in a python script and run it.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">agents.clients.ollama</span> <span class="kn">import</span> <span class="n">OllamaClient</span>
+<span class="kn">from</span> <span class="nn">agents.components</span> <span class="kn">import</span> <span class="n">VLM</span>
+<span class="kn">from</span> <span class="nn">agents.models</span> <span class="kn">import</span> <span class="n">OllamaModel</span>
+<span class="kn">from</span> <span class="nn">agents.ros</span> <span class="kn">import</span> <span class="n">Topic</span><span class="p">,</span> <span class="n">Launcher</span>
+
+<span class="c1"># Define input and output topics (pay attention to msg_type)</span>
+<span class="n">text0</span> <span class="o">=</span> <span class="n">Topic</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;text0&quot;</span><span class="p">,</span> <span class="n">msg_type</span><span class="o">=</span><span class="s2">&quot;String&quot;</span><span class="p">)</span>
+<span class="n">image0</span> <span class="o">=</span> <span class="n">Topic</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;image_raw&quot;</span><span class="p">,</span> <span class="n">msg_type</span><span class="o">=</span><span class="s2">&quot;Image&quot;</span><span class="p">)</span>
+<span class="n">text1</span> <span class="o">=</span> <span class="n">Topic</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;text1&quot;</span><span class="p">,</span> <span class="n">msg_type</span><span class="o">=</span><span class="s2">&quot;String&quot;</span><span class="p">)</span>
+
+<span class="c1"># Define a model client (working with Ollama in this case)</span>
+<span class="c1"># OllamaModel is a generic wrapper for all Ollama models</span>
+<span class="n">llava</span> <span class="o">=</span> <span class="n">OllamaModel</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;llava&quot;</span><span class="p">,</span> <span class="n">checkpoint</span><span class="o">=</span><span class="s2">&quot;llava:latest&quot;</span><span class="p">)</span>
+<span class="n">llava_client</span> <span class="o">=</span> <span class="n">OllamaClient</span><span class="p">(</span><span class="n">llava</span><span class="p">)</span>
+
+<span class="c1"># Define a VLM component (A component represents a node with a particular functionality)</span>
+<span class="n">mllm</span> <span class="o">=</span> <span class="n">VLM</span><span class="p">(</span>
+    <span class="n">inputs</span><span class="o">=</span><span class="p">[</span><span class="n">text0</span><span class="p">,</span> <span class="n">image0</span><span class="p">],</span>
+    <span class="n">outputs</span><span class="o">=</span><span class="p">[</span><span class="n">text1</span><span class="p">],</span>
+    <span class="n">model_client</span><span class="o">=</span><span class="n">llava_client</span><span class="p">,</span>
+    <span class="n">trigger</span><span class="o">=</span><span class="p">[</span><span class="n">text0</span><span class="p">],</span>
+    <span class="n">component_name</span><span class="o">=</span><span class="s2">&quot;vqa&quot;</span>
+<span class="p">)</span>
+<span class="c1"># Additional prompt settings</span>
+<span class="n">mllm</span><span class="o">.</span><span class="n">set_topic_prompt</span><span class="p">(</span><span class="n">text0</span><span class="p">,</span> <span class="n">template</span><span class="o">=</span><span class="s2">&quot;&quot;&quot;You are an amazing and funny robot.</span>
+<span class="s2">    Answer the following about this image: {{ text0 }}&quot;&quot;&quot;</span>
+<span class="p">)</span>
+<span class="c1"># Launch the component</span>
+<span class="n">launcher</span> <span class="o">=</span> <span class="n">Launcher</span><span class="p">()</span>
+<span class="n">launcher</span><span class="o">.</span><span class="n">add_pkg</span><span class="p">(</span><span class="n">components</span><span class="o">=</span><span class="p">[</span><span class="n">mllm</span><span class="p">])</span>
+<span class="n">launcher</span><span class="o">.</span><span class="n">bringup</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>Now let us see step-by-step what we have done in this code. First we defined inputs and outputs to our component in the form of ROS Topics. Components automatically create listeners for input topics and publishers for output topics.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Define input and output topics (pay attention to msg_type)</span>
+<span class="n">text0</span> <span class="o">=</span> <span class="n">Topic</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;text0&quot;</span><span class="p">,</span> <span class="n">msg_type</span><span class="o">=</span><span class="s2">&quot;String&quot;</span><span class="p">)</span>
+<span class="n">image0</span> <span class="o">=</span> <span class="n">Topic</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;image_raw&quot;</span><span class="p">,</span> <span class="n">msg_type</span><span class="o">=</span><span class="s2">&quot;Image&quot;</span><span class="p">)</span>
+<span class="n">text1</span> <span class="o">=</span> <span class="n">Topic</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;text1&quot;</span><span class="p">,</span> <span class="n">msg_type</span><span class="o">=</span><span class="s2">&quot;String&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+<div class="admonition important">
+<p class="admonition-title">Important</p>
+<p>If you are running <em>EmbodiedAgents</em> on a robot, make sure you change the name of the topic to which the robot’s camera is publishing the RGB images to in the following line.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">image0</span> <span class="o">=</span> <span class="n">Topic</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;NAME_OF_THE_TOPIC&quot;</span><span class="p">,</span> <span class="n">msg_type</span><span class="o">=</span><span class="s2">&quot;Image&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>If you are running <em>EmbodiedAgents</em> on a testing machine, and the machine has a webcam, you can install the <a class="reference external" href="https://github.com/klintan/ros2_usb_camera"><strong>ROS2 USB Cam</strong></a>. Make sure you use the correct name of the image topic as above.</p>
+</div>
+<p>Then we will create a multimodal LLM component. Components are functional units in <em>EmbodiedAgents</em>. To learn more about them, check out <a class="reference internal" href="basics/index.html"><span class="std std-doc">Basic Concepts</span></a>. Other than input/output topics, the MLLM component expects a model client. So first we will create a model client that can utilize a <a class="reference external" href="https://ollama.com/library/llava">Llava</a> model on <a class="reference external" href="https://ollama.com">Ollama</a> as its model serving platform.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Define a model client (working with Ollama in this case)</span>
+<span class="c1"># OllamaModel is a generic wrapper for all Ollama models</span>
+<span class="n">llava</span> <span class="o">=</span> <span class="n">OllamaModel</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;llava&quot;</span><span class="p">,</span> <span class="n">checkpoint</span><span class="o">=</span><span class="s2">&quot;llava:latest&quot;</span><span class="p">)</span>
+<span class="n">llava_client</span> <span class="o">=</span> <span class="n">OllamaClient</span><span class="p">(</span><span class="n">llava</span><span class="p">)</span>
+</pre></div>
+</div>
+<div class="admonition important">
+<p class="admonition-title">Important</p>
+<p>If you are not running Ollama on the same machine (robot) on which you are running <em>EmbodiedAgents</em>, you can define access to the machine running Ollama using host and port in this line:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">llava_client</span> <span class="o">=</span> <span class="n">OllamaClient</span><span class="p">(</span><span class="n">llava</span><span class="p">,</span> <span class="n">host</span><span class="o">=</span><span class="s2">&quot;127.0.0.1&quot;</span><span class="p">,</span> <span class="n">port</span><span class="o">=</span><span class="mi">8000</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>If the use of Ollama as a model serving platform is unclear, checkout <a class="reference internal" href="installation.html"><span class="std std-doc">installation instructions</span></a>.</p>
+</div>
+<p>Now we are ready to setup our component.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Define an MLLM component (A component represents a node with a particular functionality)</span>
+<span class="n">mllm</span> <span class="o">=</span> <span class="n">VLM</span><span class="p">(</span>
+    <span class="n">inputs</span><span class="o">=</span><span class="p">[</span><span class="n">text0</span><span class="p">,</span> <span class="n">image0</span><span class="p">],</span>
+    <span class="n">outputs</span><span class="o">=</span><span class="p">[</span><span class="n">text1</span><span class="p">],</span>
+    <span class="n">model_client</span><span class="o">=</span><span class="n">llava_client</span><span class="p">,</span>
+    <span class="n">trigger</span><span class="o">=</span><span class="p">[</span><span class="n">text0</span><span class="p">],</span>
+    <span class="n">component_name</span><span class="o">=</span><span class="s2">&quot;vqa&quot;</span>
+<span class="p">)</span>
+<span class="c1"># Additional prompt settings</span>
+<span class="n">mllm</span><span class="o">.</span><span class="n">set_topic_prompt</span><span class="p">(</span><span class="n">text0</span><span class="p">,</span> <span class="n">template</span><span class="o">=</span><span class="s2">&quot;&quot;&quot;You are an amazing and funny robot.</span>
+<span class="s2">    Answer the following about this image: {{ text0 }}&quot;&quot;&quot;</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+<p>Note how the MLLM type of component, also allows us to set a topic or component level prompt, where a jinja2 template can be used to define a template in which our input string should be embedded. Finally we will launch the component.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Launch the component</span>
+<span class="n">launcher</span> <span class="o">=</span> <span class="n">Launcher</span><span class="p">()</span>
+<span class="n">launcher</span><span class="o">.</span><span class="n">add_pkg</span><span class="p">(</span><span class="n">components</span><span class="o">=</span><span class="p">[</span><span class="n">mllm</span><span class="p">])</span>
+<span class="n">launcher</span><span class="o">.</span><span class="n">bringup</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>Now we can check that our component is running by using familiar ROS2 commands from a new terminal. We should see our component running as a ROS node and the its input and output topics in the topic list.</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>ros2<span class="w"> </span>node<span class="w"> </span>list
+ros2<span class="w"> </span>topic<span class="w"> </span>list
+</pre></div>
+</div>
+<p>In order to interact with our component <em>EmbodiedAgents</em> can dynamically generate a web-based UI for us. We can make the client available by adding the following line to our code that tells the launcher which topics to render:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Launch the component</span>
+<span class="n">launcher</span> <span class="o">=</span> <span class="n">Launcher</span><span class="p">()</span>
+<span class="n">launcher</span><span class="o">.</span><span class="n">enable_ui</span><span class="p">(</span><span class="n">inputs</span><span class="o">=</span><span class="p">[</span><span class="n">text0</span><span class="p">],</span> <span class="n">outputs</span><span class="o">=</span><span class="p">[</span><span class="n">text1</span><span class="p">,</span> <span class="n">image0</span><span class="p">])</span>  <span class="c1"># &lt;-- specify UI</span>
+<span class="n">launcher</span><span class="o">.</span><span class="n">add_pkg</span><span class="p">(</span><span class="n">components</span><span class="o">=</span><span class="p">[</span><span class="n">mllm</span><span class="p">])</span>
+<span class="n">launcher</span><span class="o">.</span><span class="n">bringup</span><span class="p">()</span>
+</pre></div>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>In order to run the client you will need to install <a class="reference external" href="https://www.fastht.ml/">FastHTML</a> and <a class="reference external" href="https://github.com/AnswerDotAI/MonsterUI">MonsterUI</a> with</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>pip<span class="w"> </span>install<span class="w"> </span>python-fasthtml<span class="w"> </span>monsterui
+</pre></div>
+</div>
+</div>
+<p>The client displays a web UI on <strong><a class="reference external" href="http://localhost:5001">http://localhost:5001</a></strong> if you have run it on your machine. Or you can access it at <strong>http://&lt;IP_ADDRESS_OF_THE_ROBOT&gt;:5001</strong> if you have run it on the robot.</p>
+<p>Open this address from browser. Component settings can be configured from the web UI by pressing the settings button. Send a question to your ROS EmbodiedAgent and you should get a the reply generated by the Llava model.</p>
+<p><img alt="Demo screencast" src="_images/agents_ui.gif" /></p>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="installation.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">Installation 🛠️</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="basics/index.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">Basic Concepts 📚</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By Automatika Robotics
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2025, Automatika Robotics.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

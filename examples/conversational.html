@@ -1,0 +1,799 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta content="cQVj-BaADcGVOGB7GOvfbkgJjxni10C2fYWCZ03jOeo" name="google-site-verification" />
+
+    <title>Create a conversational agent with audio &#8212; EmbodiedAgents 0.4.3 documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=a746c00c" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../_static/custom.css?v=260ea625" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="../_static/documentation_options.js?v=0f4711b3"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../_static/copybutton.js?v=f281be69"></script>
+    <script src="../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'examples/conversational';</script>
+    <link rel="canonical" href="https://automatika-robotics.github.io/embodied-agents/examples/conversational.html" />
+    <link rel="icon" href="../_static/favicon.png"/>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Prompt engineering for LLMs/MLLMs using vision models" href="prompt_engineering.html" />
+    <link rel="prev" title="Recipes ✨" href="index.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../index.html">
+  
+  
+  
+  
+  
+    
+    
+      
+    
+    
+    <img src="../_static/EMBODIED_AGENTS_LIGHT.png" class="logo__image only-light" alt="EmbodiedAgents 0.4.3 documentation - Home"/>
+    <script>document.write(`<img src="../_static/EMBODIED_AGENTS_DARK.png" class="logo__image only-dark" alt="EmbodiedAgents 0.4.3 documentation - Home"/>`);</script>
+  
+  
+</a></div>
+        <div class="sidebar-primary-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://automatikarobotics.com/" title="Automatika" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><img src="../_static/automatika-logo.png" class="icon-link-image" alt="Automatika"/></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/automatika-robotics/embodied-agents" title="GitHub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-github fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">GitHub</span></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://discord.gg/B9ZU6qjzND" title="Discord" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-discord fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">Discord</span></a>
+        </li>
+</ul></div>
+        <div class="sidebar-primary-item">
+
+ <script>
+ document.write(`
+   <button class="btn search-button-field search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass"></i>
+    <span class="search-button__default-text">Search</span>
+    <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+   </button>
+ `);
+ </script></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../intro.html">EmbodiedAgents 🤖</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../installation.html">Installation 🛠️</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../quickstart.html">Quick Start 🚀</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../basics/index.html">Basic Concepts 📚</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../basics/components.html">Components 🧩</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../basics/clients.html">Clients 🔌</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../basics/models.html">Models / Vector Databases 🧠</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 current active has-children"><a class="reference internal" href="index.html">Recipes ✨</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
+<li class="toctree-l2 current active"><a class="current reference internal" href="#">Create a conversational agent with audio</a></li>
+<li class="toctree-l2"><a class="reference internal" href="prompt_engineering.html">Prompt engineering for LLMs/MLLMs using vision models</a></li>
+<li class="toctree-l2"><a class="reference internal" href="semantic_map.html">Create a spatio-temporal semantic map</a></li>
+<li class="toctree-l2"><a class="reference internal" href="goto.html">Create a Go-to-X component using map data</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tool_calling.html">Use Tool Calling in Go-to-X</a></li>
+<li class="toctree-l2"><a class="reference internal" href="semantic_router.html">Create a semantic router to route text queries between different components</a></li>
+<li class="toctree-l2"><a class="reference internal" href="complete.html">Bringing it all together 🤖</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multiprocessing.html">Making the System Robust And Production Ready</a></li>
+<li class="toctree-l2"><a class="reference internal" href="planning_model.html">Use a MultiModal Planning Model for Vision Guided Navigation</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../apidocs/index.html">API Reference</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../apidocs/agents/agents.html"><code class="xref py py-mod docutils literal notranslate"><span class="pre">agents</span></code></a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="../apidocs/agents/agents.components.html"><code class="xref py py-mod docutils literal notranslate"><span class="pre">agents.components</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../apidocs/agents/agents.clients.html"><code class="xref py py-mod docutils literal notranslate"><span class="pre">agents.clients</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../apidocs/agents/agents.vectordbs.html"><code class="xref py py-mod docutils literal notranslate"><span class="pre">agents.vectordbs</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../apidocs/agents/agents.ros.html"><code class="xref py py-mod docutils literal notranslate"><span class="pre">agents.ros</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../apidocs/agents/agents.models.html"><code class="xref py py-mod docutils literal notranslate"><span class="pre">agents.models</span></code></a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-source-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Source repositories">
+    <i class="fab fa-github"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="https://github.com/automatika-robotics/embodied-agents/blob/main/docs/examples/conversational.md?plain=1" target="_blank"
+   class="btn btn-sm btn-source-file-button dropdown-item"
+   title="Show source"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-code"></i>
+  </span>
+<span class="btn__text-container">Show source</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/automatika-robotics/embodied-agents/edit/main/docs/examples/conversational.md" target="_blank"
+   class="btn btn-sm btn-source-edit-button dropdown-item"
+   title="Suggest edit"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-pencil-alt"></i>
+  </span>
+<span class="btn__text-container">Suggest edit</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/automatika-robotics/embodied-agents/issues/new?title=Issue%20on%20page%20%2Fexamples/conversational.html&body=Your%20issue%20content%20here." target="_blank"
+   class="btn btn-sm btn-source-issues-button dropdown-item"
+   title="Open an issue"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-lightbulb"></i>
+  </span>
+<span class="btn__text-container">Open issue</span>
+</a>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="../_sources/examples/conversational.md" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.md</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+<button class="sidebar-toggle secondary-toggle btn btn-sm" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>Create a conversational agent with audio</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#speechtotext-component">SpeechToText Component</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#mllm-component">MLLM Component</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#texttospeech-component">TextToSpeech Component</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#launching-the-components">Launching the Components</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#web-based-ui-for-interacting-with-the-robot">Web Based UI for Interacting with the Robot</a></li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section class="tex2jax_ignore mathjax_ignore" id="create-a-conversational-agent-with-audio">
+<h1>Create a conversational agent with audio<a class="headerlink" href="#create-a-conversational-agent-with-audio" title="Link to this heading">#</a></h1>
+<p>Often times robots are equipped with a speaker system and a microphone. Once these peripherals have been exposed through ROS, we can use <em>EmbodiedAgents</em> to trivially create a conversational interface on the robot. Our conversational agent will use a multimodal LLM for contextual question/answering utilizing the camera onboard the robot. Furthermore, it will use speech-to-text and text-to-speech models for converting audio to text and vice versa. We will start by importing the relavent components that we want to string together.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">agents.components</span> <span class="kn">import</span> <span class="n">MLLM</span><span class="p">,</span> <span class="n">SpeechToText</span><span class="p">,</span> <span class="n">TextToSpeech</span>
+</pre></div>
+</div>
+<p><a class="reference internal" href="../basics/components.html"><span class="doc std std-doc">Components</span></a> are basic functional units in <em>EmbodiedAgents</em>. Their inputs and outputs are defined using ROS <a class="reference internal" href="../basics/components.html#topic"><span class="std std-ref">Topics</span></a>. And their function can be any input transformation, for example the inference of an ML model. Lets setup these components one by one. Since our input to the robot would be speech, we will setup the speech-to-text component first.</p>
+<section id="speechtotext-component">
+<h2>SpeechToText Component<a class="headerlink" href="#speechtotext-component" title="Link to this heading">#</a></h2>
+<p>This component listens to input an audio input topic, that takes in a multibyte array of audio (captured in a ROS std_msgs message, which maps to Audio msg_type in Sugarcoat🍬) and can publish output to a text topic. It can also be configured to get the audio stream from microphones on board our robot. By default the component is configured to use a small Voice Activity Detection (VAD) model, <a class="reference external" href="https://github.com/snakers4/silero-vad">Silero-VAD</a> to filter out any audio that is not speech.</p>
+<p>However, merely utilizing speech can be problamatic in robots, due to the hands free nature of the audio system. Therefore its useful to add wakeword detection, so that speech-to-text is only activated when the robot is called with a specific phrase (e.g. ‘Hey Jarvis’).</p>
+<p>We will be using this configuration in our example. First we will setup our input and output topics and then create a config object which we can later pass to our component.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>With <strong>enable_vad</strong> set to <strong>True</strong>, the component automatically downloads and deploys <a class="reference external" href="https://github.com/snakers4/silero-vad">Silero-VAD</a> by default in ONNX format. This model has a small footprint and can be easily deployed on the edge. However we need to install a couple of dependencies for this to work. These can be installed with: <code class="docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span> <span class="pre">pyaudio</span> <span class="pre">onnxruntime</span></code></p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>With <strong>enable_wakeword</strong> set to <strong>True</strong>, the component automatically downloads and deploys a pre-trained model from <a class="reference external" href="https://github.com/dscripka/openWakeWord">openWakeWord</a> by default in ONNX format, that can be invoked with <strong>‘Hey Jarvis’</strong>. Other pre-trained models from openWakeWord are available <a class="reference external" href="https://github.com/dscripka/openWakeWord">here</a>. However it is recommended that you deploy own wakeword model, which can be easily trained by following <a class="reference external" href="https://github.com/dscripka/openWakeWord/blob/main/notebooks/automatic_model_training.ipynb">this amazing tutorial</a>. The tutorial notebook can be run in <a class="reference external" href="https://colab.research.google.com/drive/1yyFH-fpguX2BTAW8wSQxTrJnJTM-0QAd?usp=sharing">Google Colab</a>.</p>
+</div>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">agents.ros</span> <span class="kn">import</span> <span class="n">Topic</span>
+<span class="kn">from</span> <span class="nn">agents.config</span> <span class="kn">import</span> <span class="n">SpeechToTextConfig</span>
+
+<span class="c1"># Define input and output topics (pay attention to msg_type)</span>
+<span class="n">audio_in</span> <span class="o">=</span> <span class="n">Topic</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;audio0&quot;</span><span class="p">,</span> <span class="n">msg_type</span><span class="o">=</span><span class="s2">&quot;Audio&quot;</span><span class="p">)</span>
+<span class="n">text_query</span> <span class="o">=</span> <span class="n">Topic</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;text0&quot;</span><span class="p">,</span> <span class="n">msg_type</span><span class="o">=</span><span class="s2">&quot;String&quot;</span><span class="p">)</span>
+
+<span class="n">s2t_config</span> <span class="o">=</span> <span class="n">SpeechToTextConfig</span><span class="p">(</span><span class="n">enable_vad</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>     <span class="c1"># option to listen for speech through the microphone, set to False if usign web UI</span>
+                                <span class="n">enable_wakeword</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span> <span class="c1"># option to invoke the component with a wakeword like &#39;hey jarvis&#39;, set to False if using web UI</span>
+</pre></div>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>The <em>enable_wakeword</em> option cannot be enabled without the <em>enable_vad</em> option.</p>
+</div>
+<div class="admonition seealso">
+<p class="admonition-title">See also</p>
+<p>Check the available defaults and options for the SpeechToTextConfig <a class="reference internal" href="../apidocs/agents/agents.config.html"><span class="doc std std-doc">here</span></a></p>
+</div>
+<p>To initialize the component we also need a model client for a speech to text model. We will be using the WebSocket client for RoboML for this purpose.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>RoboML is an aggregator library that provides a model serving aparatus for locally serving opensource ML models useful in robotics. Learn about setting up RoboML <a class="reference external" href="https://www.github.com/automatika-robotics/roboml">here</a>.</p>
+</div>
+<p>Additionally, we will use the client with a model called, Whisper, a popular opensource speech to text model from OpenAI. Lets see what the looks like in code.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">agents.clients</span> <span class="kn">import</span> <span class="n">RoboMLWSClient</span>
+<span class="kn">from</span> <span class="nn">agents.models</span> <span class="kn">import</span> <span class="n">Whisper</span>
+
+<span class="c1"># Setup the model client</span>
+<span class="n">whisper</span> <span class="o">=</span> <span class="n">Whisper</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;whisper&quot;</span><span class="p">)</span>  <span class="c1"># Custom model init params can be provided here</span>
+<span class="n">roboml_whisper</span> <span class="o">=</span> <span class="n">RoboMLWSClient</span><span class="p">(</span><span class="n">whisper</span><span class="p">)</span>
+
+<span class="c1"># Initialize the component</span>
+<span class="n">speech_to_text</span> <span class="o">=</span> <span class="n">SpeechToText</span><span class="p">(</span>
+    <span class="n">inputs</span><span class="o">=</span><span class="p">[</span><span class="n">audio_in</span><span class="p">],</span>  <span class="c1"># the input topic we setup</span>
+    <span class="n">outputs</span><span class="o">=</span><span class="p">[</span><span class="n">text_query</span><span class="p">],</span> <span class="c1"># the output topic we setup</span>
+    <span class="n">model_client</span><span class="o">=</span><span class="n">roboml_whisper</span><span class="p">,</span>
+    <span class="n">trigger</span><span class="o">=</span><span class="n">audio_in</span><span class="p">,</span>
+    <span class="n">config</span><span class="o">=</span><span class="n">s2t_config</span><span class="p">,</span>  <span class="c1"># pass in the config object</span>
+    <span class="n">component_name</span><span class="o">=</span><span class="s2">&quot;speech_to_text&quot;</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+<p>The trigger parameter lets the component know that it has to perform its function (in this case model inference) when an input is received on this particular topic. In our configuration, the component will be triggered using voice activity detection on the continuous stream of audio being received on the microphone. Next we will setup our MLLM component.</p>
+</section>
+<section id="mllm-component">
+<h2>MLLM Component<a class="headerlink" href="#mllm-component" title="Link to this heading">#</a></h2>
+<p>The MLLM component takes as input a text topic (the output of the SpeechToText component) and an image topic, assuming we have a camera device onboard the robot publishing this topic. And just like before we need to provide a model client, this time with an MLLM model. This time we will use the OllamaClient along with <em>llava:latest</em> model, a popular opensource multimodal LLM available on Ollama. Furthermore, we will configure our MLLM component using <code class="docutils literal notranslate"><span class="pre">MLLMConfig</span></code>. We will set <code class="docutils literal notranslate"><span class="pre">stream=True</span></code> to make the MLLM output text, be published as a stream for downstream components that consume this output. In <em>EmbodiedAgents</em>, streaming can output can be chunked using a <code class="docutils literal notranslate"><span class="pre">break_character</span></code> in the config (Default: ‘.’).This way the downstream TextToSpeech component can start generating audio as soon as the first sentence is produced by the LLM.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Ollama is one of the most popular local LLM serving projects. Learn about setting up Ollama <a class="reference external" href="https://ollama.com">here</a>.</p>
+</div>
+<p>Here is the code for our MLLM setup.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">agents.clients.ollama</span> <span class="kn">import</span> <span class="n">OllamaClient</span>
+<span class="kn">from</span> <span class="nn">agents.models</span> <span class="kn">import</span> <span class="n">OllamaModel</span>
+<span class="kn">from</span> <span class="nn">agents.config</span> <span class="kn">import</span> <span class="n">MLLMConfig</span>
+
+<span class="c1"># Define the image input topic and a new text output topic</span>
+<span class="n">image0</span> <span class="o">=</span> <span class="n">Topic</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;image_raw&quot;</span><span class="p">,</span> <span class="n">msg_type</span><span class="o">=</span><span class="s2">&quot;Image&quot;</span><span class="p">)</span>
+<span class="n">text_answer</span> <span class="o">=</span> <span class="n">Topic</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;text1&quot;</span><span class="p">,</span> <span class="n">msg_type</span><span class="o">=</span><span class="s2">&quot;String&quot;</span><span class="p">)</span>
+
+<span class="c1"># Define a model client (working with Ollama in this case)</span>
+<span class="c1"># OllamaModel is a generic wrapper for all ollama models</span>
+<span class="n">llava</span> <span class="o">=</span> <span class="n">OllamaModel</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;llava&quot;</span><span class="p">,</span> <span class="n">checkpoint</span><span class="o">=</span><span class="s2">&quot;llava:latest&quot;</span><span class="p">)</span>
+<span class="n">llava_client</span> <span class="o">=</span> <span class="n">OllamaClient</span><span class="p">(</span><span class="n">llava</span><span class="p">)</span>
+
+<span class="n">mllm_config</span> <span class="o">=</span> <span class="n">MLLMConfig</span><span class="p">(</span><span class="n">stream</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>  <span class="c1"># Other inference specific paramters can be provided here</span>
+
+<span class="c1"># Define an MLLM component</span>
+<span class="n">mllm</span> <span class="o">=</span> <span class="n">MLLM</span><span class="p">(</span>
+    <span class="n">inputs</span><span class="o">=</span><span class="p">[</span><span class="n">text_query</span><span class="p">,</span> <span class="n">image0</span><span class="p">],</span>  <span class="c1"># Notice the text input is the same as the output of the previous component</span>
+    <span class="n">outputs</span><span class="o">=</span><span class="p">[</span><span class="n">text_answer</span><span class="p">],</span>
+    <span class="n">model_client</span><span class="o">=</span><span class="n">llava_client</span><span class="p">,</span>
+    <span class="n">trigger</span><span class="o">=</span><span class="n">text_query</span><span class="p">,</span>
+    <span class="n">component_name</span><span class="o">=</span><span class="s2">&quot;vqa&quot;</span> <span class="c1"># We have also given our component an optional name</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+<p>We can further customize the our MLLM component by attaching a context prompt template. This can be done at the component level or at the level of a particular input topic. In this case we will attach a prompt template to the input topic <strong>text_query</strong>.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Attach a prompt template</span>
+<span class="n">mllm</span><span class="o">.</span><span class="n">set_topic_prompt</span><span class="p">(</span><span class="n">text_query</span><span class="p">,</span> <span class="n">template</span><span class="o">=</span><span class="s2">&quot;&quot;&quot;You are an amazing and funny robot.</span>
+<span class="s2">Answer the following about this image: {{ text0 }}&quot;&quot;&quot;</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+<p>Notice that the template is a jinja2 template string, where the actual name of the topic is set as a variable. For longer templates you can also write them to a file and provide its path when calling this function. After this we move on to setting up our last component.</p>
+</section>
+<section id="texttospeech-component">
+<h2>TextToSpeech Component<a class="headerlink" href="#texttospeech-component" title="Link to this heading">#</a></h2>
+<p>The TextToSpeech component setup will be very similar to the SpeechToText component. We will once again use a RoboML client, this time with the SpeechT5 model (opensource model from Microsoft). Furthermore, this component can be configured to play audio on a playback device available onboard the robot. We will utilize this option through our config. An output topic is optional for this component as we will be playing the audio directly on device.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>In order to utilize <em>play_on_device</em> you need to install a couple of dependencies as follows: <code class="docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span> <span class="pre">soundfile</span> <span class="pre">sounddevice</span></code></p>
+</div>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">agents.config</span> <span class="kn">import</span> <span class="n">TextToSpeechConfig</span>
+<span class="kn">from</span> <span class="nn">agents.models</span> <span class="kn">import</span> <span class="n">SpeechT5</span>
+
+<span class="c1"># config for asynchronously playing audio on device</span>
+<span class="n">t2s_config</span> <span class="o">=</span> <span class="n">TextToSpeechConfig</span><span class="p">(</span><span class="n">play_on_device</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">stream</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>  <span class="c1"># Set play_on_device to false if using the web UI</span>
+
+<span class="c1"># Uncomment the following line for receiving output on the web UI</span>
+<span class="c1"># audio_out = Topic(name=&quot;audio_out&quot;, msg_type=&quot;Audio&quot;)</span>
+
+<span class="n">speecht5</span> <span class="o">=</span> <span class="n">SpeechT5</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;speecht5&quot;</span><span class="p">)</span>
+<span class="n">roboml_speecht5</span> <span class="o">=</span> <span class="n">RoboMLWSClient</span><span class="p">(</span><span class="n">speecht5</span><span class="p">)</span>
+<span class="n">text_to_speech</span> <span class="o">=</span> <span class="n">TextToSpeech</span><span class="p">(</span>
+    <span class="n">inputs</span><span class="o">=</span><span class="p">[</span><span class="n">text_answer</span><span class="p">],</span>
+    <span class="n">outputs</span><span class="o">=</span><span class="p">[],</span>  <span class="c1"># use outputs=[audio_out] for receiving answers on web UI</span>
+    <span class="n">trigger</span><span class="o">=</span><span class="n">text_answer</span><span class="p">,</span>
+    <span class="n">model_client</span><span class="o">=</span><span class="n">roboml_speecht5</span><span class="p">,</span>
+    <span class="n">config</span><span class="o">=</span><span class="n">t2s_config</span><span class="p">,</span>
+    <span class="n">component_name</span><span class="o">=</span><span class="s2">&quot;text_to_speech&quot;</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="launching-the-components">
+<h2>Launching the Components<a class="headerlink" href="#launching-the-components" title="Link to this heading">#</a></h2>
+<p>The final step in this example is to launch the components. This is done by passing the defined components to the launcher and calling the <strong>bringup</strong> method. <em>EmbodiedAgents</em> also allows us to create a web-based UI for interacting with our conversational agent recipe.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">agents.ros</span> <span class="kn">import</span> <span class="n">Launcher</span>
+
+<span class="c1"># Launch the components</span>
+<span class="n">launcher</span> <span class="o">=</span> <span class="n">Launcher</span><span class="p">()</span>
+<span class="n">launcher</span><span class="o">.</span><span class="n">enable_ui</span><span class="p">(</span><span class="n">inputs</span><span class="o">=</span><span class="p">[</span><span class="n">audio_in</span><span class="p">,</span> <span class="n">text_query</span><span class="p">],</span> <span class="n">outputs</span><span class="o">=</span><span class="p">[</span><span class="n">image0</span><span class="p">])</span>  <span class="c1"># specify topics</span>
+<span class="n">launcher</span><span class="o">.</span><span class="n">add_pkg</span><span class="p">(</span>
+    <span class="n">components</span><span class="o">=</span><span class="p">[</span><span class="n">speech_to_text</span><span class="p">,</span> <span class="n">mllm</span><span class="p">,</span> <span class="n">text_to_speech</span><span class="p">]</span>
+    <span class="p">)</span>
+<span class="n">launcher</span><span class="o">.</span><span class="n">bringup</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>Et voila! we have setup a graph of three components in less than 50 lines of well formatted code. The complete example is as follows:</p>
+<div class="literal-block-wrapper docutils container" id="id1">
+<div class="code-block-caption"><span class="caption-text">Multimodal Audio Conversational Agent</span><a class="headerlink" href="#id1" title="Link to this code">#</a></div>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="linenos"> 1</span><span class="kn">from</span> <span class="nn">agents.components</span> <span class="kn">import</span> <span class="n">MLLM</span><span class="p">,</span> <span class="n">SpeechToText</span><span class="p">,</span> <span class="n">TextToSpeech</span>
+<span class="linenos"> 2</span><span class="kn">from</span> <span class="nn">agents.config</span> <span class="kn">import</span> <span class="n">SpeechToTextConfig</span><span class="p">,</span> <span class="n">TextToSpeechConfig</span><span class="p">,</span> <span class="n">MLLMConfig</span>
+<span class="linenos"> 3</span><span class="kn">from</span> <span class="nn">agents.clients</span> <span class="kn">import</span> <span class="n">OllamaClient</span><span class="p">,</span> <span class="n">RoboMLWSClient</span>
+<span class="linenos"> 4</span><span class="kn">from</span> <span class="nn">agents.models</span> <span class="kn">import</span> <span class="n">Whisper</span><span class="p">,</span> <span class="n">SpeechT5</span><span class="p">,</span> <span class="n">OllamaModel</span>
+<span class="linenos"> 5</span><span class="kn">from</span> <span class="nn">agents.ros</span> <span class="kn">import</span> <span class="n">Topic</span><span class="p">,</span> <span class="n">Launcher</span>
+<span class="linenos"> 6</span>
+<span class="linenos"> 7</span><span class="n">audio_in</span> <span class="o">=</span> <span class="n">Topic</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;audio0&quot;</span><span class="p">,</span> <span class="n">msg_type</span><span class="o">=</span><span class="s2">&quot;Audio&quot;</span><span class="p">)</span>
+<span class="linenos"> 8</span><span class="n">text_query</span> <span class="o">=</span> <span class="n">Topic</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;text0&quot;</span><span class="p">,</span> <span class="n">msg_type</span><span class="o">=</span><span class="s2">&quot;String&quot;</span><span class="p">)</span>
+<span class="linenos"> 9</span>
+<span class="linenos">10</span><span class="n">whisper</span> <span class="o">=</span> <span class="n">Whisper</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;whisper&quot;</span><span class="p">)</span>  <span class="c1"># Custom model init params can be provided here</span>
+<span class="linenos">11</span><span class="n">roboml_whisper</span> <span class="o">=</span> <span class="n">RoboMLWSClient</span><span class="p">(</span><span class="n">whisper</span><span class="p">)</span>
+<span class="linenos">12</span>
+<span class="linenos">13</span><span class="n">s2t_config</span> <span class="o">=</span> <span class="n">SpeechToTextConfig</span><span class="p">(</span><span class="n">enable_vad</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>     <span class="c1"># option to listen for speech through the microphone, set to False if usign web UI</span>
+<span class="linenos">14</span>                                <span class="n">enable_wakeword</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span> <span class="c1"># option to invoke the component with a wakeword like &#39;hey jarvis&#39;, set to False if using web UI</span>
+<span class="linenos">15</span>
+<span class="linenos">16</span><span class="n">speech_to_text</span> <span class="o">=</span> <span class="n">SpeechToText</span><span class="p">(</span>
+<span class="linenos">17</span>    <span class="n">inputs</span><span class="o">=</span><span class="p">[</span><span class="n">audio_in</span><span class="p">],</span>
+<span class="linenos">18</span>    <span class="n">outputs</span><span class="o">=</span><span class="p">[</span><span class="n">text_query</span><span class="p">],</span>
+<span class="linenos">19</span>    <span class="n">model_client</span><span class="o">=</span><span class="n">roboml_whisper</span><span class="p">,</span>
+<span class="linenos">20</span>    <span class="n">trigger</span><span class="o">=</span><span class="n">audio_in</span><span class="p">,</span>
+<span class="linenos">21</span>    <span class="n">config</span><span class="o">=</span><span class="n">s2t_config</span><span class="p">,</span>
+<span class="linenos">22</span>    <span class="n">component_name</span><span class="o">=</span><span class="s2">&quot;speech_to_text&quot;</span><span class="p">,</span>
+<span class="linenos">23</span><span class="p">)</span>
+<span class="linenos">24</span>
+<span class="linenos">25</span><span class="n">image0</span> <span class="o">=</span> <span class="n">Topic</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;image_raw&quot;</span><span class="p">,</span> <span class="n">msg_type</span><span class="o">=</span><span class="s2">&quot;Image&quot;</span><span class="p">)</span>
+<span class="linenos">26</span><span class="n">text_answer</span> <span class="o">=</span> <span class="n">Topic</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;text1&quot;</span><span class="p">,</span> <span class="n">msg_type</span><span class="o">=</span><span class="s2">&quot;String&quot;</span><span class="p">)</span>
+<span class="linenos">27</span>
+<span class="linenos">28</span><span class="n">llava</span> <span class="o">=</span> <span class="n">OllamaModel</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;llava&quot;</span><span class="p">,</span> <span class="n">checkpoint</span><span class="o">=</span><span class="s2">&quot;llava:latest&quot;</span><span class="p">)</span>
+<span class="linenos">29</span><span class="n">llava_client</span> <span class="o">=</span> <span class="n">OllamaClient</span><span class="p">(</span><span class="n">llava</span><span class="p">)</span>
+<span class="linenos">30</span><span class="n">mllm_config</span> <span class="o">=</span> <span class="n">MLLMConfig</span><span class="p">(</span><span class="n">stream</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>  <span class="c1"># Other inference specific paramters can be provided here</span>
+<span class="linenos">31</span>
+<span class="linenos">32</span><span class="n">mllm</span> <span class="o">=</span> <span class="n">MLLM</span><span class="p">(</span>
+<span class="linenos">33</span>    <span class="n">inputs</span><span class="o">=</span><span class="p">[</span><span class="n">text_query</span><span class="p">,</span> <span class="n">image0</span><span class="p">],</span>
+<span class="linenos">34</span>    <span class="n">outputs</span><span class="o">=</span><span class="p">[</span><span class="n">text_answer</span><span class="p">],</span>
+<span class="linenos">35</span>    <span class="n">model_client</span><span class="o">=</span><span class="n">llava_client</span><span class="p">,</span>
+<span class="linenos">36</span>    <span class="n">trigger</span><span class="o">=</span><span class="n">text_query</span><span class="p">,</span>
+<span class="linenos">37</span>    <span class="n">config</span><span class="o">=</span><span class="n">mllm_config</span><span class="p">,</span>
+<span class="linenos">38</span>    <span class="n">component_name</span><span class="o">=</span><span class="s2">&quot;vqa&quot;</span><span class="p">,</span>
+<span class="linenos">39</span><span class="p">)</span>
+<span class="linenos">40</span>
+<span class="linenos">41</span><span class="n">t2s_config</span> <span class="o">=</span> <span class="n">TextToSpeechConfig</span><span class="p">(</span><span class="n">play_on_device</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">stream</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>  <span class="c1"># Set play_on_device to false if using the web UI</span>
+<span class="linenos">42</span>
+<span class="linenos">43</span><span class="c1"># Uncomment the following line for receiving output on the web UI</span>
+<span class="linenos">44</span><span class="c1"># audio_out = Topic(name=&quot;audio_out&quot;, msg_type=&quot;Audio&quot;)</span>
+<span class="linenos">45</span>
+<span class="linenos">46</span><span class="n">speecht5</span> <span class="o">=</span> <span class="n">SpeechT5</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;speecht5&quot;</span><span class="p">)</span>
+<span class="linenos">47</span><span class="n">roboml_speecht5</span> <span class="o">=</span> <span class="n">RoboMLWSClient</span><span class="p">(</span><span class="n">speecht5</span><span class="p">)</span>
+<span class="linenos">48</span><span class="n">text_to_speech</span> <span class="o">=</span> <span class="n">TextToSpeech</span><span class="p">(</span>
+<span class="linenos">49</span>    <span class="n">inputs</span><span class="o">=</span><span class="p">[</span><span class="n">text_answer</span><span class="p">],</span>
+<span class="linenos">50</span>    <span class="n">outputs</span><span class="o">=</span><span class="p">[],</span>  <span class="c1"># use outputs=[audio_out] for receiving answers on web UI</span>
+<span class="linenos">51</span>    <span class="n">trigger</span><span class="o">=</span><span class="n">text_answer</span><span class="p">,</span>
+<span class="linenos">52</span>    <span class="n">model_client</span><span class="o">=</span><span class="n">roboml_speecht5</span><span class="p">,</span>
+<span class="linenos">53</span>    <span class="n">config</span><span class="o">=</span><span class="n">t2s_config</span><span class="p">,</span>
+<span class="linenos">54</span>    <span class="n">component_name</span><span class="o">=</span><span class="s2">&quot;text_to_speech&quot;</span>
+<span class="linenos">55</span><span class="p">)</span>
+<span class="linenos">56</span>
+<span class="linenos">57</span><span class="n">launcher</span> <span class="o">=</span> <span class="n">Launcher</span><span class="p">()</span>
+<span class="linenos">58</span><span class="n">launcher</span><span class="o">.</span><span class="n">enable_ui</span><span class="p">(</span><span class="n">inputs</span><span class="o">=</span><span class="p">[</span><span class="n">audio_in</span><span class="p">,</span> <span class="n">text_query</span><span class="p">],</span> <span class="n">outputs</span><span class="o">=</span><span class="p">[</span><span class="n">image0</span><span class="p">])</span>  <span class="c1"># specify topics</span>
+<span class="linenos">59</span><span class="n">launcher</span><span class="o">.</span><span class="n">add_pkg</span><span class="p">(</span><span class="n">components</span><span class="o">=</span><span class="p">[</span><span class="n">speech_to_text</span><span class="p">,</span> <span class="n">mllm</span><span class="p">,</span> <span class="n">text_to_speech</span><span class="p">])</span>
+<span class="linenos">60</span><span class="n">launcher</span><span class="o">.</span><span class="n">bringup</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="web-based-ui-for-interacting-with-the-robot">
+<h2>Web Based UI for Interacting with the Robot<a class="headerlink" href="#web-based-ui-for-interacting-with-the-robot" title="Link to this heading">#</a></h2>
+<p>To interact with topics on the robot, <em>EmbodiedAgents</em> can create dynamically specified UIs. This is useful if the robot does not have a microphone/speaker interface or if one wants to communicate with it remotely. We will also like to see the images coming in from the robots camera to have more context of its answers.</p>
+<p>In the code above, we already specified the input and output topics for the UI by calling the function <code class="docutils literal notranslate"><span class="pre">launcher.enable_ui</span></code>. Furthermore, we can set <code class="docutils literal notranslate"><span class="pre">enable_vad</span></code> and <code class="docutils literal notranslate"><span class="pre">enable_wakeword</span></code> options in <code class="docutils literal notranslate"><span class="pre">s2t_config</span></code> to <code class="docutils literal notranslate"><span class="pre">False</span></code> and set <code class="docutils literal notranslate"><span class="pre">play_on_device</span></code> option in <code class="docutils literal notranslate"><span class="pre">t2s_config</span></code> to <code class="docutils literal notranslate"><span class="pre">False</span></code>. Now we are ready to use our browser based UI.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>In order to run the client you will need to install <a class="reference external" href="https://www.fastht.ml/">FastHTML</a> and <a class="reference external" href="https://github.com/AnswerDotAI/MonsterUI">MonsterUI</a> with</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>pip<span class="w"> </span>install<span class="w"> </span>python-fasthtml<span class="w"> </span>monsterui
+</pre></div>
+</div>
+</div>
+<p>The client displays a web UI on <strong><a class="reference external" href="http://localhost:5001">http://localhost:5001</a></strong> if you have run it on your machine. Or you can access it at <strong>http://&lt;IP_ADDRESS_OF_THE_ROBOT&gt;:5001</strong> if you have run it on the robot.</p>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="index.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">Recipes ✨</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="prompt_engineering.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">Prompt engineering for LLMs/MLLMs using vision models</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <div class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#speechtotext-component">SpeechToText Component</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#mllm-component">MLLM Component</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#texttospeech-component">TextToSpeech Component</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#launching-the-components">Launching the Components</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#web-based-ui-for-interacting-with-the-robot">Web Based UI for Interacting with the Robot</a></li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By Automatika Robotics
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2025, Automatika Robotics.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>
