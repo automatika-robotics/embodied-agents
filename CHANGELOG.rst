@@ -2,8 +2,8 @@
 Changelog for package automatika_embodied_agents
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+0.4.3 (2025-11-07)
+------------------
 * (docs) Adds instructions for using the dynamic web UI
 * (chore) Removes tiny web client
 * (fix) Removes StreamingString as input option for LLM/MLLM
