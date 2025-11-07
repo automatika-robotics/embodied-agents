@@ -2,6 +2,33 @@
 Changelog for package automatika_embodied_agents
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+* (docs) Adds instructions for using the dynamic web UI
+* (chore) Removes tiny web client
+* (fix) Removes StreamingString as input option for LLM/MLLM
+* (feature) Adds logging output from StreamingString in the UI
+* (chore) Adds warning for using templates with StreamingString
+* (chore) Adds alias VLM for MLLM component
+* (fix) Adds detections as handled output in mllm component
+* (feature) Adds callback for points of interest msg
+* (feature) Adds ui callback for rgbd images
+* (docs) Updates docs for planning model example
+* (fix) Fixes publishing images as part of detection msgs
+* (refactor) Updates callbacks for video and rgbd type messages
+* (feature) Adds handling of additional types from other sugar derived packages in agent's components
+* (feature) Adds UI element definitions for custom types
+* (feature) Adds ui callbacks for Detections and DetectionsMultiSource
+* (feature) Adds utility for drawing images with bounding boxes
+* (fix) Fixes passing topic from sugar derived packages to agents components
+* (feature) Adds Detection2D as allowed input in map encoding component
+* (feature) Adds callback for Detections2D and their use in llm/mllm components
+  - Streamlines names of detection msgs
+  - Streamlines names of tracking msgs
+* (fix) Gets raw msg data in execution step to avoid calling get_output twice
+* (chore) Adds websockets as an explicit dependency
+* Contributors: ahr, mkabtoul
+
 0.4.2 (2025-09-03)
 ------------------
 * (feature) Adds udp streaming to IP:PORT as an option to TextToStream component when play_on_device is enabled
