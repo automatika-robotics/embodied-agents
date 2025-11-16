@@ -81,6 +81,7 @@ class Component(BaseComponent):
         Called by parent BaseComponent
         """
         self.get_logger().info("STARTING ALL SUBSCRIBERS")
+        # TODO: Inspect when component runtype is being set
         all_callbacks = (
             list(self.callbacks.values()) + list(self.trig_callbacks.values())
             if self.run_type is ComponentRunType.EVENT
@@ -88,11 +89,7 @@ class Component(BaseComponent):
         )
         for callback in all_callbacks:
             callback.set_node_name(self.node_name)
-            if hasattr(callback.input_topic, "fixed"):
-                self.get_logger().debug(
-                    f"Fixed input specified for topic: {callback.input_topic} of type {callback.input_topic.msg_type}"
-                )
-            else:
+            if not hasattr(callback.input_topic, "fixed"):
                 callback.set_subscriber(self._add_ros_subscriber(callback))
 
     def activate_all_triggers(self) -> None:
