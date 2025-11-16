@@ -245,13 +245,17 @@ def main():
         if args.outputs
         else None
     )
+
+    # TODO: Handle additional types and qos in deserialization
     layers = (
-        [MapLayer(**i) for i in _deserialize_topics(args.layers, additional_types)]
+        [MapLayer(**json.loads(i)) for i in json.loads(args.layers)]
         if args.layers
         else None
     )
+
+    # TODO: Handle additional types and qos in deserialization
     routes = (
-        [Route(**r) for r in _deserialize_topics(args.routes, additional_types)]
+        [Route(**json.loads(r)) for r in json.loads(args.routes)]
         if args.routes
         else None
     )
