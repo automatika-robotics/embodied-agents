@@ -51,7 +51,7 @@ pip install 'attrs>=23.2.0'
 #### 依存関係の取得
 
 ```bash
-pip install numpy opencv-python-headless 'attrs>=23.2.0' jinja2 httpx setproctitle msgpack msgpack-numpy platformdirs tqdm websockets
+pip install numpy opencv-python-headless 'attrs>=23.2.0' jinja2 httpx setproctitle msgpack msgpack-numpy platformdirs tqdm websockets onnxruntime
 ```
 
 Sugarcoat🍬 をクローン：
