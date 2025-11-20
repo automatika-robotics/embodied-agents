@@ -15,6 +15,7 @@
 - **语义记忆**：集成向量数据库、语义路由和其他支持组件，快速构建复杂的代理信息流图。无需在机器人上部署臃肿的 "GenAI" 框架。
 - **基于 ROS2 构建**：以 ROS2 作为分布式通信的核心。理论上所有提供 ROS2 包的设备都可用于将数据发送给 ML 模型，已实现常用数据类型的回调，并具备无限扩展性。
 
+加入我们的 [Discord](https://discord.gg/B9ZU6qjzND) 👾
 查看 [安装说明](https://automatika-robotics.github.io/embodied-agents/installation.html) 🛠️
 立即开始 [快速上手](https://automatika-robotics.github.io/embodied-agents/quickstart.html) 🚀
 了解 [基本概念](https://automatika-robotics.github.io/embodied-agents/basics/index.html) 📚

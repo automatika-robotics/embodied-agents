@@ -15,6 +15,8 @@
 - **セマンティックメモリ**：ベクトルデータベース、セマンティックルーティング、その他の補助コンポーネントを統合し、エージェント情報フローの複雑なグラフを迅速に構築できます。重い「GenAI」フレームワークは不要です。
 - **ROS2 ベース**：ROS2 を分散通信の基盤として使用。ROS2 パッケージを提供するすべてのデバイスが ML モデルへのデータ送信に利用可能で、主要なデータ型に対応したコールバックが用意されており、拡張性は無限です。
 
+
+私たちの [Discord](https://discord.gg/B9ZU6qjzND) に参加してください 👾
 [インストール手順](https://automatika-robotics.github.io/embodied-agents/installation.html) 🛠️
 [クイックスタートガイド](https://automatika-robotics.github.io/embodied-agents/quickstart.html) 🚀
 [基本概念](https://automatika-robotics.github.io/embodied-agents/basics/index.html) 📚

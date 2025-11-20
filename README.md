@@ -15,6 +15,8 @@
 - **Semantic Memory**: Integrates vector databases, semantic routing and other supporting components to quickly build arbitrarily complex graphs for agentic information flow. No need to utilize bloated "GenAI" frameworks on your robot.
 - **Made in ROS2**: Utilizes ROS2 as the underlying distributed communications backbone. Theoretically, all devices that provide a ROS2 package can be utilized to send data to ML models, with callbacks implemented for most commonly used data types and infinite extensibility.
 
+Join our [Discord](https://discord.gg/B9ZU6qjzND) 👾
+
 Checkout [Installation Instructions](https://automatika-robotics.github.io/embodied-agents/installation.html) 🛠️
 
 Get started with the [Quickstart Guide](https://automatika-robotics.github.io/embodied-agents/quickstart.html) 🚀
