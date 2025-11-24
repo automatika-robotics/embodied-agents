@@ -17,9 +17,11 @@ find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 
 file(GLOB_RECURSE MSG_FILES RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" "msg/*.msg" )
+file(GLOB_RECURSE ACTION_FILES RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" "action/*.action" )
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   ${MSG_FILES}
+  ${ACTION_FILES}
   DEPENDENCIES builtin_interfaces std_msgs sensor_msgs
 )
 
