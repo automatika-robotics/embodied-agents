@@ -1,0 +1,11 @@
+# Start vision langauge action
+string cmd
+---
+# Result
+bool success
+float64[] positions
+float64[] velocities
+---
+# Feedback
+float64[] position_errors
+float64[] velocity_errors

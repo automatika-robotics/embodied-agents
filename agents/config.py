@@ -200,6 +200,23 @@ VLMConfig = MLLMConfig
 
 
 @define(kw_only=True)
+class VLAConfig(ModelComponentConfig):
+    """
+    Configuration for the Vision-Language-Agent (VLA) component.
+    """
+
+    action_sending_rate: float = field(
+        default=1.0, validator=base_validators.in_range(min_value=1e-6, max_value=1e6)
+    )
+    input_timeout: float = field(
+        default=30.0, validator=base_validators.in_range(min_value=1e-6, max_value=1e6)
+    )  # seconds
+    task: Optional[
+        Literal["general", "pointing", "affordance", "trajectory", "grounding"]
+    ] = field(default=None)
+
+
+@define(kw_only=True)
 class VisionConfig(ModelComponentConfig):
     """Configuration for a detection component.
 
