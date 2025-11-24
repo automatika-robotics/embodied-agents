@@ -23,6 +23,7 @@ class Component(BaseComponent):
         inputs: Optional[Sequence[Union[Topic, FixedInput]]] = None,
         outputs: Optional[Sequence[Topic]] = None,
         config: Optional[BaseComponentConfig] = None,
+        trigger: Union[Topic, List[Topic], float, None] = 1.0,
         component_name: str = "agents_component",
         **kwargs,
     ):
@@ -253,3 +254,61 @@ class Component(BaseComponent):
             return json.dumps([t.to_json() for t in self.trig_topic])
         else:
             return json.dumps(self.trig_topic)
+
+    def _replace_input_topic(
+        self, topic_name: str, new_name: str, msg_type: str
+    ) -> Optional[str]:
+        """Replaces a component input topic by a new topic. Overrides parent method to handle trigger callbacks
+
+        :param topic_name: Old Topic name
+        :type topic_name: str
+        :param new_name: New topic name
+        :type new_name: str
+        :param msg_type: New topic message type
+        :type msg_type: str
+        :return: Error message or None if no errors are found
+        :rtype: Optional[str]
+        """
+        error_msg = super()._replace_input_topic(topic_name, new_name, msg_type)
+        if not error_msg:
+            return
+
+        # topic to be replaced is not found in callbacks -> check in trigger callbacks
+        normalized_topic_name = (
+            topic_name[1:] if topic_name.startswith("/") else topic_name
+        )
+
+        if topic_name not in self.trig_callbacks:
+            error_msg = f"Topic {topic_name} is not found in Component inputs"
+            return error_msg
+
+        old_callback = self.trig_callbacks[normalized_topic_name]
+
+        # Create New Topic/Callback
+        try:
+            new_topic = Topic(name=new_name, msg_type=msg_type)
+            new_callback = new_topic.msg_type.callback(
+                new_topic, node_name=self.node_name
+            )
+        except Exception as e:
+            error_msg = f"Invalid topic parameters: {e}"
+            return error_msg
+
+        # Handle Active Subscriber
+        if old_callback._subscriber:
+            self.get_logger().info(
+                f"Destroying subscriber for old topic '{topic_name}'"
+            )
+            self.destroy_subscription(old_callback._subscriber)
+
+            new_callback.set_subscriber(self._add_ros_subscriber(new_callback))
+
+        # Update callbacks dictionary
+        self.trig_callbacks.pop(normalized_topic_name)
+        self.trig_callbacks[new_name] = new_callback
+
+        # update the internal lists
+        old_topic = old_callback.input_topic
+        self._update_inactive_input_topic(old_topic, new_topic)
+
+        return None
