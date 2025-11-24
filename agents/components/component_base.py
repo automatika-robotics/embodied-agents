@@ -23,7 +23,6 @@ class Component(BaseComponent):
         inputs: Optional[Sequence[Union[Topic, FixedInput]]] = None,
         outputs: Optional[Sequence[Topic]] = None,
         config: Optional[BaseComponentConfig] = None,
-        trigger: Union[Topic, List[Topic], float] = 1.0,
         component_name: str = "agents_component",
         **kwargs,
     ):
@@ -140,6 +139,15 @@ class Component(BaseComponent):
             self.run_type = ComponentRunType.EVENT
             self.trig_callbacks = {trigger.name: self.callbacks[trigger.name]}
             del self.callbacks[trigger.name]
+
+        elif trigger is None:
+            if self.run_type not in [
+                ComponentRunType.ACTION_SERVER,
+                ComponentRunType.SERVER,
+            ]:
+                raise TypeError(
+                    f"Component run type is set to `{self.run_type}` but no trigger is provided. Trigger can only be set to None when component run type is `ACTION_SERVER` or `SERVER`."
+                )
 
         else:
             self.run_type = ComponentRunType.TIMED
