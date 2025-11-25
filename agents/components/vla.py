@@ -6,9 +6,9 @@ from ..ros import (
     Image,
     String,
     Topic,
-    DetectionsMultiSource,
-    Detections,
-    RGBD,
+    JointTrajectory,
+    JointJog,
+    JointState,
     ComponentRunType,
 )
 from ..utils import validate_func_args
@@ -33,10 +33,9 @@ class VLA(ModelComponent):
     ):
         self.config: VLAConfig = config or VLAConfig()
         self.allowed_inputs = {
-            "Required": [String, [Image, RGBD]],
-            "Optional": [DetectionsMultiSource, Detections],
+            "Required": [String, Image, JointState],
         }
-        # self.handled_outputs = [String]
+        self.handled_outputs = [[JointTrajectory, JointJog]]
 
         self.model_client = model_client
 
@@ -99,7 +98,8 @@ class VLA(ModelComponent):
         # Wait for all inputs to be available
         _timeout = 0.0
         while not self.got_all_inputs() and _timeout < self.config.input_timeout:
-            self.get_logger().warn("Inputs topics are not available, waiting to start executing actions...",
+            self.get_logger().warn(
+                "Inputs topics are not available, waiting to start executing actions...",
                 once=True,
             )
             _timeout += 1 / self.config.loop_rate
@@ -107,7 +107,6 @@ class VLA(ModelComponent):
 
         try:
             while not self._action_done(action_feedback_msg):
-
                 # Check if goal is canceled
                 if not goal_handle.is_active or goal_handle.is_cancel_requested:
                     self.get_logger().info("Goal Canceled")
@@ -116,18 +115,18 @@ class VLA(ModelComponent):
                     return action_result
 
                 # Get new observations from inputs
-                got_observations = self._prepare_observations(command)
+                model_observations = self._prepare_observations(command)
 
-                if got_observations:
+                if model_observations:
                     # publish feedback
-                    result = self._send_observations_for_inference()
+                    result = self._send_observations_for_inference(model_observations)
                     self._update_actions_queue(result)
                 else:
-                    self.get_logger().warn("Could not prepare inference input, skipping this step...",
-                        once=True,
+                    self.get_logger().warn(
+                        "Could not prepare inference input, skipping this step..."
                     )
-                    # TODO: add timeout for waiting for inputs
                     continue
+
                 # Compute errors and publish feedback
                 goal_handle.publish_feedback(action_feedback_msg)
                 self.get_logger().debug(f"Action Feedback: {action_feedback_msg}")
@@ -162,7 +161,7 @@ class VLA(ModelComponent):
         """
         pass
 
-    def _prepare_observations(self, command: str) -> bool:
+    def _prepare_observations(self, command: str):
         """Prepare observations from current inputs
 
         :param command: Command string
@@ -171,14 +170,11 @@ class VLA(ModelComponent):
         # TODO: implement state update from component inputs
         # TODO: implement inference input preparation
         # Return False if inference input cannot be prepared or inputs are not available
-        self._model_observations = {
-            "command": command
-        }
-        return True
+        model_observations = {"command": command}
+        return model_observations
 
-    def _send_observations_for_inference(self):
-        """Send observations to model for inference
-        """
+    def _send_observations_for_inference(self, model_observations):
+        """Send observations to model for inference"""
         # TODO: implement sending observations for inference and getting the result
         # return result
         pass

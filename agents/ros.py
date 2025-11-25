@@ -1,9 +1,12 @@
 """The following classes provide wrappers for data being transmitted via ROS topics. These classes form the inputs and outputs of [Components](agents.components.md)."""
 
-from typing import Union, Any, Dict, List, Tuple
+from typing import Union, Any, Dict, List, Tuple, Optional
 import numpy as np
 from attrs import define, field, Factory
 from importlib.util import find_spec
+from rclpy.logging import get_logger
+
+from sensor_msgs.msg import JointState as JointStateROS
 
 # FROM SUGARCOAT
 from ros_sugar.supported_types import (
@@ -52,7 +55,10 @@ from .callbacks import (
     RGBDCallback,
     VideoCallback,
     StreamingStringCallback,
+    JointStateCallback
 )
+
+from .utils.actions import JointsData
 
 __all__ = [
     "String",
@@ -352,6 +358,134 @@ class RGBD(SupportedType):
         return RealSenseRGBD
 
 
+class JointTrajectoryPoint(SupportedType):
+    """JointTrajectoryPoint Supported Type for ROS2 trajectory_msgs/msg/JointTrajectoryPoint"""
+
+    @classmethod
+    def get_ros_type(cls) -> type:
+        if find_spec("trajectory_msgs") is None:
+            raise ModuleNotFoundError(
+                "'trajectory_msgs' module is required to use 'JointTrajectory' msg type but it is not installed. Please install the 'ros-<distro>-trajectory-msgs' package."
+            )
+        from trajectory_msgs.msg import JointTrajectoryPoint as JointTrajectoryPointROS
+
+        return JointTrajectoryPointROS
+
+    @classmethod
+    def convert(cls, output: JointsData, index: Optional[int] = None, **_) -> Any:
+        """
+        Takes joint trajectory point data dictionary and converts it into a ROS message
+        of type JointTrajectoryPoint
+
+        :return: JointTrajectory
+        """
+        msg = cls.get_ros_type()()
+        msg.time_from_start = output.delay
+
+        if index is None:
+            msg.positions = output.positions.tolist()
+            msg.velocities = output.velocities.tolist()
+            msg.accelerations = output.velocities.tolist()
+            msg.effort = output.efforts.tolist()
+            return msg
+
+        if index < output.positions.shape[0]:
+            msg.positions = output.positions[index].tolist()
+        if index < output.velocities.shape[0]:
+            msg.velocities = output.velocities[index].tolist()
+        if index < output.accelerations.shape[0]:
+            msg.accelerations = output.accelerations[index].tolist()
+        if index < output.efforts.shape[0]:
+            msg.effort = output.efforts[index].tolist()
+        return msg
+
+
+class JointTrajectory(SupportedType):
+    """JointTrajectory Supported Type for ROS2 trajectory_msgs/msg/JointTrajectory"""
+
+    callback = None
+
+    @classmethod
+    def get_ros_type(cls) -> type:
+        if find_spec("trajectory_msgs") is None:
+            raise ModuleNotFoundError(
+                "'trajectory_msgs' module is required to use 'JointTrajectory' msg type but it is not installed. Please install the 'ros-<distro>-trajectory-msgs' package."
+            )
+        from trajectory_msgs.msg import JointTrajectory as JointTrajectoryROS
+
+        return JointTrajectoryROS
+
+    @classmethod
+    def convert(cls, output: JointsData, **_) -> Any:
+        """
+        Takes joint trajectory data dictionary and converts it into a ROS message
+        of type JointTrajectory
+
+        :return: JointTrajectory
+        """
+        msg = cls.get_ros_type()()
+        msg.joint_names = output.joints_names
+        msg.points = []
+
+        if output.positions.ndim == 1:
+            # a single point
+            point_msg = JointTrajectoryPoint.convert(output)
+            msg.points.append(point_msg)
+            return msg
+
+        if output.positions.ndim != 2:
+            get_logger("joint_trajectory_publisher").error(
+                f"Trying to publish invalid joint trajectory data. Expecting joint positions array dimension 2, got: `{output.positions.ndim}`"
+            )
+            return None
+
+        # Get points data
+        for idx in range(output.positions.shape[0]):
+            point_msg = JointTrajectoryPoint.convert(output, index=idx)
+            msg.points.append(point_msg)
+        return msg
+
+
+class JointJog(SupportedType):
+    """JointJog Supported Type for ROS2 control_msgs/msg/JointJog"""
+
+    callback = None
+
+    @classmethod
+    def get_ros_type(cls) -> type:
+        if find_spec("control_msgs") is None:
+            raise ModuleNotFoundError(
+                "'control_msgs' module is required to use 'JointJog' msg type but it is not installed. Please install the 'ros-<distro>-control-msgs' package."
+            )
+        from control_msgs.msg import JointJog as JointJogROS
+
+        return JointJogROS
+
+    @classmethod
+    def convert(cls, output: JointsData, **_) -> Any:
+        """
+        Takes joint jog data dictionary and converts it into a ROS message
+        of type JointJog
+
+        :return: JointJog
+        """
+        msg = cls.get_ros_type()()
+        msg.joint_names = output.joints_names
+
+        msg.displacements = output.positions.tolist()
+        msg.velocities = output.velocities.tolist()
+        msg.duration = output.duration.tolist()
+
+        return msg
+
+
+class JointState(SupportedType):
+    """JointState Supported Type for ROS2 sensor_msgs/msg/JointState"""
+
+    _ros_type = JointStateROS
+    callback = JointStateCallback
+
+
 agent_types = [
     StreamingString,
     Video,
@@ -361,6 +495,10 @@ agent_types = [
     TrackingsMultiSource,
     PointsOfInterest,
     RGBD,
+    JointState,
+    JointJog,
+    JointTrajectory,
+    JointTrajectoryPoint
 ]
 
 

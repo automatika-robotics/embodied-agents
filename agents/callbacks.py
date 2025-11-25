@@ -22,6 +22,8 @@ from .utils import (
     draw_points_2d,
 )
 
+from .utils.actions import JointsData
+
 __all__ = ["GenericCallback", "TextCallback"]
 
 
@@ -383,3 +385,30 @@ class PointsOfInterestCallback(GenericCallback):
         img = draw_points_2d(img, points)  # draw points as red circles
 
         return convert_img_to_jpeg_str(img, getattr(self, "node_name", "ui"))
+
+
+class JointStateCallback(GenericCallback):
+    """
+    sensor_msgs/JointState Callback class.
+
+    The state of each joint (revolute or prismatic) is defined by:
+    * the position of the joint (rad or m),
+    * the velocity of the joint (rad/s or m/s) and
+    * the effort that is applied in the joint (Nm or N)
+    """
+
+    def _get_output(self, **_) -> Optional[JointsData]:
+        """
+        Gets joint states as a dictionary with 'joint_names' and 'positions' keys.
+        :returns:   Joint states as dict
+        :rtype:     dict
+        """
+        if not self.msg:
+            return None
+
+        return JointsData(
+            joints_names=self.msg.name,
+            positions=np.array(self.msg.position),
+            velocities=np.array(self.msg.velocity),
+            efforts=np.array(self.msg.effort)
+        )

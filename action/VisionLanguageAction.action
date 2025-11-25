@@ -7,5 +7,5 @@ float64[] positions
 float64[] velocities
 ---
 # Feedback
-float64[] position_errors
-float64[] velocity_errors
+float64[] positions_errors
+float64[] velocities_errors
