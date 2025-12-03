@@ -1,4 +1,5 @@
 import base64
+import json
 import inspect
 import uuid
 from functools import wraps
@@ -337,6 +338,129 @@ def flatten(xs):
             yield from flatten(x)
         else:
             yield x
+
+
+def _normalize_names(names: Optional[Union[List, Dict]]) -> Optional[List]:
+    """Helper for normalizing inside dataset features:
+    list, dict, or None -> return list or None"""
+
+    if names is None:
+        return None
+
+    if isinstance(names, List):
+        return names
+
+    if isinstance(names, Dict):
+        result = []
+
+        def recurse(prefix, obj):
+            if isinstance(obj, List):
+                for item in obj:
+                    result.append(f"{prefix}.{item}")
+            elif isinstance(obj, Dict):
+                for k, v in obj.items():
+                    recurse(f"{prefix}.{k}" if prefix else k, v)
+
+        recurse("", names)
+        return result
+
+    return None
+
+
+def _normalize_entry(spec: Dict) -> Dict:
+    """Helper for normalizing dataset info entries"""
+
+    # Map dtypes -> types
+    # NOTE: As of now only dtypes are used by the server for sorting inputs
+    TYPE_MAP = {
+        "video": "VISUAL",
+        "image": "VISUAL",
+        "float32": "STATE",
+        "float64": "STATE",
+    }
+
+    dtype = spec.get("dtype", "").lower()
+    shape_raw = spec.get("shape", [])
+    shape = tuple(shape_raw) if isinstance(shape_raw, (list, tuple)) else ()
+
+    feature_type = TYPE_MAP.get(dtype, None)
+    if not feature_type:
+        return {}
+
+    names = _normalize_names(spec.get("names"))
+
+    entry = {
+        "dtype": dtype,
+        "shape": shape,
+        "type": feature_type,
+    }
+    if names:
+        entry["names"] = names
+
+    return entry
+
+
+def build_lerobot_features_from_dataset_info(path_or_url: str) -> Dict[str, Dict]:
+    """
+    Load LeRobot dataset info.json from a local file or URL and build
+    the feature and actions dict.
+    """
+    # Load JSON from URL
+    if path_or_url.startswith(("http://", "https://")):
+        try:
+            resp = httpx.get(
+                path_or_url, timeout=10, follow_redirects=True
+            ).raise_for_status()
+        except httpx.RequestError as e:
+            raise RuntimeError(
+                f"Failed to connect to URL '{path_or_url}'. Error: {e}"
+            ) from e
+
+        except httpx.HTTPStatusError as e:
+            raise RuntimeError(f"Failed to fetch URL '{path_or_url}'. ") from e
+
+        try:
+            dataset_json = resp.json()
+        except json.JSONDecodeError as e:
+            raise RuntimeError(
+                f"URL '{path_or_url}' returned non-JSON content. Error: {e}"
+            ) from e
+
+    # Load JSON from file path
+    else:
+        p = Path(path_or_url)
+        if not p.exists():
+            raise FileNotFoundError(f"File not found: '{p}'")
+
+        if not p.is_file():
+            raise RuntimeError(f"Path exists but is not a file: '{p}'")
+        try:
+            dataset_json = json.loads(p.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            raise RuntimeError(
+                f"File '{p}' does not contain valid JSON. Error: {e}"
+            ) from e
+        except PermissionError as e:
+            raise PermissionError(f"Permission denied when reading file '{p}'.") from e
+
+    # Build feature dictionary
+    raw_features = dataset_json.get("features", {})
+
+    features = {}
+    actions = {}
+
+    for key, spec in raw_features.items():
+        # NOTE: Only checking for state, images and action for now
+        if key == "observation.state" or key.startswith("observation.images."):
+            features[key] = _normalize_entry(spec)
+
+    action_spec = raw_features.get("action", {})
+    actions = _normalize_entry(action_spec)
+
+    print(f"Features: {features}")
+    print(f"Actions: {actions}")
+
+    return {"features": features, "actions": actions}
 
 
 class PDFReader:

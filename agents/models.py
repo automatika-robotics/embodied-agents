@@ -2,10 +2,10 @@
 The following model specification classes are meant to define a comman interface for initialization parameters for ML models across supported model serving platforms.
 """
 
-from typing import Optional, Dict, Any
-
+from typing import Optional, Dict, Any, Literal
 from attrs import define, field
 from .ros import BaseAttrs, base_validators
+from .utils import build_lerobot_features_from_dataset_info
 
 __all__ = [
     "TransformersLLM",
@@ -411,4 +411,95 @@ class VisionModel(Model):
             "tracking_distance_function": self.tracking_distance_function,
             "tracking_distance_threshold": self.tracking_distance_threshold,
             "deploy_tensorrt": self.deploy_tensorrt,
+        }
+
+
+@define(kw_only=True)
+class LeRobotPolicy(Model):
+    """LeRobot Policy Model for Vision-Language-Action Robotics.
+
+    This model provides a high-level interface for loading and running **LeRobot** policies— vision-language-action (VLA) models trained for robotic manipulation tasks.
+
+    It supports automatic extraction of feature and action specifications directly from dataset metadata, as well as flexible configuration of policy behavior.
+
+    The policy can be instantiated from any compatible **LeRobot** checkpoint hosted on
+    HuggingFace, making it easy to load pretrained models such as `smolvla_base` or others from LeRobot. Upon initialization, the wrapper downloads and parses the dataset
+    metadata file to derive the feature schema and action space that the policy expects.
+
+    :param checkpoint:
+        The name or HuggingFace repository ID of the pretrained LeRobot checkpoint to load.
+        Default: `"lerobot/smolvla_base"`.
+    :type checkpoint: str
+    :param policy_type:
+    The type of LeRobot policy to load.
+    Supported values are:
+    - `"diffusion"` — Diffusion-based action generation policy
+    - `"act"` — Action Chunk Transformer policy
+    - `"smolvla"` — General VLA from HuggingFace
+    - `"pi0"` — General VLA from Physical Intelligence
+    This field determines how the checkpoint is interpreted and which policy architecture is instantiated.
+    Default: `"smolvla"`.
+    :param dataset_info_file:
+        URL or local path to the dataset metadata file (`info.json`).
+        This file defines the input features and action structure that the policy must follow. By default, this points to metadata for the `svla_so100_pickplace` dataset.
+    :type dataset_info_file: str
+    :param actions_per_chunk:
+        The number of predicted actions produced per inference chunk. This is only applicable for certain policy types that implement Real Time Chunking (RTC) such as Pi0, and SmolVLA
+        Default: `50`.
+    :type actions_per_chunk: int
+    :param init_timeout:
+        Optional timeout (in seconds) for initialization.
+        Default: `None`.
+    :type init_timeout: int, optional
+
+    ### Behavior
+
+    Upon initialization, the class automatically uses provided metadata file/url to extract and set:
+
+    - `self.features` — policy input features
+    - `self.actions` — action definitions used during inference
+
+    ---
+
+    ### Example
+    ```python
+    # Load a standard LeRobot policy
+    policy = LeRobotPolicy(
+        checkpoint="lerobot/smolvla_base",
+        policy_type="smolvla"
+    )
+
+    # Load a policy with a different dataset specification
+    policy = LeRobotPolicy(
+        checkpoint="my_own/smolvla_finetuned",
+        policy_type="smolvla"
+        dataset_info_file="path/to/my_dataset/info.json",
+        actions_per_chunk=25,
+    )
+    """
+
+    checkpoint: str = field(default="lerobot/smolvla_base")
+    policy_type: Literal["smolvla", "diffusion", "act", "pi0"] = field(
+        default="smolvla"
+    )
+    dataset_info_file: str = field(
+        default="https://huggingface.co/datasets/lerobot/svla_so100_pickplace/resolve/main/meta/info.json"
+    )
+    features: Dict = field(default={})
+    actions: Dict = field(default={})
+    actions_per_chunk: int = field(default=50)
+
+    def __attrs_post_init__(self):
+        lerobot_features = build_lerobot_features_from_dataset_info(
+            self.dataset_info_file
+        )
+        self.features = lerobot_features["features"]
+        self.actions = lerobot_features["actions"]
+
+    def _get_init_params(self):
+        return {
+            "checkpoint": self.checkpoint,
+            "policy_type": self.policy_type,
+            "features": self.features,
+            "actions_per_chunk": self.actions_per_chunk,
         }

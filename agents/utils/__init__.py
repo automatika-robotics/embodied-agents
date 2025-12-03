@@ -11,11 +11,13 @@ from .utils import (
     WakeWordStatus,
     load_model,
     flatten,
+    build_lerobot_features_from_dataset_info,
     _LANGUAGE_CODES,
 )
 
 __all__ = [
     "_LANGUAGE_CODES",
+    "build_lerobot_features_from_dataset_info",
     "flatten",
     "create_detection_context",
     "draw_detection_bounding_boxes",
