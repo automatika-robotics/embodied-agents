@@ -10,11 +10,12 @@
 **_EmbodiedAgents_** は、環境のコンテキスト情報を理解し、記憶し、それに基づいて行動できる対話型の物理エージェントを作成するための、完全に ROS2 で構築されたフル機能のフレームワークです。
 
 - **本番対応の物理エージェント**：実世界の動的な環境で動作する自律型ロボットシステムのために設計されています。_EmbodiedAgents_ を使えば、Physical AI を簡単に活用できます。
+
 * **直感的なAPI**：シンプルでPython的なAPIにより、ローカルまたはクラウドベースの機械学習モデル（特に**マルチモーダル大規模言語モデル（Multimodal LLMs）**やその他の**Transformerベースのアーキテクチャ**）をロボット上で活用できます。コンポーネントのライフサイクル管理、ヘルスモニタリング、フォールバック機構などの利点により、エージェントの堅牢性が向上します。
-* **自己参照型かつイベント駆動型**：*EmbodiedAgents* を使って作成されたエージェントは、内部または外部のイベントに応じて、自らのコンポーネントを起動・停止・再構成することができます。たとえば、エージェントは地図上の位置やビジョンモデルからの入力に応じて、計画用のMLモデルを切り替えることができます。*EmbodiedAgents* を使えば、自己参照型の [ゲーデル・マシン（Gödel machines）](https://en.wikipedia.org/wiki/G%C3%B6del_machine) のようなエージェントを簡単に作成できます。
+* **自己参照型かつイベント駆動型**：_EmbodiedAgents_ を使って作成されたエージェントは、内部または外部のイベントに応じて、自らのコンポーネントを起動・停止・再構成することができます。たとえば、エージェントは地図上の位置やビジョンモデルからの入力に応じて、計画用のMLモデルを切り替えることができます。_EmbodiedAgents_ を使えば、自己参照型の [ゲーデル・マシン（Gödel machines）](https://en.wikipedia.org/wiki/G%C3%B6del_machine) のようなエージェントを簡単に作成できます。
+
 - **セマンティックメモリ**：ベクトルデータベース、セマンティックルーティング、その他の補助コンポーネントを統合し、エージェント情報フローの複雑なグラフを迅速に構築できます。重い「GenAI」フレームワークは不要です。
 - **ROS2 ベース**：ROS2 を分散通信の基盤として使用。ROS2 パッケージを提供するすべてのデバイスが ML モデルへのデータ送信に利用可能で、主要なデータ型に対応したコールバックが用意されており、拡張性は無限です。
-
 
 私たちの [Discord](https://discord.gg/B9ZU6qjzND) に参加してください 👾
 [インストール手順](https://automatika-robotics.github.io/embodied-agents/installation.html) 🛠️
@@ -53,7 +54,7 @@ pip install 'attrs>=23.2.0'
 #### 依存関係の取得
 
 ```bash
-pip install numpy opencv-python-headless 'attrs>=23.2.0' jinja2 httpx setproctitle msgpack msgpack-numpy platformdirs tqdm websockets onnxruntime
+pip install numpy opencv-python-headless 'attrs>=23.2.0' jinja2 httpx setproctitle msgpack msgpack-numpy platformdirs tqdm websockets
 ```
 
 Sugarcoat🍬 をクローン：
@@ -124,14 +125,14 @@ launcher.bringup()
 
 ## EmbodiedAgentレシピの動的Web UI
 
-基盤となる[**Sugarcoat**](https://github.com/automatika-robotics/sugarcoat)フレームワークの強力な機能を活用し、***EmbodiedAgents***は各レシピに対して**完全に動的で自動生成されるWeb UI**を提供します。
+基盤となる[**Sugarcoat**](https://github.com/automatika-robotics/sugarcoat)フレームワークの強力な機能を活用し、**_EmbodiedAgents_**は各レシピに対して**完全に動的で自動生成されるWeb UI**を提供します。
 この機能は**FastHTML**によって構築されており、手動でのGUI開発を不要にし、制御や可視化のためのレスポンシブなインターフェースを即座に提供します。
 
 このUIは自動的に以下を生成します：
 
-* レシピ内で使用されるすべてのコンポーネントに対する設定インターフェース
-* コンポーネントの入出力に対するリアルタイムデータの可視化と制御
-* すべての対応メッセージ型に対するWebSocketベースのデータストリーミング
+- レシピ内で使用されるすべてのコンポーネントに対する設定インターフェース
+- コンポーネントの入出力に対するリアルタイムデータの可視化と制御
+- すべての対応メッセージ型に対するWebSocketベースのデータストリーミング
 
 ### 例：VLMエージェントUI
 

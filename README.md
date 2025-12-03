@@ -52,7 +52,7 @@ If the attrs version from your package manager is < 23.2, install it using pip a
 Install python dependencies
 
 ```shell
-pip install numpy opencv-python-headless 'attrs>=23.2.0' jinja2 httpx setproctitle msgpack msgpack-numpy platformdirs tqdm websockets onnxruntime
+pip install numpy opencv-python-headless 'attrs>=23.2.0' jinja2 httpx setproctitle msgpack msgpack-numpy platformdirs tqdm websockets
 ```
 
 Download Sugarcoat🍬
@@ -126,9 +126,10 @@ The quickstart example above is just an amuse-bouche of what is possible with _E
 Leveraging the power of the underlying [**Sugarcoat**](https://github.com/automatika-robotics/sugarcoat) framework, **_EmbodiedAgents_** offers a **fully dynamic, auto-generated Web UI** for every recipe. This feature is built with **FastHTML** and eliminates manual GUI development, instantly providing a responsive interface for control and visualization.
 
 The UI automatically creates:
-* Settings interfaces for all the components used in the recipe.
-* Real-time data visualizations and controls for component inputs/outputs.
-* WebSocket-based data streaming for all supported message types.
+
+- Settings interfaces for all the components used in the recipe.
+- Real-time data visualizations and controls for component inputs/outputs.
+- WebSocket-based data streaming for all supported message types.
 
 ### Example: VLM Agent UI
 

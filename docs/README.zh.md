@@ -10,8 +10,10 @@
 **_EmbodiedAgents_** 是一个功能齐全的框架，完全使用 ROS2 编写，用于创建能够理解、记忆并基于环境上下文信息采取行动的交互式物理智能体。
 
 - **可投入生产的物理智能体**：设计用于在现实世界动态环境中运行的自主机器人系统。_EmbodiedAgents_ 使构建基于物理 AI 的系统变得简单。
+
 * **直观的 API**：提供简洁、符合 Python 风格的 API，可在机器人上使用本地或基于云的机器学习模型（特别是**多模态大语言模型（Multimodal LLMs）**和其他**基于 Transformer 的架构**），同时具备组件生命周期管理、健康监控和回退机制等优势，使代理系统更加健壮。
-* **自指性和事件驱动**：通过 *EmbodiedAgents* 创建的代理可以根据内部或外部事件启动、停止或重新配置自身的组件。例如，代理可以根据其在地图上的位置或视觉模型的输入来切换用于规划的机器学习模型。*EmbodiedAgents* 使创建具有自指特性的代理变得简单，这些代理类似于[Gödel 机](https://en.wikipedia.org/wiki/G%C3%B6del_machine)（Gödel machines）。
+* **自指性和事件驱动**：通过 _EmbodiedAgents_ 创建的代理可以根据内部或外部事件启动、停止或重新配置自身的组件。例如，代理可以根据其在地图上的位置或视觉模型的输入来切换用于规划的机器学习模型。_EmbodiedAgents_ 使创建具有自指特性的代理变得简单，这些代理类似于[Gödel 机](https://en.wikipedia.org/wiki/G%C3%B6del_machine)（Gödel machines）。
+
 - **语义记忆**：集成向量数据库、语义路由和其他支持组件，快速构建复杂的代理信息流图。无需在机器人上部署臃肿的 "GenAI" 框架。
 - **基于 ROS2 构建**：以 ROS2 作为分布式通信的核心。理论上所有提供 ROS2 包的设备都可用于将数据发送给 ML 模型，已实现常用数据类型的回调，并具备无限扩展性。
 
@@ -46,7 +48,7 @@ _EmbodiedAgents_ 的核心与具体的模型部署平台无关。目前支持的
 #### 安装依赖项
 
 ```bash
-pip install numpy opencv-python-headless 'attrs>=23.2.0' jinja2 httpx setproctitle msgpack msgpack-numpy platformdirs tqdm websockets onnxruntime
+pip install numpy opencv-python-headless 'attrs>=23.2.0' jinja2 httpx setproctitle msgpack msgpack-numpy platformdirs tqdm websockets
 ```
 
 克隆 Sugarcoat🍬：
@@ -117,14 +119,14 @@ launcher.bringup()
 
 ## EmbodiedAgent 配方的动态网页界面
 
-借助底层 [**Sugarcoat**](https://github.com/automatika-robotics/sugarcoat) 框架的强大功能，***EmbodiedAgents*** 为每个配方提供了一个**完全动态、自动生成的网页界面（Web UI）**。
+借助底层 [**Sugarcoat**](https://github.com/automatika-robotics/sugarcoat) 框架的强大功能，**_EmbodiedAgents_** 为每个配方提供了一个**完全动态、自动生成的网页界面（Web UI）**。
 该功能基于 **FastHTML** 构建，彻底消除了手动开发图形界面的需求，并能即时提供一个用于控制和可视化的响应式界面。
 
 该界面会自动生成以下内容：
 
-* 配方中所使用的所有组件的设置界面
-* 组件输入/输出的实时数据可视化与控制
-* 针对所有支持的消息类型的基于 WebSocket 的数据流传输
+- 配方中所使用的所有组件的设置界面
+- 组件输入/输出的实时数据可视化与控制
+- 针对所有支持的消息类型的基于 WebSocket 的数据流传输
 
 ### 示例：VLM Agent 界面
 
