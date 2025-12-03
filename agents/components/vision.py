@@ -24,7 +24,6 @@ from ..utils import (
     draw_points_2d,
     draw_detection_bounding_boxes,
 )
-from ..utils.vision import LocalVisionModel
 from .model_component import ModelComponent
 from .component_base import ComponentRunType
 
@@ -131,6 +130,8 @@ class Vision(ModelComponent):
 
         # deploy local model if enabled
         if not self.model_client and self.config.enable_local_classifier:
+            from ..utils.vision import LocalVisionModel
+
             self.local_classifier = LocalVisionModel(
                 model_path=load_model(
                     "local_classifier", self.config.local_classifier_model_path
