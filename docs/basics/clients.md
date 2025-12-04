@@ -41,6 +41,13 @@ Some clients may require additional dependencies, which are detailed in the tabl
   - An HTTP client for interacting with ML models served on [Ollama](https://ollama.com). Supports LLMs/MLLMs and embedding models. It can be invoked with the generic [OllamaModel](../apidocs/agents/agents.models.md#classes).
     Requires `pip install ollama`.
 
+* - **LeRobot**
+  - LeRobotClient
+  - A GRPC based asynchronous client for vision-language-action (VLA) policies served on LeRobot Policy Server. Supports various robot action policies available in LeRobot package by HuggingFace. It can be invoked with the generic wrapper [LeRobotPolicy](agents.models.md#classes).
+    Requires grpc and torch (at least the CPU version):<br/>
+    `pip install grpcio`<br/>
+    `pip install torch --index-url https://download.pytorch.org/whl/cpu`
+
 * - **ChromaDB**
   - ChromaClient
   - An HTTP client for interacting with a ChromaDB instance running as a server.

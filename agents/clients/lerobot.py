@@ -11,6 +11,7 @@ from lerobot_transport.utils import (
     TimedObservation,
 )
 
+__all__ = ["LeRobotClient"]
 
 LEROBOT_MIN_VERSION = "0.4.2"
 
