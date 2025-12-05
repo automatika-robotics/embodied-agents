@@ -86,9 +86,7 @@ def parse_urdf_joints(path_or_url: str) -> Dict:
     Returns:
         dict: {joint_name: {lower, upper, effort, velocity} or None}
     """
-    tree = _read_spec_file(path_or_url, spec_type="xml")
-
-    root = tree.getroot()
+    root = _read_spec_file(path_or_url, spec_type="xml")
 
     joints_limits = {}
 

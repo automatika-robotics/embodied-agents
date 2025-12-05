@@ -378,7 +378,8 @@ def _read_spec_file_from_path(path: str, spec_type: Literal["json", "xml"] = "js
         if spec_type == "json":
             return json.loads(p.read_text(encoding="utf-8"))
         elif spec_type == "xml":
-            return ET.parse(p)
+            tree = ET.parse(p)
+            return tree.getroot()
     except ET.ParseError as e:
         raise ET.ParseError(f"Failed to parse XML from URL '{path}': {e}") from e
     except json.JSONDecodeError as e:
