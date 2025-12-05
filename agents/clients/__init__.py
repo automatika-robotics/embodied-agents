@@ -56,12 +56,14 @@ from .roboml import (
     RoboMLRESPClient,
     RoboMLWSClient,
 )
+from .lerobot import LeRobotClient
 from .chroma import ChromaClient
 
 
 __all__ = [
     "GenericHTTPClient",
     "OllamaClient",
+    "LeRobotClient",
     "ChromaClient",
     "RoboMLHTTPClient",
     "RoboMLRESPClient",

@@ -23,7 +23,7 @@ class ModelComponent(Component):
         outputs: Optional[Sequence[Topic]] = None,
         model_client: Optional[ModelClient] = None,
         config: Optional[ModelComponentConfig] = None,
-        trigger: Union[Topic, List[Topic], float] = 1.0,
+        trigger: Union[Topic, List[Topic], float, None] = 1.0,
         component_name: str = "model_component",
         **kwargs,
     ):
