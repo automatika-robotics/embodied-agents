@@ -1,5 +1,5 @@
 # Start vision langauge action
-string cmd
+string task
 ---
 # Result
 bool success
