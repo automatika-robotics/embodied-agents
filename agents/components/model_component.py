@@ -78,7 +78,7 @@ class ModelComponent(Component):
                 # asynchronously in case of streaming. The callback is implemented
                 # in child components and gets executed in a blocking manner
                 if getattr(self.config, "stream", None):
-                    self.create_timer(
+                    self.__stream_timer = self.create_timer(
                         timer_period_sec=0.001,
                         callback=self._handle_websocket_streaming,
                         callback_group=MutuallyExclusiveCallbackGroup(),
@@ -126,6 +126,10 @@ class ModelComponent(Component):
                         self.req_queue.task_done()
                     except queue.Empty:
                         break
+
+        # Destroy any stream timer if it exists
+        if hasattr(self, "__stream_timer"):
+            self.destroy_timer(self.__stream_timer)
 
     def _validate_output_topics(self) -> None:
         """
