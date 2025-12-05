@@ -24,7 +24,7 @@ class LeRobotClient(ModelClient):
         model: Union[LeRobotPolicy, Dict],
         host: str = "127.0.0.1",
         port: int = 8080,
-        inference_timeout: int = 30,
+        inference_timeout: int = 30,  # Currently not used in this async client
         init_on_activation: bool = True,
         logging_level: str = "info",
         **kwargs,
@@ -126,13 +126,15 @@ class LeRobotClient(ModelClient):
 
         # Create the object (using LeRobot spoofed class)
         inf_inp_obj = TimedObservation(
-            timestamp=time.time(),
+            timestamp=inference_input.pop("timestamp"),
             timestep=inference_input.pop("timestep"),
             observation=inference_input,
             must_go=True,  # Force server to process it
         )
 
-        self.logger.debug(f"Sending to lerobot server: {inf_inp_obj}")
+        self.logger.debug(
+            f"Sending to lerobot server on timestep: {inf_inp_obj.timestep}"
+        )
         try:
             inf_inp_bytes = pickle.dumps(inf_inp_obj)
 

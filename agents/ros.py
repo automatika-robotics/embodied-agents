@@ -48,6 +48,7 @@ from automatika_embodied_agents.msg import (
     TrackingsMultiSource as ROSTrackingsMultiSource,
     PointsOfInterest as ROSPointsOfInterest,
 )
+from automatika_embodied_agents.action import VisionLanguageAction
 from .callbacks import (
     DetectionsCallback,
     DetectionsMultiSourceCallback,
@@ -55,7 +56,7 @@ from .callbacks import (
     RGBDCallback,
     VideoCallback,
     StreamingStringCallback,
-    JointStateCallback
+    JointStateCallback,
 )
 
 from .utils.actions import JointsData
@@ -81,6 +82,7 @@ __all__ = [
     "MapLayer",
     "Route",
     "MutuallyExclusiveCallbackGroup",
+    "VisionLanguageAction",
 ]
 
 
@@ -498,7 +500,7 @@ agent_types = [
     JointState,
     JointJog,
     JointTrajectory,
-    JointTrajectoryPoint
+    JointTrajectoryPoint,
 ]
 
 

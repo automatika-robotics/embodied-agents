@@ -2,7 +2,7 @@
 The following model specification classes are meant to define a comman interface for initialization parameters for ML models across supported model serving platforms.
 """
 
-from typing import Optional, Dict, Any, Literal
+from typing import Optional, Dict, Any, Literal, List
 from attrs import define, field
 from .ros import BaseAttrs, base_validators
 from .utils import build_lerobot_features_from_dataset_info
@@ -488,6 +488,8 @@ class LeRobotPolicy(Model):
     features: Dict = field(default={})
     actions: Dict = field(default={})
     actions_per_chunk: int = field(default=50)
+    _image_keys: List = field(init=False)
+    _joint_keys: List = field(init=False)
 
     def __attrs_post_init__(self):
         lerobot_features = build_lerobot_features_from_dataset_info(
@@ -495,6 +497,8 @@ class LeRobotPolicy(Model):
         )
         self.features = lerobot_features["features"]
         self.actions = lerobot_features["actions"]
+        self._image_keys = lerobot_features["image_keys"]
+        self._joint_keys = self.features["observation.state"]["names"]
 
     def _get_init_params(self):
         return {

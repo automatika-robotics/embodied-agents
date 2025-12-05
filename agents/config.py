@@ -11,6 +11,7 @@ __all__ = [
     "LLMConfig",
     "MLLMConfig",
     "VLMConfig",
+    "VLAConfig",
     "SpeechToTextConfig",
     "TextToSpeechConfig",
     "SemanticRouterConfig",
@@ -205,15 +206,18 @@ class VLAConfig(ModelComponentConfig):
     Configuration for the Vision-Language-Agent (VLA) component.
     """
 
+    joint_names_map: Dict[str, str] = field()
+    camera_inputs_map: Dict[str, Union[Topic, Dict]] = field()
+    state_input_type: Literal["positions", "velocities", "accelerations", "efforts"] = (
+        field(default="positions")
+    )
     action_sending_rate: float = field(
         default=1.0, validator=base_validators.in_range(min_value=1e-6, max_value=1e6)
     )
     input_timeout: float = field(
         default=30.0, validator=base_validators.in_range(min_value=1e-6, max_value=1e6)
     )  # seconds
-    task: Optional[
-        Literal["general", "pointing", "affordance", "trajectory", "grounding"]
-    ] = field(default=None)
+    robot_urdf_file: Optional[str] = field(default=None)
 
 
 @define(kw_only=True)
