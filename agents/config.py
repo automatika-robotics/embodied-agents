@@ -213,6 +213,11 @@ class VLAConfig(ModelComponentConfig):
     state_input_type: Literal["positions", "velocities", "accelerations", "efforts"] = (
         field(default="positions")
     )
+    # TODO: One can make models that produce multiple action output types.
+    # This parameter would have to be revised in that case
+    action_output_type: Literal["positions", "velocities", "accelerations", "efforts"] = (
+        field(default="positions")
+    )
     action_sending_rate: float = field(
         default=1.0, validator=base_validators.in_range(min_value=1e-6, max_value=1e6)
     )

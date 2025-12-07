@@ -54,6 +54,11 @@ class VLA(ModelComponent):
         self.model_client = model_client
 
         # Verify config and model definition
+        # Dataset definition of actions
+        self._dataset_action_dtype = None
+        self._dataset_sorted_joint_names = None
+        # Joint Limits
+        self.robot_joints_limits = None
         self._verify_config(component_name)
 
         # Set the component to run as an action server and set the main action type
@@ -61,7 +66,7 @@ class VLA(ModelComponent):
         self.action_type = VisionLanguageAction
 
         # queue aggregation function
-        self._aggregate_fn: Callable = lambda _, y: y
+        self._aggregator_function: Callable = lambda _, y: y
 
         super().__init__(
             inputs,
@@ -115,9 +120,9 @@ class VLA(ModelComponent):
             )
 
         # Assign external aggregator function in case its provided
-        if agg_fun := self._external_processors.get("agg_fun", None):
+        if agg_fun := self._external_processors.get("aggregator_function", None):
             # Get the first element of the tuple and the only function in that list
-            self._aggregate_fn = partial(run_external_processor, logger_name=self.node_name, topic_name='aggregator_function', processor=agg_fun[0][0])
+            self._aggregator_function = partial(run_external_processor, logger_name=self.node_name, topic_name='aggregator_function', processor=agg_fun[0][0])
 
     def custom_on_deactivate(self):
         """Custom deactivation"""
@@ -146,7 +151,12 @@ class VLA(ModelComponent):
             )
 
         # If action definition was part of the dataset info, store it
-        self._action_definition = self.model_client._model._actions
+        action_definition = self.model_client._model._actions
+        if action_definition:
+            dataset_joint_names = action_definition.get("names", None)
+            if dataset_joint_names:
+                self._dataset_sorted_joint_names = [self.config.joint_names_map[j] for j in dataset_joint_names]
+            self._dataset_action_dtype = action_definition.get("dtype", None)
 
         # Read robot joint limits
         if self.config.robot_urdf_file:
@@ -175,7 +185,6 @@ class VLA(ModelComponent):
                 get_logger(component_name).warning(
                     "You have not provided a urdf file. If a urdf file is not available for your robot, consider adding joint limits to config as config.joint_limits to ensure safe movement execution."
                 )
-                self.robot_joints_limits = None
             else:
                 # Check if all limits were provided
                 ok, errors = check_joint_limits(
@@ -238,7 +247,7 @@ class VLA(ModelComponent):
                     existing_act = action_map[ts]
 
                     # Perform the aggregation on the array
-                    merged_array = self._aggregate_fn(
+                    merged_array = self._aggregator_function(
                         existing_act.action, new_act.action
                     )
 
@@ -264,13 +273,7 @@ class VLA(ModelComponent):
                 # Manually notify any consumers
                 self._actions_received.not_empty.notify()
 
-    def _get_action(self):
-        with self._action_queue_lock:
-            if self._actions_received.not_empty:
-                # Return the immediate next action
-                # TODO: Remove torch depenedency here once server can send numpy arrays
-                return self._actions_received.get().action.numpy()
-        return None
+    def _get_action(self) -> np.ndarray:
 
     def _create_input(self, task: str) -> Optional[Dict]:
         """Prepare observations from current inputs
@@ -316,8 +319,31 @@ class VLA(ModelComponent):
 
     def _send_action_commands(self):
         """Send action commands"""
-        # TODO: implement sending a command to the robot from the commands queue
-        pass
+        # Pop an action from queue action, return if queue is empty
+        with self._action_queue_lock:
+            if self._actions_received.not_empty:
+                # Return the immediate next action
+                # TODO: Remove torch depenedency here once server can send numpy arrays
+                action_to_pub = self._actions_received.get().action.numpy()
+            else:
+                return
+
+        # TODO: Create safe values based on joint limits
+
+        # Create publishing action
+        action_data = JointsData(
+            joints_names=self._dataset_sorted_joint_names or list(self.config.joint_names_map.values()),
+            )
+
+        # Set appropriate values based on output type
+        setattr(action_data, self.config.action_output_type, action_to_pub.astype(np.float64))
+
+        # Publish action
+        self._publish(result={'output': action_data})
+
+        # Update the last executed timestep
+        with self._last_executed_timestep_lock:
+            self._last_executed_timestep = action_to_pub.timestep
 
     def _destroy_action_timers(self):
         """Destroy action timers"""
@@ -365,21 +391,20 @@ class VLA(ModelComponent):
                 """_wrapper"""
                 out = func(x, y)
                 # Check if we have action dtype
-                dtype = self._action_definition.get("dtype", None)
                 # type check agg fn output, if incorrect, raise an error
                 if type(out) is not np.ndarray:
                     raise TypeError(
                         "Only numpy arrays are acceptable as outputs of aggregator functions."
                     )
-                elif out.dtype != dtype:
+                elif self._dataset_action_dtype and out.dtype != self._dataset_action_dtype:
                     raise TypeError(
-                        f"Only numpy arrays of dtype {dtype} are acceptable as outputs of aggregator functions."
+                        f"Only numpy arrays of dtype {self._dataset_action_dtype} are acceptable as outputs of aggregator functions."
                     )
 
             _wrapper.__name__ = func.__name__
             return _wrapper
 
-        self._external_processors["agg_fun"] = ([agg_closure(agg_fn)], "agg_processor")
+        self._external_processors["aggregator_function"] = ([agg_closure(agg_fn)], "aggregator_function")
 
     def main_action_callback(self, goal_handle: VisionLanguageAction.Goal):
         """

@@ -48,6 +48,7 @@ class JointsData:
         state_type: Literal["positions", "velocities", "accelerations", "efforts"],
         joint_names_map: Dict[str, str],
     ) -> Optional[Dict[str, np.float32]]:
+        """Return the state mapped according to the dataset keys provided in the config"""
         # Get particular state values of the type required
         state_values = getattr(self, state_type, None)
 
