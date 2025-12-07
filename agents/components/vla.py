@@ -273,8 +273,6 @@ class VLA(ModelComponent):
                 # Manually notify any consumers
                 self._actions_received.not_empty.notify()
 
-    def _get_action(self) -> np.ndarray:
-
     def _create_input(self, task: str) -> Optional[Dict]:
         """Prepare observations from current inputs
 
