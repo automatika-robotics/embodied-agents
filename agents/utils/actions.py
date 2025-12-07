@@ -1,4 +1,4 @@
-from typing import List, Dict, Literal, Optional
+from typing import List, Dict, Literal, Optional, Iterable, Tuple
 from attr import define, field
 import numpy as np
 
@@ -78,6 +78,59 @@ def find_missing_values(check_list, string_list: List) -> List:
     missing = [s for s in string_list if s not in value_set]
 
     return missing
+
+
+def check_joint_limits(
+    joints_limits: Dict[str, Optional[Dict[str, float]]], requirements: Iterable[str]
+) -> Tuple:
+    """
+    Validate that required joint limits are provided for all joints.
+
+    :param joints_limits: Output of parse_urdf_joints().
+    :type joints_limits: Dict[str, Optional[Dict[str, float]]]
+
+    :param requirements: Iterable of requirement categories:
+                         - "positions"  -> requires "lower" and "upper"
+                         - "efforts"    -> requires "effort"
+                         - "velocities" or "accelerations" -> requires "velocity"
+    :type requirements: Iterable[str]
+
+    :return: A tuple containing a boolean indicating if all requirements are satisfied,
+             and a list of human-readable error messages.
+    :rtype: Tuple[bool, List[str]]
+    """
+
+    # Map requirement categories -> URDF limit keys
+    req_map = {
+        "positions": ["lower", "upper"],
+        "efforts": ["effort"],
+        "velocities": ["velocity"],
+        "accelerations": ["velocity"],
+    }
+
+    # Build final required keys
+    required_keys = []
+    for req in requirements:
+        required_keys.extend(req_map.get(req, []))
+
+    errors = []
+
+    for joint, limits in joints_limits.items():
+        if limits is None:
+            # No limits available at all
+            missing = required_keys
+            if missing:
+                errors.append(
+                    f"Joint '{joint}' has no <limit> tag but requires: {missing}"
+                )
+            continue
+
+        # Check required keys for this joint
+        for key in required_keys:
+            if limits.get(key) is None:
+                errors.append(f"Joint '{joint}' missing required limit '{key}'.")
+
+    return (len(errors) == 0, errors)
 
 
 def parse_urdf_joints(path_or_url: str) -> Dict:

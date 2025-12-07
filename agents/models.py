@@ -486,8 +486,8 @@ class LeRobotPolicy(Model):
         default="https://huggingface.co/datasets/lerobot/svla_so100_pickplace/resolve/main/meta/info.json"
     )
     features: Dict = field(default={})
-    actions: Dict = field(default={})
     actions_per_chunk: int = field(default=50)
+    _actions: Dict = field(default={})
     _image_keys: List = field(init=False)
     _joint_keys: List = field(init=False)
 
@@ -496,7 +496,7 @@ class LeRobotPolicy(Model):
             self.dataset_info_file
         )
         self.features = lerobot_features["features"]
-        self.actions = lerobot_features["actions"]
+        self._actions = lerobot_features["actions"]
         self._image_keys = lerobot_features["image_keys"]
         self._joint_keys = self.features["observation.state"]["names"]
 

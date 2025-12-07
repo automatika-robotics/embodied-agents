@@ -33,6 +33,7 @@ from ros_sugar.core import BaseComponent
 from ros_sugar.core.component import MutuallyExclusiveCallbackGroup
 from ros_sugar import Launcher, UI_EXTENSIONS
 from ros_sugar.utils import component_action
+from ros_sugar.io.utils import run_external_processor
 
 # AGENTS TYPES
 from automatika_embodied_agents.msg import (
@@ -83,6 +84,7 @@ __all__ = [
     "Route",
     "MutuallyExclusiveCallbackGroup",
     "VisionLanguageAction",
+    "run_external_processor"
 ]
 
 

@@ -208,6 +208,8 @@ class VLAConfig(ModelComponentConfig):
 
     joint_names_map: Dict[str, str] = field()
     camera_inputs_map: Dict[str, Union[Topic, Dict]] = field()
+    # TODO: One can make models that take multiple state input types.
+    # This parameter would have to be revised in that case
     state_input_type: Literal["positions", "velocities", "accelerations", "efforts"] = (
         field(default="positions")
     )
@@ -218,6 +220,7 @@ class VLAConfig(ModelComponentConfig):
         default=30.0, validator=base_validators.in_range(min_value=1e-6, max_value=1e6)
     )  # seconds
     robot_urdf_file: Optional[str] = field(default=None)
+    joint_limits: Optional[Dict] = field(default=None)
 
 
 @define(kw_only=True)

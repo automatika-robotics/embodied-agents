@@ -1,4 +1,6 @@
 from typing import Optional, List, Dict, Callable
+import inspect
+from functools import partial, wraps
 import queue
 import threading
 import numpy as np
@@ -16,9 +18,15 @@ from ..ros import (
     ComponentRunType,
     MutuallyExclusiveCallbackGroup,
     VisionLanguageAction,
+    run_external_processor
 )
 from ..utils import validate_func_args
-from ..utils.actions import JointsData, find_missing_values, parse_urdf_joints
+from ..utils.actions import (
+    JointsData,
+    find_missing_values,
+    parse_urdf_joints,
+    check_joint_limits,
+)
 from ..clients.lerobot import LeRobotClient
 from .model_component import ModelComponent
 
@@ -53,9 +61,7 @@ class VLA(ModelComponent):
         self.action_type = VisionLanguageAction
 
         # queue aggregation function
-        self._aggregate_fn: Callable[[np.ndarray, np.ndarray], np.ndarray] = (
-            lambda _, y: y
-        )
+        self._aggregate_fn: Callable = lambda _, y: y
 
         super().__init__(
             inputs,
@@ -108,6 +114,11 @@ class VLA(ModelComponent):
                 "Could not find a topic of type JointState. VLA component needs at least one topic of type JointState as input."
             )
 
+        # Assign external aggregator function in case its provided
+        if agg_fun := self._external_processors.get("agg_fun", None):
+            # Get the first element of the tuple and the only function in that list
+            self._aggregate_fn = partial(run_external_processor, logger_name=self.node_name, topic_name='aggregator_function', processor=agg_fun[0][0])
+
     def custom_on_deactivate(self):
         """Custom deactivation"""
 
@@ -127,15 +138,18 @@ class VLA(ModelComponent):
 
         # Check dataset keys from model definition in keys from config
         joint_keys_missing = find_missing_values(
-            self.config.joint_names_map.keys(), self.model_client.model.joint_keys
+            self.config.joint_names_map.keys(), self.model_client._model._joint_keys
         )
         if joint_keys_missing:
             raise ValueError(
                 f"Your 'joint_names_map' in VLAConfig does not map all the dataset joint names to the robot joint names correctly. The following joint names from the dataset info are unmapped: {joint_keys_missing}"
             )
 
+        # If action definition was part of the dataset info, store it
+        self._action_definition = self.model_client._model._actions
+
+        # Read robot joint limits
         if self.config.robot_urdf_file:
-            # Read robot joint limits
             self.robot_joints_limits = parse_urdf_joints(self.config.robot_urdf_file)
 
             # Check for mapping joint names in urdf
@@ -146,12 +160,38 @@ class VLA(ModelComponent):
             get_logger(component_name).warning(
                 f"Your 'joint_names_map' in VLAConfig includes robot joint names that do not exist in the provided URDF file. This might cause errors later on. The following joint names were not found in the URDF file: {joint_keys_missing}"
             )
+
+            # Check if all limits were provided
+            ok, errors = check_joint_limits(
+                self.robot_joints_limits, requirements=[self.config.state_input_type]
+            )
+            if not ok:
+                get_logger(component_name).warning(
+                    f"""The following limits were not provided for joints in the URDF file. Consider adding them in config as config.joint_limits:
+                        {"\n".join(e for e in errors)}."""
+                )
         else:
-            self.robot_joints_limits = None
+            if not self.config.joint_limits:
+                get_logger(component_name).warning(
+                    "You have not provided a urdf file. If a urdf file is not available for your robot, consider adding joint limits to config as config.joint_limits to ensure safe movement execution."
+                )
+                self.robot_joints_limits = None
+            else:
+                # Check if all limits were provided
+                ok, errors = check_joint_limits(
+                    self.config.joint_limits,
+                    requirements=[self.config.state_input_type],
+                )
+                if not ok:
+                    get_logger(component_name).warning(
+                        f"""The following limits were not provided for joints. Consider adding them in config:
+                            {"\n".join(e for e in errors)}."""
+                    )
+                self.robot_joints_limits = self.config.joint_limits
 
         # TODO:: Handle partially available image keys with error logging
         image_keys_missing = find_missing_values(
-            self.config.camera_inputs_map.keys(), self.model_client.model.image_keys
+            self.config.camera_inputs_map.keys(), self.model_client._model._image_keys
         )
         if image_keys_missing:
             raise ValueError(
@@ -287,6 +327,59 @@ class VLA(ModelComponent):
         if self.__action_receiving_timer is not None:
             self.destroy_timer(self.__action_receiving_timer)
             self.__action_receiving_timer = None
+
+    def set_aggregation_function(
+        self, agg_fn: Callable[[np.ndarray, np.ndarray], np.ndarray]
+    ):
+        """
+        Set the aggregation function to be used for aggregating generated actions from the robot policy model
+
+        :param agg_fn: A callable that takes two numpy arrays as input and returns a single numpy array.
+        :type agg_fn: Callable[[np.ndarray, np.ndarray], np.ndarray]
+
+        :raises TypeError: If `agg_fn` is not a callable or does not match the expected signature.
+        """
+        if not callable(agg_fn):
+            raise TypeError(
+                "Aggregation function has to be a callable that takes as input two numpy arrays and returns a single numpy array"
+            )
+
+        # Check if the function has exactly two arguments
+        sig = inspect.signature(agg_fn)
+        params = list(sig.parameters.values())
+
+        if len(params) != 2 or any(
+            param.annotation not in (np.ndarray, inspect.Parameter.empty)
+            for param in params
+        ):
+            raise TypeError(
+                "Aggregation function must have exactly two parameters, both expected to be numpy arrays."
+            )
+
+        # Closure for using external functions
+        def agg_closure(func: Callable[[np.ndarray, np.ndarray], np.ndarray]):
+            """Wrapper for aggregator function"""
+
+            @wraps(func)
+            def _wrapper(*, x: np.ndarray, y: np.ndarray):
+                """_wrapper"""
+                out = func(x, y)
+                # Check if we have action dtype
+                dtype = self._action_definition.get("dtype", None)
+                # type check agg fn output, if incorrect, raise an error
+                if type(out) is not np.ndarray:
+                    raise TypeError(
+                        "Only numpy arrays are acceptable as outputs of aggregator functions."
+                    )
+                elif out.dtype != dtype:
+                    raise TypeError(
+                        f"Only numpy arrays of dtype {dtype} are acceptable as outputs of aggregator functions."
+                    )
+
+            _wrapper.__name__ = func.__name__
+            return _wrapper
+
+        self._external_processors["agg_fun"] = ([agg_closure(agg_fn)], "agg_processor")
 
     def main_action_callback(self, goal_handle: VisionLanguageAction.Goal):
         """
