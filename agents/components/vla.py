@@ -18,7 +18,7 @@ from ..ros import (
     ComponentRunType,
     MutuallyExclusiveCallbackGroup,
     VisionLanguageAction,
-    run_external_processor
+    run_external_processor,
 )
 from ..utils import validate_func_args
 from ..utils.actions import (
@@ -26,6 +26,7 @@ from ..utils.actions import (
     find_missing_values,
     parse_urdf_joints,
     check_joint_limits,
+    cap_actions_with_limits,
 )
 from ..clients.lerobot import LeRobotClient
 from .model_component import ModelComponent
@@ -122,7 +123,12 @@ class VLA(ModelComponent):
         # Assign external aggregator function in case its provided
         if agg_fun := self._external_processors.get("aggregator_function", None):
             # Get the first element of the tuple and the only function in that list
-            self._aggregator_function = partial(run_external_processor, logger_name=self.node_name, topic_name='aggregator_function', processor=agg_fun[0][0])
+            self._aggregator_function = partial(
+                run_external_processor,
+                logger_name=self.node_name,
+                topic_name="aggregator_function",
+                processor=agg_fun[0][0],
+            )
 
     def custom_on_deactivate(self):
         """Custom deactivation"""
@@ -155,7 +161,9 @@ class VLA(ModelComponent):
         if action_definition:
             dataset_joint_names = action_definition.get("names", None)
             if dataset_joint_names:
-                self._dataset_sorted_joint_names = [self.config.joint_names_map[j] for j in dataset_joint_names]
+                self._dataset_sorted_joint_names = [
+                    self.config.joint_names_map[j] for j in dataset_joint_names
+                ]
             self._dataset_action_dtype = action_definition.get("dtype", None)
 
         # Read robot joint limits
@@ -326,18 +334,36 @@ class VLA(ModelComponent):
             else:
                 return
 
-        # TODO: Create safe values based on joint limits
-
         # Create publishing action
         action_data = JointsData(
-            joints_names=self._dataset_sorted_joint_names or list(self.config.joint_names_map.values()),
+            joints_names=self._dataset_sorted_joint_names
+            or list(self.config.joint_names_map.values()),
+        )
+
+        # Cap actions within limits
+        safe_action = (
+            cap_actions_with_limits(
+                action_data.joints_names,
+                action_to_pub,
+                self.robot_joints_limits,
+                self.config.action_output_type,
+                self.node_name,
             )
+            if self.robot_joints_limits
+            else action_to_pub
+        )
+
+        # TODO: Add smoothing for bigger deltas between new action and currect state
 
         # Set appropriate values based on output type
-        setattr(action_data, self.config.action_output_type, action_to_pub.astype(np.float64))
+        setattr(
+            action_data,
+            self.config.action_output_type,
+            safe_action.astype(np.float64),
+        )
 
         # Publish action
-        self._publish(result={'output': action_data})
+        self._publish(result={"output": action_data})
 
         # Update the last executed timestep
         with self._last_executed_timestep_lock:
@@ -394,7 +420,10 @@ class VLA(ModelComponent):
                     raise TypeError(
                         "Only numpy arrays are acceptable as outputs of aggregator functions."
                     )
-                elif self._dataset_action_dtype and out.dtype != self._dataset_action_dtype:
+                elif (
+                    self._dataset_action_dtype
+                    and out.dtype != self._dataset_action_dtype
+                ):
                     raise TypeError(
                         f"Only numpy arrays of dtype {self._dataset_action_dtype} are acceptable as outputs of aggregator functions."
                     )
@@ -402,7 +431,10 @@ class VLA(ModelComponent):
             _wrapper.__name__ = func.__name__
             return _wrapper
 
-        self._external_processors["aggregator_function"] = ([agg_closure(agg_fn)], "aggregator_function")
+        self._external_processors["aggregator_function"] = (
+            [agg_closure(agg_fn)],
+            "aggregator_function",
+        )
 
     def main_action_callback(self, goal_handle: VisionLanguageAction.Goal):
         """
