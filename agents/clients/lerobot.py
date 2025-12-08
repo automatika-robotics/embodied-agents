@@ -3,7 +3,7 @@ from typing import Dict, Union
 import time
 import pickle
 import threading
-from model_base import ModelClient
+from .model_base import ModelClient
 from ..models import LeRobotPolicy
 
 from lerobot_transport.utils import (
