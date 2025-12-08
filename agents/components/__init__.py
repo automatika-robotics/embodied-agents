@@ -13,6 +13,9 @@ A Component is the main execution unit in _EmbodiedAgents_ and in essence each c
 * - **[VLM](agents.components.mllm.md)**
   - Leverages multimodal LLMs (e.g., Llava) for understanding and processing both text and image data. Inherits all functionalities of the LLM component.
 
+* - **[VLA](agents.components.vla.md)**
+  - Provides an interface to utilize Vision Language Action (VLA) models for manipulation and control tasks. It can use VLA Policies (such as SmolVLA, Pi0 etc.) served with HuggingFace LeRobot Async Policy Server and publish them to common topic formats in MoveIt Servo and ROS2 Control.
+
 * - **[SpeechToText](agents.components.speechtotext.md)**
   - Converts spoken audio into text using speech-to-text models (e.g., Whisper). Suitable for voice command recognition. It also implements small on-board models for Voice Activity Detection (VAD) and Wakeword recognition, using audio capture devices onboard the robot.
 
@@ -43,6 +46,7 @@ from .semantic_router import SemanticRouter
 from .speechtotext import SpeechToText
 from .texttospeech import TextToSpeech
 from .vision import Vision
+from .vla import VLA
 
 __all__ = [
     "Component",
@@ -51,6 +55,7 @@ __all__ = [
     "MLLM",
     "VLM",
     "LLM",
+    "VLA",
     "SpeechToText",
     "TextToSpeech",
     "Vision",

@@ -1,4 +1,4 @@
-from typing import Optional, Union, Dict, List, Literal
+from typing import Optional, Union, Dict, List, Literal, Mapping
 from pathlib import Path
 
 from attrs import define, field, Factory
@@ -207,7 +207,7 @@ class VLAConfig(ModelComponentConfig):
     """
 
     joint_names_map: Dict[str, str] = field()
-    camera_inputs_map: Dict[str, Union[Topic, Dict]] = field()
+    camera_inputs_map: Mapping[str, Union[Topic, Dict]] = field()
     termination_mode: Literal["timesteps", "keyboard", "event"] = field(
         default="timesteps"
     )
@@ -225,7 +225,7 @@ class VLAConfig(ModelComponentConfig):
         "positions", "velocities", "accelerations", "efforts"
     ] = field(default="positions")
     action_sending_rate: float = field(
-        default=1.0, validator=base_validators.in_range(min_value=1e-6, max_value=1e6)
+        default=10.0, validator=base_validators.in_range(min_value=1e-6, max_value=1e6)
     )
     input_timeout: float = field(
         default=30.0, validator=base_validators.in_range(min_value=1e-6, max_value=1e6)

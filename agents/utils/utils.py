@@ -492,7 +492,7 @@ def build_lerobot_features_from_dataset_info(
             features[key] = _normalize_entry(spec)
         elif key.startswith("observation.images."):
             features[key] = _normalize_entry(spec)
-            image_keys.append(key)
+            image_keys.append(key.removeprefix("observation.images."))
 
     action_spec = raw_features.get("action", {})
     actions = _normalize_entry(action_spec)

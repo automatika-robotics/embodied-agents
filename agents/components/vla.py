@@ -207,9 +207,10 @@ class VLA(ModelComponent):
                 self.robot_joints_limits.keys(),
                 list(self.config.joint_names_map.values()),
             )
-            get_logger(component_name).warning(
-                f"Your 'joint_names_map' in VLAConfig includes robot joint names that do not exist in the provided URDF file. This might cause errors later on. The following joint names were not found in the URDF file: {joint_keys_missing}"
-            )
+            if joint_keys_missing:
+                get_logger(component_name).warning(
+                    f"Your 'joint_names_map' in VLAConfig includes robot joint names that do not exist in the provided URDF file. This might cause errors later on. The following joint names were not found in the URDF file: {joint_keys_missing}"
+                )
 
             # Check if all limits were provided
             ok, errors = check_joint_limits(
@@ -241,12 +242,19 @@ class VLA(ModelComponent):
                 self.robot_joints_limits = self.config.joint_limits
 
         # TODO:: Handle partially available image keys with error logging
+        # Remove LeRobot specific prefix in case it has been added by the user
+        new_camera_map = {}
+        for k, v in self.config.camera_inputs_map.items():
+            new_key = k.removeprefix("observation.images.")
+            new_camera_map[new_key] = v
+        self.config.camera_inputs_map = new_camera_map
+
         image_keys_missing = find_missing_values(
             self.config.camera_inputs_map.keys(), self.model_client._model._image_keys
         )
         if image_keys_missing:
             raise ValueError(
-                f"Your 'image_keys_missing' in VLAConfig does not map all the dataset camera names to the robot camera topics correctly. The following camera names from the dataset info are unmapped: {image_keys_missing}"
+                f"Your 'camera_inputs_map' in VLAConfig does not map all the dataset camera names to the robot camera topics correctly. The following camera names from the dataset info are unmapped: {image_keys_missing}"
             )
 
     def _receive_actions_from_client(self):

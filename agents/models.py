@@ -485,8 +485,8 @@ class LeRobotPolicy(Model):
     dataset_info_file: str = field(
         default="https://huggingface.co/datasets/lerobot/svla_so100_pickplace/resolve/main/meta/info.json"
     )
-    features: Dict = field(default={})
     actions_per_chunk: int = field(default=50)
+    _features: Dict = field(default={})
     _actions: Dict = field(default={})
     _image_keys: List = field(init=False)
     _joint_keys: List = field(init=False)
@@ -495,15 +495,15 @@ class LeRobotPolicy(Model):
         lerobot_features = build_lerobot_features_from_dataset_info(
             self.dataset_info_file
         )
-        self.features = lerobot_features["features"]
+        self._features = lerobot_features["features"]
         self._actions = lerobot_features["actions"]
         self._image_keys = lerobot_features["image_keys"]
-        self._joint_keys = self.features["observation.state"]["names"]
+        self._joint_keys = self._features["observation.state"]["names"]
 
     def _get_init_params(self):
         return {
             "checkpoint": self.checkpoint,
             "policy_type": self.policy_type,
-            "features": self.features,
+            "features": self._features,
             "actions_per_chunk": self.actions_per_chunk,
         }

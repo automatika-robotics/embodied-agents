@@ -30,7 +30,7 @@ class LeRobotClient(ModelClient):
         **kwargs,
     ):
         try:
-            from lerobot_transport import services_pb2, services_pb2_grpc
+            from .lerobot_transport import services_pb2, services_pb2_grpc
 
             self.services_pb2 = services_pb2
             self.services_pb2_grpc = services_pb2_grpc
