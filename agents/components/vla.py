@@ -6,9 +6,15 @@ import threading
 import numpy as np
 from rclpy.logging import get_logger
 
+try:
+    from pynput import keyboard
+except ImportError:
+    keyboard = None
+
 from ..config import VLAConfig
 import time
 from ..ros import (
+    Action,
     RGBD,
     Image,
     Topic,
@@ -68,6 +74,12 @@ class VLA(ModelComponent):
         # queue aggregation function
         self._aggregator_function: Callable = lambda _, y: y
 
+        # Add event/action if required in config
+        if self.config.termination_mode == "event" and self.config.termination_event:
+            serialized_event = self.config.termination_event.json
+            termination_action = Action(self.signal_done)
+            self.events_actions = {serialized_event: termination_action}
+
         super().__init__(
             inputs,
             outputs,
@@ -104,6 +116,9 @@ class VLA(ModelComponent):
         self._last_executed_timestep_lock = threading.Lock()
         self._last_executed_timestep = -1
 
+        # track task status
+        self._task_completed = False
+
         # Action timers
         self.__action_sending_timer = None
         self.__action_receiving_timer = None
@@ -132,7 +147,7 @@ class VLA(ModelComponent):
     def custom_on_deactivate(self):
         """Custom deactivation"""
 
-        # mark any pendings actions as finished
+        # Mark any pendings actions as finished
         while not self._actions_received.empty():
             try:
                 self._actions_received.get_nowait()
@@ -142,6 +157,24 @@ class VLA(ModelComponent):
 
         # Deactivate component
         super().custom_on_deactivate()
+
+    def signal_done(self):
+        """Signals that the action is complete.
+        Can be used as an action for signaled events"""
+        self._task_completed = True
+        self.get_logger().info("Action completion signaled")
+
+    def _on_key_press(self, key):
+        """Callback for keyboard listener."""
+        try:
+            # Check for char keys
+            if hasattr(key, "char") and key.char == self.config.termination_key:
+                self.signal_done()
+            # Check for special keys (e.g. Esc) if configured as such
+            elif hasattr(key, "name") and key.name == self.config.termination_key:
+                self.signal_done()
+        except AttributeError:
+            pass
 
     def _verify_config(self, component_name: str):
         """Run checks on provided config and model definition"""
@@ -370,14 +403,22 @@ class VLA(ModelComponent):
         with self._last_executed_timestep_lock:
             self._last_executed_timestep = action_to_pub.timestep
 
-    def _destroy_action_timers(self):
-        """Destroy action timers"""
+    def _action_cleanup(self):
+        """Destroy action timers and other listeners"""
         if self.__action_sending_timer is not None:
             self.destroy_timer(self.__action_sending_timer)
             self.__action_sending_timer = None
         if self.__action_receiving_timer is not None:
             self.destroy_timer(self.__action_receiving_timer)
             self.__action_receiving_timer = None
+
+        # Cleanup keyboard listener
+        if (
+            self.config.termination_mode == "keyboard"
+            and self._keyboard_listener is not None
+        ):
+            self._keyboard_listener.stop()
+            self._keyboard_listener = None
 
     def set_aggregation_function(
         self, agg_fn: Callable[[np.ndarray, np.ndarray], np.ndarray]
@@ -451,14 +492,22 @@ class VLA(ModelComponent):
         self._actions_received.queue.clear()
 
         # Get request
-        task: str = goal_handle.request.task
+        task: str = goal_handle.task
 
-        # Setup response and feedback of the action
-        action_feedback_msg = VisionLanguageAction.Feedback()
+        # Setup feedback of the action
+        task_feedback_msg = VisionLanguageAction.Feedback()
 
-        action_result = VisionLanguageAction.Result()
+        # Setup response of the action
+        task_result = VisionLanguageAction.Result()
+        task_result.success = False
 
-        action_result.success = False
+        # Add keyboard listener if required by termination config
+        if self.config.termination_mode == "keyboard":
+            self._keyboard_listener = keyboard.Listener(on_press=self._on_key_press)
+            self._keyboard_listener.start()
+            self.get_logger().info(
+                f"Listening for stop key: '{self.config.termination_key}'"
+            )
 
         # Create a timer to send actions at a fixed rate
         self.__action_sending_timer = self.create_timer(
@@ -485,61 +534,76 @@ class VLA(ModelComponent):
             time.sleep(1 / self.config.loop_rate)
 
         try:
-            while not self._action_done(action_feedback_msg):
+            while not self._action_done():
                 # Check if goal is canceled
                 if not goal_handle.is_active or goal_handle.is_cancel_requested:
-                    self._destroy_action_timers()
+                    self._action_cleanup()
                     self.get_logger().info("Goal Canceled")
-                    return action_result
+                    return task_result
 
                 # Get new observations from inputs
                 model_observations = self._create_input(task)
 
+                # Get last executed timestep
+                with self._last_executed_timestep_lock:
+                    last_timestep = self._last_executed_timestep
                 if model_observations:
-                    # Get last executed action
-                    with self._last_executed_timestep_lock:
-                        model_observations["timestep"] = self._last_executed_timestep
+                    # Add last executed action timestep
+                    model_observations["timestep"] = last_timestep
                     # send input for inference
                     self.model_client.inference(model_observations)
                 else:
-                    self.get_logger().warn(
+                    self.get_logger().warning(
                         "Could not prepare inference input, skipping this step..."
                     )
                     continue
 
                 # Compute errors and publish feedback
-                goal_handle.publish_feedback(action_feedback_msg)
-                self.get_logger().debug(f"Action Feedback: {action_feedback_msg}")
+                task_feedback_msg.timestep = last_timestep
+                task_feedback_msg.completed = self._task_completed
+                goal_handle.publish_feedback(task_feedback_msg)
+                self.get_logger().debug(f"Action Feedback: {task_feedback_msg}")
                 # NOTE: using Python time directly, as ros rate sleep (from self.create_rate) was not functioning as expected
                 time.sleep(1 / self.config.loop_rate)
 
         except Exception as e:
             self.get_logger().error(f"Action execution error - {e}")
             with self._main_goal_lock:
-                self._destroy_action_timers()
+                self._action_cleanup()
                 goal_handle.abort()
                 goal_handle.reset()
+                return task_result
 
-        # Get the final goal state
-        # action_result = ...
+        # Task was successful
+        task_result.success = True
 
-        action_result.success = True
-        # Publish zero commands to stop the robot
-
+        # Action cleanup
         with self._main_goal_lock:
-            self._destroy_action_timers()
+            self._action_cleanup()
             goal_handle.succeed()
 
-        return action_result
+        return task_result
 
-    def _action_done(self, action_feedback: VisionLanguageAction.Feedback) -> bool:
-        """Check if action is done
+    def _action_done(self) -> bool:
+        """Check if action is done based on configuration"""
 
-        :param goal: Current action goal
-        :return: True if action is done, False otherwise
-        """
-        # TODO: implement action done check
-        # True if feedback errors are less than tolerance (for example)
+        # External Event or Keyboard signal (sets _task_completed to True)
+        if self._task_completed:
+            return True
+
+        # Timestep limit logic
+        if self.config.termination_mode == "timesteps":
+            with self._last_executed_timestep_lock:
+                current_ts = self._last_executed_timestep
+
+            # Check if we exceeded the max steps
+            if current_ts >= self.config.termination_timesteps:
+                self.get_logger().info(
+                    f"Reached max timesteps ({self.config.termination_timesteps}). Action Done."
+                )
+                self._task_completed = True
+                return True
+
         return False
 
     def _warmup(self):

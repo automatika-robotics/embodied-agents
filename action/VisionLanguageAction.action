@@ -3,9 +3,7 @@ string task
 ---
 # Result
 bool success
-float64[] positions
-float64[] velocities
 ---
 # Feedback
-float64[] positions_errors
-float64[] velocities_errors
+int32 timestep
+bool completed
