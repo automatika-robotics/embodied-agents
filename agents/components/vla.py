@@ -364,7 +364,8 @@ class VLA(ModelComponent):
             if self._actions_received.not_empty:
                 # Return the immediate next action
                 # TODO: Remove torch depenedency here once server can send numpy arrays
-                action_to_pub = self._actions_received.get().action.numpy()
+                action_to_pub = self._actions_received.get().action
+                action_to_pub_data = action_to_pub.numpy()
             else:
                 return
 
@@ -378,13 +379,13 @@ class VLA(ModelComponent):
         safe_action = (
             cap_actions_with_limits(
                 action_data.joints_names,
-                action_to_pub,
+                action_to_pub_data,
                 self.robot_joints_limits,
                 self.config.action_output_type,
                 self.node_name,
             )
             if self.robot_joints_limits
-            else action_to_pub
+            else action_to_pub_data
         )
 
         # TODO: Add smoothing for bigger deltas between new action and currect state
@@ -535,6 +536,7 @@ class VLA(ModelComponent):
 
         try:
             while not self._action_done():
+                start_time = time.perf_counter()
                 # Check if goal is canceled
                 if not goal_handle.is_active or goal_handle.is_cancel_requested:
                     self._action_cleanup()
@@ -547,6 +549,7 @@ class VLA(ModelComponent):
                 # Get last executed timestep
                 with self._last_executed_timestep_lock:
                     last_timestep = self._last_executed_timestep
+                # TODO: Add condition for sending based on queue consumption
                 if model_observations:
                     # Add last executed action timestep
                     model_observations["timestep"] = last_timestep
@@ -563,8 +566,16 @@ class VLA(ModelComponent):
                 task_feedback_msg.completed = self._task_completed
                 goal_handle.publish_feedback(task_feedback_msg)
                 self.get_logger().debug(f"Action Feedback: {task_feedback_msg}")
+
+                # Add sleep time to dynamically adjust loop_rate of action server
                 # NOTE: using Python time directly, as ros rate sleep (from self.create_rate) was not functioning as expected
-                time.sleep(1 / self.config.loop_rate)
+                time.sleep(
+                    max(
+                        0,
+                        (1 / self.config.loop_rate)
+                        - (time.perf_counter() - start_time),
+                    )
+                )
 
         except Exception as e:
             self.get_logger().error(f"Action execution error - {e}")
