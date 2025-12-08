@@ -342,6 +342,18 @@ def flatten(xs):
             yield x
 
 
+def find_missing_values(check_list, string_list: List) -> List:
+    """
+    Return strings from `string_list` that do NOT appear in the dictionary's values.
+    """
+    # Convert values to a set for efficient lookup
+    value_set = set(check_list)
+    # Collect strings that are not found among the values
+    missing = [s for s in string_list if s not in value_set]
+
+    return missing
+
+
 def _read_spec_file_from_url(url: str, spec_type: Literal["json", "xml"] = "json"):
     """Read from URL"""
     try:
@@ -419,8 +431,6 @@ def _normalize_names(names: Optional[Union[List, Dict]]) -> Optional[List]:
 
         recurse("", names)
         return result
-
-    return None
 
 
 def _normalize_entry(spec: Dict) -> Dict:

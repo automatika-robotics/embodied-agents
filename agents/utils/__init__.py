@@ -12,12 +12,14 @@ from .utils import (
     load_model,
     flatten,
     build_lerobot_features_from_dataset_info,
+    find_missing_values,
     _LANGUAGE_CODES,
 )
 
 __all__ = [
     "_LANGUAGE_CODES",
     "build_lerobot_features_from_dataset_info",
+    "find_missing_values",
     "flatten",
     "create_detection_context",
     "draw_detection_bounding_boxes",

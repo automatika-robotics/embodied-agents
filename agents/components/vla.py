@@ -20,10 +20,9 @@ from ..ros import (
     VisionLanguageAction,
     run_external_processor,
 )
-from ..utils import validate_func_args
+from ..utils import validate_func_args, find_missing_values
 from ..utils.actions import (
     JointsData,
-    find_missing_values,
     parse_urdf_joints,
     check_joint_limits,
     cap_actions_with_limits,
@@ -184,9 +183,10 @@ class VLA(ModelComponent):
                 self.robot_joints_limits, requirements=[self.config.state_input_type]
             )
             if not ok:
+                errors = "\n".join(e for e in errors)
                 get_logger(component_name).warning(
                     f"""The following limits were not provided for joints in the URDF file. Consider adding them in config as config.joint_limits:
-                        {"\n".join(e for e in errors)}."""
+                        {errors}."""
                 )
         else:
             if not self.config.joint_limits:
@@ -200,9 +200,10 @@ class VLA(ModelComponent):
                     requirements=[self.config.state_input_type],
                 )
                 if not ok:
+                    errors = "\n".join(e for e in errors)
                     get_logger(component_name).warning(
                         f"""The following limits were not provided for joints. Consider adding them in config:
-                            {"\n".join(e for e in errors)}."""
+                            {errors}."""
                     )
                 self.robot_joints_limits = self.config.joint_limits
 
