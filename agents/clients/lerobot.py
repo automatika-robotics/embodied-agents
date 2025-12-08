@@ -6,7 +6,7 @@ import threading
 from .model_base import ModelClient
 from ..models import LeRobotPolicy
 
-from lerobot_transport.utils import (
+from .lerobot_transport.utils import (
     RemotePolicyConfig,
     TimedObservation,
 )
