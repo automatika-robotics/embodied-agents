@@ -33,7 +33,7 @@ class Model(BaseAttrs):
 
     def _get_init_params(self) -> Dict:
         raise NotImplementedError(
-            "This method needs to be implemented by model definition classes"
+            "_get_init_params method needs to be implemented by model definition classes"
         )
 
 

@@ -129,7 +129,7 @@ class DBClient(ABC):
         :rtype: None
         """
         raise NotImplementedError(
-            "This method needs to be implemented in a child class"
+            "_check_connection method needs to be implemented in a child class"
         )
 
     @abstractmethod
@@ -138,7 +138,7 @@ class DBClient(ABC):
         :rtype: None
         """
         raise NotImplementedError(
-            "This method needs to be implemented in a child class"
+            "_initialize method needs to be implemented in a child class"
         )
 
     @abstractmethod
@@ -149,7 +149,7 @@ class DBClient(ABC):
         :rtype: dict | None
         """
         raise NotImplementedError(
-            "This method needs to be implemented in a child class"
+            "_add method needs to be implemented in a child class"
         )
 
     @abstractmethod
@@ -160,7 +160,7 @@ class DBClient(ABC):
         :rtype: dict | None
         """
         raise NotImplementedError(
-            "This method needs to be implemented in a child class"
+            "_conditional_add method needs to be implemented in a child class"
         )
 
     @abstractmethod
@@ -171,7 +171,7 @@ class DBClient(ABC):
         :rtype: dict | None
         """
         raise NotImplementedError(
-            "This method needs to be implemented in a child class"
+            "_metadata_query method needs to be implemented in a child class"
         )
 
     @abstractmethod
@@ -182,12 +182,12 @@ class DBClient(ABC):
         :rtype: dict | None
         """
         raise NotImplementedError(
-            "This method needs to be implemented in a child class"
+            "_query method needs to be implemented in a child class"
         )
 
     @abstractmethod
     def _deinitialize(self) -> None:
         """deinitialize."""
         raise NotImplementedError(
-            "This method needs to be implemented in a child class"
+            "_deinitialize method needs to be implemented in a child class"
         )

@@ -1,6 +1,7 @@
 import json
 from abc import abstractmethod
 from copy import deepcopy
+from types import NoneType
 from typing import Optional, Sequence, Union, List, Dict, Type
 
 from ..ros import (
@@ -23,7 +24,7 @@ class Component(BaseComponent):
         inputs: Optional[Sequence[Union[Topic, FixedInput]]] = None,
         outputs: Optional[Sequence[Topic]] = None,
         config: Optional[BaseComponentConfig] = None,
-        trigger: Union[Topic, List[Topic], float, None] = 1.0,
+        trigger: Union[Topic, List[Topic], float, NoneType] = 1.0,
         component_name: str = "agents_component",
         **kwargs,
     ):
@@ -227,7 +228,7 @@ class Component(BaseComponent):
         :param kwargs:
         """
         raise NotImplementedError(
-            "This method needs to be implemented by child components."
+            "_execution_step method needs to be implemented by child components."
         )
 
     def _update_cmd_args_list(self):

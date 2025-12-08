@@ -237,7 +237,7 @@ def validate_func_args(func):
         fn_params = inspect.signature(func).parameters
 
         # for parameters with annotation, preference is given to checking by annotation
-        for arg, param in zip(args, list(fn_params)[:args_count]):
+        for arg, param in zip(args, list(fn_params)[:args_count], strict=True):
             if fn_params[param].annotation is not fn_params[param].empty:
                 _check_type_from_signature(arg, fn_params[param])
             elif fn_params[param].default is not fn_params[param].empty:

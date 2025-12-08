@@ -65,11 +65,9 @@ class VLA(ModelComponent):
         self._dataset_sorted_joint_names = None
         # Joint Limits
         self.robot_joints_limits = None
-        self._verify_config(component_name)
-
-        # Set the component to run as an action server and set the main action type
-        self.run_type = ComponentRunType.ACTION_SERVER
-        self.action_type = VisionLanguageAction
+        # Make verifications on init, not after serialization
+        if hasattr(self.model_client, "_model"):
+            self._verify_config(component_name)
 
         # queue aggregation function
         self._aggregator_function: Callable = lambda _, y: y
@@ -80,13 +78,25 @@ class VLA(ModelComponent):
             termination_action = Action(self.signal_done)
             self.events_actions = {serialized_event: termination_action}
 
+        # Set the component to run as an action server and set the main action type
+        self.run_type = ComponentRunType.ACTION_SERVER
+
+        # TODO: Trigger will be passed by serialized component in the kwargs
+        # We will remove it here. This can be improved by passing kwargs differently
+        if "trigger" in list(kwargs.keys()):
+            kwargs.pop("trigger")
+
+        import logging
+
+        logging.info(f"GOT KWARGS {kwargs}")
         super().__init__(
-            inputs,
-            outputs,
-            model_client,
-            self.config,
-            None,
-            component_name,
+            inputs=inputs,
+            outputs=outputs,
+            model_client=model_client,
+            trigger=None,
+            config=self.config,
+            component_name=component_name,
+            main_action_type=VisionLanguageAction,
             **kwargs,
         )
 
@@ -501,7 +511,7 @@ class VLA(ModelComponent):
         self._actions_received.queue.clear()
 
         # Get request
-        task: str = goal_handle.task
+        task: str = goal_handle.request.task
 
         # Setup feedback of the action
         task_feedback_msg = VisionLanguageAction.Feedback()
@@ -541,6 +551,15 @@ class VLA(ModelComponent):
             )
             _timeout += 1 / self.config.loop_rate
             time.sleep(1 / self.config.loop_rate)
+
+        if _timeout >= self.config.input_timeout:
+            self.get_logger().error(
+                "Inputs were not received within the specified timeout period, aborting action."
+            )
+            self._action_cleanup()
+            with self._main_goal_lock:
+                goal_handle.abort()
+                return task_result
 
         try:
             while not self._action_done():
@@ -590,7 +609,6 @@ class VLA(ModelComponent):
             with self._main_goal_lock:
                 self._action_cleanup()
                 goal_handle.abort()
-                goal_handle.reset()
                 return task_result
 
         # Task was successful

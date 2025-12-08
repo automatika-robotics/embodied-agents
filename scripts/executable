@@ -2,6 +2,7 @@
 import json
 import argparse
 import importlib
+from types import NoneType
 from typing import List, Dict, Union, Tuple, Optional
 
 import rclpy
@@ -128,7 +129,7 @@ def _parse_additional_types(value: str):
     return _additional_types
 
 
-def _parse_trigger(trigger_str: str) -> Union[Topic, List[Topic], float]:
+def _parse_trigger(trigger_str: str) -> Union[Topic, List[Topic], float, NoneType]:
     """Parse component trigger json string
 
     :param trigger_str: Trigger JSON string
@@ -144,7 +145,7 @@ def _parse_trigger(trigger_str: str) -> Union[Topic, List[Topic], float]:
     elif isinstance(trigger_json, Dict):
         return Topic(**trigger_json)
     else:
-        # return float
+        # return float or None
         return trigger_json
 
 

@@ -31,7 +31,7 @@ class ModelComponentConfig(BaseComponentConfig):
 
     def _get_inference_params(self) -> Dict:
         raise NotImplementedError(
-            "This method needs to be implemented by model config classes"
+            "_get_inference_params method needs to be implemented by model config classes"
         )
 
 
@@ -237,7 +237,9 @@ class VLAConfig(ModelComponentConfig):
     def _task_termination_validator(self, _, value):
         if value == "keyboard":
             try:
-                from pynput import keyboard
+                import importlib
+
+                importlib.import_module("keyboard", "pynput")
             except ModuleNotFoundError as e:
                 raise ModuleNotFoundError(
                     "pynput is required for keyboard termination. Install with `pip install pynput`."
@@ -247,6 +249,9 @@ class VLAConfig(ModelComponentConfig):
             raise ValueError(
                 "A termination_event must be set when setting the termination_mode to `event`"
             )
+
+    def _get_inference_params(self) -> Dict:
+        return {}
 
 
 @define(kw_only=True)

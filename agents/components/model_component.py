@@ -3,6 +3,7 @@ import inspect
 import json
 import queue
 import threading
+from types import NoneType
 from typing import Any, Optional, Sequence, Union, List, Dict, Type
 import msgpack
 
@@ -23,7 +24,7 @@ class ModelComponent(Component):
         outputs: Optional[Sequence[Topic]] = None,
         model_client: Optional[ModelClient] = None,
         config: Optional[ModelComponentConfig] = None,
-        trigger: Union[Topic, List[Topic], float, None] = 1.0,
+        trigger: Union[Topic, List[Topic], float, NoneType] = 1.0,
         component_name: str = "model_component",
         **kwargs,
     ):

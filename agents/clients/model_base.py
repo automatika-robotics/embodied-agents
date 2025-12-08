@@ -110,7 +110,7 @@ class ModelClient(ABC):
         :rtype: None
         """
         raise NotImplementedError(
-            "This method needs to be implemented in a child class"
+            "_check_connection method needs to be implemented in a child class"
         )
 
     @abstractmethod
@@ -119,7 +119,7 @@ class ModelClient(ABC):
         :rtype: None
         """
         raise NotImplementedError(
-            "This method needs to be implemented in a child class"
+            "_initialize method needs to be implemented in a child class"
         )
 
     @abstractmethod
@@ -132,12 +132,12 @@ class ModelClient(ABC):
         :rtype: dict | None
         """
         raise NotImplementedError(
-            "This method needs to be implemented in a child class"
+            "_inference method needs to be implemented in a child class"
         )
 
     @abstractmethod
     def _deinitialize(self):
         """deinitialize."""
         raise NotImplementedError(
-            "This method needs to be implemented in a child class"
+            "_deinitialize method needs to be implemented in a child class"
         )
