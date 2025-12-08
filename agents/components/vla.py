@@ -1,4 +1,4 @@
-from typing import Optional, List, Dict, Callable
+from typing import Optional, List, Dict, Callable, Literal
 import inspect
 from functools import partial, wraps
 import queue
@@ -33,6 +33,7 @@ from ..utils.actions import (
     check_joint_limits,
     cap_actions_with_limits,
 )
+from ..events import Event
 from ..clients.lerobot import LeRobotClient
 from .model_component import ModelComponent
 
@@ -65,7 +66,7 @@ class VLA(ModelComponent):
         self._dataset_sorted_joint_names = None
         # Joint Limits
         self.robot_joints_limits = None
-        # Make verifications on init, not after serialization
+        # Make verifications on init, skip after serialization
         if hasattr(self.model_client, "_model"):
             self._verify_config(component_name)
 
@@ -73,10 +74,6 @@ class VLA(ModelComponent):
         self._aggregator_function: Callable = lambda _, y: y
 
         # Add event/action if required in config
-        if self.config.termination_mode == "event" and self.config.termination_event:
-            serialized_event = self.config.termination_event.json
-            termination_action = Action(self.signal_done)
-            self.events_actions = {serialized_event: termination_action}
 
         # Set the component to run as an action server and set the main action type
         self.run_type = ComponentRunType.ACTION_SERVER
@@ -86,9 +83,6 @@ class VLA(ModelComponent):
         if "trigger" in list(kwargs.keys()):
             kwargs.pop("trigger")
 
-        import logging
-
-        logging.info(f"GOT KWARGS {kwargs}")
         super().__init__(
             inputs=inputs,
             outputs=outputs,
@@ -168,6 +162,53 @@ class VLA(ModelComponent):
         # Deactivate component
         super().custom_on_deactivate()
 
+    def set_termination_trigger(
+        self,
+        mode: Literal["timesteps", "keyboard", "event"] = "timesteps",
+        max_timesteps: int = 100,
+        stop_key: str = "q",
+        stop_event: Optional[Event] = None,
+    ):
+        """
+        Set the condition used to determine when an action is done.
+
+        :param mode: One of 'timesteps', 'keyboard', 'event'.
+        :param max_timesteps: The number of timesteps after which to stop (used if mode='timesteps').
+        :param stop_key: The key to press to stop the action (used if mode='keyboard').
+        """
+        valid_modes = ["timesteps", "keyboard", "event"]
+        if mode not in valid_modes:
+            raise ValueError(f"Termination mode must be one of {valid_modes}")
+
+        self.config._termination_mode = mode
+        get_logger(self.node_name).info(
+            f"Action termination configured for mode: {mode}"
+        )
+
+        if mode == "timesteps":
+            self.config._termination_timesteps = max_timesteps
+            get_logger(self.node_name).info(
+                f"Action will terminate after {max_timesteps} timesteps."
+            )
+
+        elif mode == "keyboard":
+            if keyboard is None:
+                raise RuntimeError(
+                    "pynput is required for keyboard based termination. Its either not installed or has thrown an error because you might be on an ssh session. Install the package with `pip install pynput` and test it with python3 -c 'import pynput'."
+                )
+
+            self.config._termination_key = stop_key
+
+        elif mode == "event":
+            if stop_event is None:
+                raise ValueError(
+                    "A stop_event must be provided when setting the termination mode to `event`"
+                )
+            get_logger(self.node_name).info(
+                f"Action will terminate on {stop_event.name} event."
+            )
+            self.events_actions = {stop_event.json: Action(self.signal_done)}
+
     def signal_done(self):
         """Signals that the action is complete.
         Can be used as an action for signaled events"""
@@ -178,10 +219,10 @@ class VLA(ModelComponent):
         """Callback for keyboard listener."""
         try:
             # Check for char keys
-            if hasattr(key, "char") and key.char == self.config.termination_key:
+            if hasattr(key, "char") and key.char == self.config._termination_key:
                 self.signal_done()
             # Check for special keys (e.g. Esc) if configured as such
-            elif hasattr(key, "name") and key.name == self.config.termination_key:
+            elif hasattr(key, "name") and key.name == self.config._termination_key:
                 self.signal_done()
         except AttributeError:
             pass
@@ -433,7 +474,7 @@ class VLA(ModelComponent):
 
         # Cleanup keyboard listener
         if (
-            self.config.termination_mode == "keyboard"
+            self.config._termination_mode == "keyboard"
             and self._keyboard_listener is not None
         ):
             self._keyboard_listener.stop()
@@ -521,11 +562,11 @@ class VLA(ModelComponent):
         task_result.success = False
 
         # Add keyboard listener if required by termination config
-        if self.config.termination_mode == "keyboard":
+        if self.config._termination_mode == "keyboard":
             self._keyboard_listener = keyboard.Listener(on_press=self._on_key_press)
             self._keyboard_listener.start()
             self.get_logger().info(
-                f"Listening for stop key: '{self.config.termination_key}'"
+                f"Listening for stop key: '{self.config._termination_key}'"
             )
 
         # Create a timer to send actions at a fixed rate
@@ -629,14 +670,14 @@ class VLA(ModelComponent):
             return True
 
         # Timestep limit logic
-        if self.config.termination_mode == "timesteps":
+        if self.config._termination_mode == "timesteps":
             with self._last_executed_timestep_lock:
                 current_ts = self._last_executed_timestep
 
             # Check if we exceeded the max steps
-            if current_ts >= self.config.termination_timesteps:
+            if current_ts >= self.config._termination_timesteps:
                 self.get_logger().info(
-                    f"Reached max timesteps ({self.config.termination_timesteps}). Action Done."
+                    f"Reached max timesteps ({self.config._termination_timesteps}). Action Done."
                 )
                 self._task_completed = True
                 return True

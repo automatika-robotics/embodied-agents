@@ -3,7 +3,7 @@ from pathlib import Path
 
 from attrs import define, field, Factory
 
-from .ros import base_validators, BaseComponentConfig, Topic, Route, Event
+from .ros import base_validators, BaseComponentConfig, Topic, Route
 from .utils import validate_kwargs_from_default, _LANGUAGE_CODES
 from .utils.vision import _MS_COCO_LABELS
 
@@ -208,12 +208,6 @@ class VLAConfig(ModelComponentConfig):
 
     joint_names_map: Dict[str, str] = field()
     camera_inputs_map: Mapping[str, Union[Topic, Dict]] = field()
-    termination_mode: Literal["timesteps", "keyboard", "event"] = field(
-        default="timesteps"
-    )
-    termination_timesteps: int = field(default=50, validator=base_validators.gt(0))
-    termination_key: str = field(default="q")
-    termination_event: Optional[Event] = field(default=None)
     # TODO: One can make models that take multiple state input types.
     # This parameter would have to be revised in that case
     state_input_type: Literal["positions", "velocities", "accelerations", "efforts"] = (
@@ -232,23 +226,13 @@ class VLAConfig(ModelComponentConfig):
     )  # seconds
     robot_urdf_file: Optional[str] = field(default=None)
     joint_limits: Optional[Dict] = field(default=None)
-
-    @termination_mode.validator
-    def _task_termination_validator(self, _, value):
-        if value == "keyboard":
-            try:
-                import importlib
-
-                importlib.import_module("keyboard", "pynput")
-            except ModuleNotFoundError as e:
-                raise ModuleNotFoundError(
-                    "pynput is required for keyboard termination. Install with `pip install pynput`."
-                ) from e
-
-        if value == "event" and self.termination_event is None:
-            raise ValueError(
-                "A termination_event must be set when setting the termination_mode to `event`"
-            )
+    _termination_mode: Literal["timesteps", "keyboard", "event"] = field(
+        default="timesteps", alias="_termination_mode"
+    )
+    _termination_timesteps: int = field(
+        default=50, validator=base_validators.gt(0), alias="_termination_timesteps"
+    )
+    _termination_key: str = field(default="q", alias="_termination_key")
 
     def _get_inference_params(self) -> Dict:
         return {}
