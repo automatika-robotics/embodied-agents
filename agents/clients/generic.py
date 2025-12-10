@@ -1,8 +1,7 @@
-from typing import Any, Dict, Generator, Optional, Union, List
+from typing import Any, Dict, Generator, Optional, Union
 import os
 import json
 
-import numpy as np
 import httpx
 
 from .model_base import ModelClient

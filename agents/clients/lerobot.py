@@ -57,7 +57,7 @@ class LeRobotClient(ModelClient):
             not isinstance(model, LeRobotPolicy)
             and model["model_type"] != "LeRobotPolicy"
         ):
-            raise TypeError("LeRobotClient can only be used with an LeRobotPolicy")
+            raise TypeError("LeRobotClient can only be used with LeRobotPolicy")
 
         super().__init__(
             model=model,

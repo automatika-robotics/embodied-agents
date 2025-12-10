@@ -569,7 +569,7 @@ class VLA(ModelComponent):
                 f"Listening for stop key: '{self.config._termination_key}'"
             )
 
-        # Create a timer to send actions at a fixed rate
+        # Create a timer to send actions to the robot at a fixed rate
         self.__action_sending_timer = self.create_timer(
             1 / self.config.action_sending_rate,
             self._send_action_commands,

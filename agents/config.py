@@ -218,6 +218,9 @@ class VLAConfig(ModelComponentConfig):
     action_output_type: Literal[
         "positions", "velocities", "accelerations", "efforts"
     ] = field(default="positions")
+    observation_sending_rate: float = field(
+        default=10.0, validator=base_validators.in_range(min_value=1e-6, max_value=1e6)
+    )
     action_sending_rate: float = field(
         default=10.0, validator=base_validators.in_range(min_value=1e-6, max_value=1e6)
     )
@@ -233,6 +236,12 @@ class VLAConfig(ModelComponentConfig):
         default=50, validator=base_validators.gt(0), alias="_termination_timesteps"
     )
     _termination_key: str = field(default="q", alias="_termination_key")
+
+    def __attrs_post_init__(self):
+        """Post Init"""
+        # Main action loop is executed at the loop rate
+        # So we set the loop rate equal to observation sending rate
+        self.loop_rate = self.observation_sending_rate
 
     def _get_inference_params(self) -> Dict:
         return {}
