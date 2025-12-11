@@ -105,7 +105,7 @@ class LeRobotClient(ModelClient):
             pretrained_name_or_path=self.model_init_params["checkpoint"],
             lerobot_features=self.model_init_params["features"],
             actions_per_chunk=self.model_init_params["actions_per_chunk"],
-            device="cuda",
+            device=self.model_init_params["device"],
         )
 
         try:

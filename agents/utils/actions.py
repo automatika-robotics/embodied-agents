@@ -4,7 +4,7 @@ import numpy as np
 
 from rclpy.logging import get_logger
 
-from .utils import _read_spec_file
+from .utils import _read_spec_file, find_missing_values
 
 
 def _size_validator(instance, attribute, value):
@@ -57,6 +57,93 @@ class JointsData:
             mapped[target_name] = state_values[idx]
 
         return mapped
+
+
+def create_observation_spec(
+    joints_map, camera_map, prefix="observation", image_shape=(480, 640, 3)
+):
+    """Create a specification dictionary for observation data structure.
+
+    This function generates a structured specification for observation data
+    that includes both state information from joints and visual information
+    from cameras. The specification defines data types, shapes, and metadata
+    for each observation component.
+
+    joints_map : dict
+        Mapping of joint names to their respective configurations. The keys
+        are used to define the state observation dimensions.
+    camera_map : dict
+        Mapping of camera names to their respective configurations. Each
+        camera will contribute a visual observation entry to the specification.
+    prefix : str, optional
+        Prefix to use for observation keys, defaults to "observation"
+    image_shape : tuple of int, optional
+        Shape of camera images as (height, width, channels), defaults to (480, 640, 3)
+
+    dict
+        Observation specification dictionary with the following structure:
+        - ``{prefix}.state``: State observation containing joint positions
+        - ``{prefix}.images.{cam_name}``: Visual observation for each camera
+        Each entry contains:
+        - ``dtype``: Data type ("float32" for state, "video" for images)
+        - ``shape``: Shape of the data
+        - ``type``: Observation type ("STATE" or "VISUAL")
+        - ``names``: List of dimension names
+    """
+
+    # Validate image_shape
+    if not isinstance(image_shape, (tuple, list)) or len(image_shape) != 3:
+        raise ValueError(
+            f"image_shape must be a tuple of 3 values (height, width, channels). Got: {image_shape}"
+        )
+
+    spec = {}
+
+    # Build the State entry
+    # use the keys from joint_names_map as the 'names' list
+    joint_names = list(joints_map.keys())
+    state_key = f"{prefix}.state"
+
+    spec[state_key] = {
+        "dtype": "float32",
+        "shape": (len(joint_names),),
+        "type": "STATE",
+        "names": joint_names,
+    }
+
+    # Build the Camera entries
+    # iterate over the keys in camera_inputs_map to create entries
+    for cam_name in camera_map.keys():
+        cam_key = f"{prefix}.images.{cam_name}"
+        spec[cam_key] = {
+            "dtype": "video",
+            "shape": tuple(image_shape),
+            "type": "VISUAL",
+            "names": ["height", "width", "channels"],
+        }
+
+    return spec
+
+
+def validate_mapping_completeness(
+    target_keys: Optional[List],
+    mapped_keys,
+    logger,
+    missing_data_msg: str,
+    error_msg: str,
+):
+    """
+    Generic helper to check if specific keys exist in a map.
+    Warns if data is missing, raises ValueError if mapping is incomplete.
+    Called from inside the component
+    """
+    if not target_keys:
+        logger.warning(missing_data_msg)
+        return
+
+    missing_keys = find_missing_values(mapped_keys, target_keys)
+    if missing_keys:
+        raise ValueError(error_msg.format(missing=missing_keys))
 
 
 # Map requirement categories -> URDF limit keys

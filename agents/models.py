@@ -441,8 +441,14 @@ class LeRobotPolicy(Model):
     Default: `"smolvla"`.
     :param dataset_info_file:
         URL or local path to the dataset metadata file (`info.json`).
-        This file defines the input features and action structure that the policy must follow. By default, this points to metadata for the `svla_so100_pickplace` dataset.
-    :type dataset_info_file: str
+        This file defines the input features and action structure that the policy must follow. Empty by default. If not provided, an attempt will be made by the VLA component to auto-generate it from the component config.
+    :type dataset_info_file: str, optional
+    :param policy_type:
+    The device on which the server should initialize the policy.
+    Supported values are:
+    - `"cuda"` — NVIDIA GPU available on server
+    - `"cpu"` — GPU not available on server
+    Default: `"cuda"`.
     :param actions_per_chunk:
         The number of predicted actions produced per inference chunk. This is only applicable for certain policy types that implement Real Time Chunking (RTC) such as Pi0, and SmolVLA
         Default: `50`.
@@ -451,15 +457,6 @@ class LeRobotPolicy(Model):
         Optional timeout (in seconds) for initialization.
         Default: `None`.
     :type init_timeout: int, optional
-
-    ### Behavior
-
-    Upon initialization, the class automatically uses provided metadata file/url to extract and set:
-
-    - `self.features` — policy input features
-    - `self.actions` — action definitions used during inference
-
-    ---
 
     ### Example
     ```python
@@ -482,23 +479,23 @@ class LeRobotPolicy(Model):
     policy_type: Literal["smolvla", "diffusion", "act", "pi0"] = field(
         default="smolvla"
     )
-    dataset_info_file: str = field(
-        default="https://huggingface.co/datasets/lerobot/svla_so100_pickplace/resolve/main/meta/info.json"
-    )
     actions_per_chunk: int = field(default=50)
-    _features: Dict = field(default={})
-    _actions: Dict = field(default={})
-    _image_keys: List = field(init=False)
-    _joint_keys: List = field(init=False)
+    policy_device: Literal["cpu", "cuda"] = field(default="cuda")
+    dataset_info_file: Optional[str] = field(default=None)
+    _features: Dict = field(default={})  # Created in the component if missing
+    _actions: Optional[Dict] = field(default=None)
+    _image_keys: Optional[List] = field(default=None)
+    _joint_keys: Optional[List] = field(default=None)
 
     def __attrs_post_init__(self):
-        lerobot_features = build_lerobot_features_from_dataset_info(
-            self.dataset_info_file
-        )
-        self._features = lerobot_features["features"]
-        self._actions = lerobot_features["actions"]
-        self._image_keys = lerobot_features["image_keys"]
-        self._joint_keys = self._features["observation.state"]["names"]
+        if self.dataset_info_file:
+            lerobot_features = build_lerobot_features_from_dataset_info(
+                self.dataset_info_file
+            )
+            self._features = lerobot_features["features"]
+            self._actions = lerobot_features["actions"]
+            self._image_keys = lerobot_features["image_keys"]
+            self._joint_keys = self._features["observation.state"]["names"]
 
     def _get_init_params(self):
         return {
@@ -506,4 +503,5 @@ class LeRobotPolicy(Model):
             "policy_type": self.policy_type,
             "features": self._features,
             "actions_per_chunk": self.actions_per_chunk,
+            "device": self.policy_device,
         }

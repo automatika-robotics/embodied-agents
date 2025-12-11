@@ -32,6 +32,8 @@ from ..utils.actions import (
     parse_urdf_joints,
     check_joint_limits,
     cap_actions_with_limits,
+    create_observation_spec,
+    validate_mapping_completeness,
 )
 from ..events import Event
 from ..clients.lerobot import LeRobotClient
@@ -229,84 +231,99 @@ class VLA(ModelComponent):
 
     def _verify_config(self, component_name: str):
         """Run checks on provided config and model definition"""
+        logger = get_logger(component_name)
 
-        # Check dataset keys from model definition in keys from config
-        joint_keys_missing = find_missing_values(
-            self.config.joint_names_map.keys(), self.model_client._model._joint_keys
-        )
-        if joint_keys_missing:
-            raise ValueError(
-                f"Your 'joint_names_map' in VLAConfig does not map all the dataset joint names to the robot joint names correctly. The following joint names from the dataset info are unmapped: {joint_keys_missing}"
+        # Initialize dataset features if missing
+        # TODO: Make prefix and image shape config params
+        if not self.model_client._model._features:
+            self.model_client._model._features = create_observation_spec(
+                self.config.joint_names_map,
+                self.config.camera_inputs_map,
+                prefix="observation",
+                image_shape=(480, 640, 3),
             )
+            logger.warning(
+                "You have not provided a dataset file for the model. Feature specification are required for initializing the policy on LeRobot Policy Server. We are going to auto-generate a feature spec from `joint_names_map` and `camera_inputs_map` that you provided. Please make sure their keys correspond to the names of features and actions used when training the model. Policy init might fail."
+            )
+            return
 
-        # If action definition was part of the dataset info, store it
-        action_definition = self.model_client._model._actions
-        if action_definition:
-            dataset_joint_names = action_definition.get("names", None)
+        # Verify Joint Keys
+        dataset_joint_keys = self.model_client._model._joint_keys
+        validate_mapping_completeness(
+            target_keys=dataset_joint_keys,
+            mapped_keys=self.config.joint_names_map.keys(),
+            logger=logger,
+            missing_data_msg="Dataset metadata for 'joint names' is missing. Skipping validation of 'joint_names_map'.",
+            error_msg="Your 'joint_names_map' in VLAConfig does not map all the dataset joint names to the robot joint names correctly. The following joint names from the dataset info are unmapped: {missing}",
+        )
+
+        # Process Action Keys
+        dataset_action_keys = self.model_client._model._actions
+        if dataset_action_keys:
+            dataset_joint_names = dataset_action_keys.get("names", None)
             if dataset_joint_names:
                 self._dataset_sorted_joint_names = [
                     self.config.joint_names_map[j] for j in dataset_joint_names
                 ]
-            self._dataset_action_dtype = action_definition.get("dtype", None)
-
-        # Read robot joint limits
-        if self.config.robot_urdf_file:
-            self.robot_joints_limits = parse_urdf_joints(self.config.robot_urdf_file)
-
-            # Check for mapping joint names in urdf
-            joint_keys_missing = find_missing_values(
-                self.robot_joints_limits.keys(),
-                list(self.config.joint_names_map.values()),
+            self._dataset_action_dtype = dataset_action_keys.get("dtype", None)
+        else:
+            logger.warning(
+                "Dataset metadata for 'actions' is missing. Actions being sent out to the robot will be sorted the same as the order of joint_names_map keys."
             )
-            if joint_keys_missing:
-                get_logger(component_name).warning(
-                    f"Your 'joint_names_map' in VLAConfig includes robot joint names that do not exist in the provided URDF file. This might cause errors later on. The following joint names were not found in the URDF file: {joint_keys_missing}. The URDF has the foollowing joint names: {list(self.robot_joints_limits.keys())}"
-                )
 
-            # Check if all limits were provided
+        # Setup and Verify Joint Limits
+        self.robot_joints_limits = self.__resolve_joint_limits(logger)
+        if self.robot_joints_limits:
             ok, errors = check_joint_limits(
                 self.robot_joints_limits, requirements=[self.config.state_input_type]
             )
             if not ok:
-                errors = "\n".join(e for e in errors)
-                get_logger(component_name).warning(
-                    f"""The following limits were not provided for joints in the URDF file. Consider adding them in config as config.joint_limits:
-                        {errors}."""
+                error_str = "\n".join(errors)
+                logger.warning(
+                    f"The following limits were not provided for joints. Consider adding them in config:\n{error_str}"
                 )
-        else:
-            if not self.config.joint_limits:
-                get_logger(component_name).warning(
-                    "You have not provided a urdf file. If a urdf file is not available for your robot, consider adding joint limits to config as config.joint_limits to ensure safe movement execution."
-                )
-            else:
-                # Check if all limits were provided
-                ok, errors = check_joint_limits(
-                    self.config.joint_limits,
-                    requirements=[self.config.state_input_type],
-                )
-                if not ok:
-                    errors = "\n".join(e for e in errors)
-                    get_logger(component_name).warning(
-                        f"""The following limits were not provided for joints. Consider adding them in config:
-                            {errors}."""
-                    )
-                self.robot_joints_limits = self.config.joint_limits
 
         # TODO:: Handle partially available image keys with error logging
         # Remove LeRobot specific prefix in case it has been added by the user
-        new_camera_map = {}
-        for k, v in self.config.camera_inputs_map.items():
-            new_key = k.removeprefix("observation.images.")
-            new_camera_map[new_key] = v
-        self.config.camera_inputs_map = new_camera_map
+        self.config.camera_inputs_map = {
+            k.removeprefix("observation.images."): v
+            for k, v in self.config.camera_inputs_map.items()
+        }
 
-        image_keys_missing = find_missing_values(
-            self.config.camera_inputs_map.keys(), self.model_client._model._image_keys
+        # Verify Image Keys
+        dataset_image_keys = self.model_client._model._image_keys
+        validate_mapping_completeness(
+            target_keys=dataset_image_keys,
+            mapped_keys=self.config.camera_inputs_map.keys(),
+            logger=logger,
+            missing_data_msg="Dataset metadata for 'images' is missing. Skipping validation of 'camera_inputs_map'.",
+            error_msg="Your 'camera_inputs_map' in VLAConfig does not map all the dataset camera names to the robot camera topics correctly. The following camera names from the dataset info are unmapped: {missing}",
         )
-        if image_keys_missing:
-            raise ValueError(
-                f"Your 'camera_inputs_map' in VLAConfig does not map all the dataset camera names to the robot camera topics correctly. The following camera names from the dataset info are unmapped: {image_keys_missing}"
+
+    def __resolve_joint_limits(self, logger) -> Optional[Dict]:
+        """Determines the source of joint limits (URDF or Config) and returns them."""
+        if self.config.robot_urdf_file:
+            limits = parse_urdf_joints(self.config.robot_urdf_file)
+
+            # Validate URDF joints against config map
+            missing_in_urdf = find_missing_values(
+                limits.keys(), list(self.config.joint_names_map.values())
             )
+            if missing_in_urdf:
+                logger.warning(
+                    f"Your 'joint_names_map' includes robot joint names not found in the URDF. "
+                    f"Missing: {missing_in_urdf}. Available in URDF: {list(limits.keys())}"
+                )
+            return limits
+
+        # Fallback to config limits
+        if not self.config.joint_limits:
+            logger.warning(
+                "No URDF file provided. Consider adding 'joint_limits' to config to ensure safe movement execution."
+            )
+            return None
+
+        return self.config.joint_limits
 
     def _receive_actions_from_client(self):
         """Timer callback for continuosly receiving actions from client"""
@@ -422,8 +439,8 @@ class VLA(ModelComponent):
         with self._action_queue_lock:
             if not self._actions_received.empty():
                 # Return the immediate next action
-                # TODO: Remove torch depenedency here once server can send numpy arrays
                 action_to_pub = self._actions_received.get()
+                # TODO: Remove torch depenedency here once server can send numpy arrays
                 action_to_pub_data = action_to_pub.action.numpy()
             else:
                 return
