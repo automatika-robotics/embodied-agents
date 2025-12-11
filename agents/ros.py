@@ -380,7 +380,7 @@ class JointTrajectoryPoint(SupportedType):
     @classmethod
     def convert(cls, output: JointsData, index: Optional[int] = None, **_) -> Any:
         """
-        Takes joint trajectory point data dictionary and converts it into a ROS message
+        Takes joint state data and converts it into a ROS message
         of type JointTrajectoryPoint
 
         :return: JointTrajectory
@@ -424,7 +424,7 @@ class JointTrajectory(SupportedType):
     @classmethod
     def convert(cls, output: JointsData, **_) -> Any:
         """
-        Takes joint trajectory data dictionary and converts it into a ROS message
+        Takes joint state data and converts it into a ROS message
         of type JointTrajectory
 
         :return: JointTrajectory
@@ -470,7 +470,7 @@ class JointJog(SupportedType):
     @classmethod
     def convert(cls, output: JointsData, **_) -> Any:
         """
-        Takes joint jog data dictionary and converts it into a ROS message
+        Takes joint state data and converts it into a ROS message
         of type JointJog
 
         :return: JointJog
@@ -490,6 +490,23 @@ class JointState(SupportedType):
 
     _ros_type = JointStateROS
     callback = JointStateCallback
+
+    @classmethod
+    def convert(cls, output: JointsData, **_) -> JointStateROS:
+        """
+        Takes joint state data and converts it into a ROS message
+        of type JointState
+
+        :return: JointState
+        """
+        msg = JointStateROS()
+        msg.name = output.joints_names
+
+        msg.position = output.positions.tolist()
+        msg.velocity = output.velocities.tolist()
+        msg.effort = output.efforts.tolist()
+
+        return msg
 
 
 agent_types = [
