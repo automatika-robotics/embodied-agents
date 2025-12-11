@@ -5,7 +5,6 @@ from attrs import define, field, Factory
 
 from .ros import base_validators, BaseComponentConfig, Topic, Route
 from .utils import validate_kwargs_from_default, _LANGUAGE_CODES
-from .utils.vision import _MS_COCO_LABELS
 
 __all__ = [
     "LLMConfig",
@@ -291,7 +290,7 @@ class VisionConfig(ModelComponentConfig):
     enable_local_classifier: bool = field(default=False)
     input_height: int = field(default=640)
     input_width: int = field(default=640)
-    dataset_labels: Dict = field(default=_MS_COCO_LABELS)
+    dataset_labels: Optional[Dict] = field(default=None)
     device_local_classifier: Literal["cpu", "cuda", "tensorrt"] = field(default="cuda")
     ncpu_local_classifier: int = field(default=1)
     local_classifier_model_path: str = field(

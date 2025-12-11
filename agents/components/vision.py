@@ -130,7 +130,13 @@ class Vision(ModelComponent):
 
         # deploy local model if enabled
         if not self.model_client and self.config.enable_local_classifier:
-            from ..utils.vision import LocalVisionModel
+            from ..utils.vision import LocalVisionModel, _MS_COCO_LABELS
+
+            if not self.config.dataset_labels:
+                self.get_logger().warning(
+                    "No dataset labels provided for the local model, using default MS_COCO labels"
+                )
+                self.config.dataset_labels = _MS_COCO_LABELS
 
             self.local_classifier = LocalVisionModel(
                 model_path=load_model(
