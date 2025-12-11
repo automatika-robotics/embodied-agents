@@ -56,7 +56,7 @@ class VLA(ModelComponent):
         self.allowed_inputs = {
             "Required": [JointState, [Image, RGBD]],
         }
-        self.handled_outputs = [JointTrajectory, JointJog]
+        self.handled_outputs = [JointState, JointTrajectory, JointJog]
 
         self.model_client = model_client
 
@@ -260,7 +260,7 @@ class VLA(ModelComponent):
             )
             if joint_keys_missing:
                 get_logger(component_name).warning(
-                    f"Your 'joint_names_map' in VLAConfig includes robot joint names that do not exist in the provided URDF file. This might cause errors later on. The following joint names were not found in the URDF file: {joint_keys_missing}"
+                    f"Your 'joint_names_map' in VLAConfig includes robot joint names that do not exist in the provided URDF file. This might cause errors later on. The following joint names were not found in the URDF file: {joint_keys_missing}. The URDF has the foollowing joint names: {list(self.robot_joints_limits.keys())}"
                 )
 
             # Check if all limits were provided
@@ -399,10 +399,10 @@ class VLA(ModelComponent):
         # Get images
         images = {}
         for key, value in self.config.camera_inputs_map.items():
-            img_out = self.callbacks[value.name].get_output(clear_last=True)
+            img_out = self.callbacks[value["name"]].get_output(clear_last=True)
             if img_out is None:
                 self.get_logger().warning(
-                    f"Did not receive an image for key: {key}, not sending input for inference"
+                    f"Did not receive an image for topic: {value['name']}, not sending input for inference"
                 )
                 return
             images[key] = img_out
@@ -420,11 +420,11 @@ class VLA(ModelComponent):
         """Send action commands"""
         # Pop an action from queue action, return if queue is empty
         with self._action_queue_lock:
-            if self._actions_received.not_empty:
+            if not self._actions_received.empty():
                 # Return the immediate next action
                 # TODO: Remove torch depenedency here once server can send numpy arrays
-                action_to_pub = self._actions_received.get().action
-                action_to_pub_data = action_to_pub.numpy()
+                action_to_pub = self._actions_received.get()
+                action_to_pub_data = action_to_pub.action.numpy()
             else:
                 return
 
@@ -465,6 +465,7 @@ class VLA(ModelComponent):
 
     def _action_cleanup(self):
         """Destroy action timers and other listeners"""
+
         if self.__action_sending_timer is not None:
             self.destroy_timer(self.__action_sending_timer)
             self.__action_sending_timer = None
@@ -479,6 +480,16 @@ class VLA(ModelComponent):
         ):
             self._keyboard_listener.stop()
             self._keyboard_listener = None
+
+        # Cleanup action queue
+        with self._action_queue_lock:
+            self._actions_received.queue.clear()
+
+        with self._last_executed_timestep_lock:
+            self._last_executed_timestep = -1
+
+        # reset task status
+        self._task_completed = False
 
     def set_aggregation_function(
         self, agg_fn: Callable[[np.ndarray, np.ndarray], np.ndarray]
@@ -571,8 +582,8 @@ class VLA(ModelComponent):
 
         # Create a timer to send actions to the robot at a fixed rate
         self.__action_sending_timer = self.create_timer(
-            1 / self.config.action_sending_rate,
-            self._send_action_commands,
+            timer_period_sec=1 / self.config.action_sending_rate,
+            callback=self._send_action_commands,
         )
 
         # Create a tight timer for receiving actions from lerobot client
@@ -585,9 +596,13 @@ class VLA(ModelComponent):
 
         # Wait for all inputs to be available
         _timeout = 0.0
-        while not self.got_all_inputs() and _timeout < self.config.input_timeout:
-            self.get_logger().warn(
-                "Inputs topics are not available, waiting to start executing actions...",
+        while (
+            not self.got_all_inputs()
+            and _timeout < self.config.input_timeout
+            and not goal_handle.is_cancel_requested
+        ):
+            self.get_logger().warning(
+                f"Inputs topics {self.get_missing_inputs()} are not available, waiting to start executing actions...",
                 once=True,
             )
             _timeout += 1 / self.config.loop_rate
@@ -614,11 +629,11 @@ class VLA(ModelComponent):
                 # Get new observations from inputs
                 model_observations = self._create_input(task)
 
-                # Get last executed timestep
-                with self._last_executed_timestep_lock:
-                    last_timestep = self._last_executed_timestep
                 # TODO: Add condition for sending based on queue consumption
                 if model_observations:
+                    # Get last executed timestep
+                    with self._last_executed_timestep_lock:
+                        last_timestep = self._last_executed_timestep
                     # Add last executed action timestep
                     model_observations["timestep"] = last_timestep
                     # send input for inference

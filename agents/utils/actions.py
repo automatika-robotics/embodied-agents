@@ -33,18 +33,6 @@ class JointsData:
     duration: float = field(default=0.0)
     delay: float = field(default=0.0)
 
-    def __attrs_post_init__(self):
-        """Last sanity check"""
-        if (
-            self.positions.size == 0
-            and self.velocities.size == 0
-            and self.accelerations.size == 0
-            and self.efforts.size == 0
-        ):
-            raise ValueError(
-                "JointsData should contain at least one of the following: positions, velocities, accelerations, efforts"
-            )
-
     def get_mapped_state(
         self,
         state_type: Literal["positions", "velocities", "accelerations", "efforts"],
