@@ -175,7 +175,7 @@ class VLA(ModelComponent):
         Set the condition used to determine when an action is done.
 
         :param mode: One of 'timesteps', 'keyboard', 'event'.
-        :param max_timesteps: The number of timesteps after which to stop (used if mode='timesteps').
+        :param max_timesteps: The number of timesteps after which to stop (used if mode='timesteps' or 'event').
         :param stop_key: The key to press to stop the action (used if mode='keyboard').
         """
         valid_modes = ["timesteps", "keyboard", "event"]
@@ -207,8 +207,9 @@ class VLA(ModelComponent):
                     "A stop_event must be provided when setting the termination mode to `event`"
                 )
             get_logger(self.node_name).info(
-                f"Action will terminate on {stop_event.name} event."
+                f"Action will terminate on {stop_event.name} event or after {max_timesteps}"
             )
+            self.config._termination_timesteps = max_timesteps
             self.events_actions = {stop_event.json: Action(self.signal_done)}
 
     def signal_done(self):
@@ -684,13 +685,14 @@ class VLA(ModelComponent):
                 goal_handle.abort()
                 return task_result
 
-        # Task was successful
-        task_result.success = True
+        if self._task_completed:
+            # Task was successful
+            task_result.success = True
 
-        # Action cleanup
-        with self._main_goal_lock:
-            self._action_cleanup()
-            goal_handle.succeed()
+            # Action cleanup
+            with self._main_goal_lock:
+                self._action_cleanup()
+                goal_handle.succeed()
 
         return task_result
 
@@ -701,17 +703,24 @@ class VLA(ModelComponent):
         if self._task_completed:
             return True
 
-        # Timestep limit logic
-        if self.config._termination_mode == "timesteps":
-            with self._last_executed_timestep_lock:
-                current_ts = self._last_executed_timestep
+        with self._last_executed_timestep_lock:
+            current_ts = self._last_executed_timestep
 
-            # Check if we exceeded the max steps
-            if current_ts >= self.config._termination_timesteps:
-                self.get_logger().info(
-                    f"Reached max timesteps ({self.config._termination_timesteps}). Action Done."
-                )
+        # Check if we exceeded the max steps
+        if current_ts >= self.config._termination_timesteps:
+            self.get_logger().info(
+                f"Reached max timesteps ({self.config._termination_timesteps})."
+            )
+            # Timestep limit logic
+            if self.config._termination_mode in ["timesteps"]:
+                self.get_logger().info("Action done because we reached max timesteps.")
                 self._task_completed = True
+                return True
+            else:
+                self.get_logger().error(
+                    "Action did not complete but we exceeded maximum timesteps."
+                )
+                self._task_completed = False
                 return True
 
         return False
