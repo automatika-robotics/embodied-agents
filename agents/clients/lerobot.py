@@ -48,7 +48,7 @@ class LeRobotClient(ModelClient):
         except ModuleNotFoundError as e:
             raise ModuleNotFoundError(
                 """In order to use the LeRobotClient, you need grpc and torch installed. This client uses grpc and LeRobot's policy server returns torch tensors. You can install it with:
-            'pip install grpcio'
+            'pip install grpcio protobuf'
     And a lightweight CPU version (recommended) of torch with
             'pip install torch --index-url https://download.pytorch.org/whl/cpu')"""
             ) from e
