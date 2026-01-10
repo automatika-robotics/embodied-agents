@@ -72,7 +72,7 @@ class LLM(ModelComponent):
         *,
         inputs: List[Union[Topic, FixedInput]],
         outputs: List[Topic],
-        model_client: ModelClient,
+        model_client: Optional[ModelClient] = None,
         config: Optional[LLMConfig] = None,
         db_client: Optional[DBClient] = None,
         trigger: Union[Topic, List[Topic], float] = 1.0,
@@ -90,6 +90,11 @@ class LLM(ModelComponent):
             }
         )
         self.handled_outputs = [String, StreamingString]
+
+        if type(self) is LLM and not model_client:
+            raise RuntimeError(
+                "LLM component cannot be initialized without a model_client. Please pass a valid model_client."
+            )
 
         self.model_client = model_client
 
@@ -223,7 +228,9 @@ class LLM(ModelComponent):
                 "\n".join(
                     f"{str(meta)}, {doc}"
                     for meta, doc in zip(
-                        result["output"]["metadatas"], result["output"]["documents"]
+                        result["output"]["metadatas"],
+                        result["output"]["documents"],
+                        strict=True,
                     )
                 )
                 if self.config.add_metadata
@@ -310,7 +317,8 @@ class LLM(ModelComponent):
                 "query": self.messages,
                 **self.config._get_inference_params(),
             }
-            return self.model_client.inference(input)
+            if self.model_client:
+                return self.model_client.inference(input)
 
         else:
             # return result with its output set to last function response
@@ -675,11 +683,15 @@ class LLM(ModelComponent):
         inference_input = {"query": [message], **self.inference_params}
 
         # Run inference once to warm up and once to measure time
-        self.model_client.inference(inference_input)
+        if self.model_client:
+            self.model_client.inference(inference_input)
 
         inference_input = {"query": [message], **self.config._get_inference_params()}
         start_time = time.time()
-        result = self.model_client.inference(inference_input)
+        if self.model_client:
+            result = self.model_client.inference(inference_input)
+        else:
+            result = None
         elapsed_time = time.time() - start_time
 
         if result:

@@ -437,6 +437,7 @@ class LeRobotPolicy(Model):
     - `"act"` — Action Chunk Transformer policy
     - `"smolvla"` — General VLA from HuggingFace
     - `"pi0"` — General VLA from Physical Intelligence
+    - `"pi05"` — General VLA from Physical Intelligence
     This field determines how the checkpoint is interpreted and which policy architecture is instantiated.
     Default: `"smolvla"`.
     :param dataset_info_file:
@@ -476,7 +477,7 @@ class LeRobotPolicy(Model):
     """
 
     checkpoint: str = field(default="lerobot/smolvla_base")
-    policy_type: Literal["smolvla", "diffusion", "act", "pi0"] = field(
+    policy_type: Literal["smolvla", "diffusion", "act", "pi0", "pi05"] = field(
         default="smolvla"
     )
     actions_per_chunk: int = field(default=50)

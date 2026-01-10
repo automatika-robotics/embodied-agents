@@ -108,6 +108,9 @@ class LLMConfig(ModelComponentConfig):
     _tool_response_flags: Dict[str, bool] = field(
         default=Factory(dict), alias="_tool_response_flags"
     )
+    _default_route: Optional[Route] = field(  # only used when LLM is used as a router
+        default=None, alias="_default_route"
+    )
 
     @response_terminator.validator
     def _not_empty(self, _, value):
@@ -638,7 +641,7 @@ def _get_optional_route(route: Union[Route, Dict]) -> Optional[Route]:
 
 
 @define(kw_only=True)
-class SemanticRouterConfig(BaseComponentConfig):
+class SemanticRouterConfig(ModelComponentConfig):
     """Configuration parameters for a semantic router component.
 
     :param router_name: The name of the router.
@@ -664,6 +667,10 @@ class SemanticRouterConfig(BaseComponentConfig):
     _default_route: Optional[Union[Route, Dict]] = field(
         default=None, converter=_get_optional_route, alias="_default_route"
     )
+
+    def _get_inference_params(self):
+        """Dummy method to avoid check if semantic router is used in vector mode"""
+        return {}
 
 
 @define(kw_only=True)
