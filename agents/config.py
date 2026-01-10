@@ -20,6 +20,23 @@ __all__ = [
 ]
 
 
+# --- HELPERS ---
+def _get_optional_topic(topic: Union[Topic, Dict]) -> Optional[Topic]:
+    if not topic:
+        return
+    if isinstance(topic, Topic):
+        return topic
+    return Topic(**topic)
+
+
+def _get_optional_route(route: Union[Route, Dict]) -> Optional[Route]:
+    if not route:
+        return
+    if isinstance(route, Route):
+        return route
+    return Route(**route)
+
+
 @define(kw_only=True)
 class ModelComponentConfig(BaseComponentConfig):
     warmup: Optional[bool] = field(default=False)
@@ -108,9 +125,9 @@ class LLMConfig(ModelComponentConfig):
     _tool_response_flags: Dict[str, bool] = field(
         default=Factory(dict), alias="_tool_response_flags"
     )
-    _default_route: Optional[Route] = field(  # only used when LLM is used as a router
-        default=None, alias="_default_route"
-    )
+    _default_route: Optional[Union[Route, Dict]] = field(
+        default=None, converter=_get_optional_route, alias="_default_route"
+    )  # Only used when LLM is used as a router
 
     @response_terminator.validator
     def _not_empty(self, _, value):
@@ -599,14 +616,6 @@ class SpeechToTextConfig(ModelComponentConfig):
         }
 
 
-def _get_optional_topic(topic: Union[Topic, Dict]) -> Optional[Topic]:
-    if not topic:
-        return
-    if isinstance(topic, Topic):
-        return topic
-    return Topic(**topic)
-
-
 @define(kw_only=True)
 class MapConfig(BaseComponentConfig):
     """Configuration for a MapEncoding component.
@@ -630,14 +639,6 @@ class MapConfig(BaseComponentConfig):
     _map_topic: Optional[Union[Topic, Dict]] = field(
         default=None, converter=_get_optional_topic, alias="_map_topic"
     )
-
-
-def _get_optional_route(route: Union[Route, Dict]) -> Optional[Route]:
-    if not route:
-        return
-    if isinstance(route, Route):
-        return route
-    return Route(**route)
 
 
 @define(kw_only=True)

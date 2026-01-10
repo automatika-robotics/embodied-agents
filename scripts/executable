@@ -3,7 +3,7 @@ import json
 import argparse
 import importlib
 from types import NoneType
-from typing import List, Dict, Union, Tuple, Optional
+from typing import List, Dict, Union, Tuple, Optional, Any
 
 import rclpy
 import setproctitle
@@ -164,6 +164,22 @@ def _deserialize_topics(
     return topic_dicts
 
 
+def _load_clients(args: argparse.Namespace) -> Tuple[Optional[Any], Optional[Any]]:
+    """Instantiates Model and DB clients."""
+    model_client = None
+    db_client = None
+
+    if args.model_client:
+        mc_json = json.loads(args.model_client)
+        model_client = getattr(clients, mc_json["client_type"])(**mc_json)
+
+    if args.db_client:
+        dbc_json = json.loads(args.db_client)
+        db_client = getattr(clients, dbc_json["client_type"])(**dbc_json)
+
+    return model_client, db_client
+
+
 def _parse_ros_args(args_names: List[str]) -> List[str]:
     """Parse ROS arguments from command line arguments
 
@@ -264,15 +280,21 @@ def main():
     # Get triggers
     trigger = _parse_trigger(args.trigger)
 
+    # Initialize clients
+    model_client, db_client = _load_clients(args)
+
     # Init the component
     # Semantic Router Component
     if component_type == all_components.SemanticRouter.__name__:
-        db_client_json = json.loads(args.db_client)
-        db_client = getattr(clients, db_client_json["client_type"])(**db_client_json)
+        if not model_client and not db_client:
+            raise RuntimeError(
+                "The router component expects at least one client (model or vectorDB)"
+            )
         component = comp_class(
             inputs=inputs,
             routes=routes,
             db_client=db_client,
+            model_client=model_client,
             config=config,
             default_route=config._default_route,
             component_name=component_name,
@@ -282,6 +304,8 @@ def main():
     elif component_type == all_components.MapEncoding.__name__:
         db_client_json = json.loads(args.db_client)
         db_client = getattr(clients, db_client_json["client_type"])(**db_client_json)
+        if not db_client:
+            raise RuntimeError("The map encoding component expects a vectorDB client")
         component = comp_class(
             layers=layers,
             position=config._position,
@@ -295,21 +319,6 @@ def main():
 
     # All other components
     else:
-        if args.model_client:
-            model_client_json = json.loads(args.model_client)
-            model_client = getattr(clients, model_client_json["client_type"])(
-                **model_client_json
-            )
-        else:
-            model_client = None
-        if args.db_client:
-            db_client_json = json.loads(args.db_client)
-            db_client = getattr(clients, db_client_json["client_type"])(
-                **db_client_json
-            )
-        else:
-            db_client = None
-
         component = comp_class(
             inputs=inputs,
             outputs=outputs,
