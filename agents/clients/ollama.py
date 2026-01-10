@@ -45,6 +45,15 @@ class OllamaClient(ModelClient):
         )
         self._check_connection()
 
+    @property
+    def supports_tool_calls(self) -> bool:
+        """
+        Ollama client supports tool calling.
+
+        :rtype: bool
+        """
+        return True
+
     def _check_connection(self) -> None:
         """Check if the platfrom is being served on specified IP and port"""
         # Ping remote server to check connection

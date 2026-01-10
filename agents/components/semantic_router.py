@@ -108,15 +108,20 @@ class SemanticRouter(LLM):
         self.allowed_outputs = {"Required": [String]}
 
         # Prepare output topics
-        self.routes_dict = {route.routes_to.name: route for route in routes}
-        route_topics: List[Topic] = [route.routes_to for route in routes]  # type: ignore
+        self.routes_dict: Dict[str, Route] = {}
+        route_topics: List[Topic] = []
+        for route in routes:
+            self.routes_dict[route.routes_to.name] = route
+            route_topics.append(route.routes_to)
+
         self.validate_topics(route_topics, self.allowed_outputs, "Outputs")
 
         # Determine operation mode
         if model_client:
-            if not isinstance(model_client, OllamaClient):
+            if not model_client.supports_tool_calls:
                 raise TypeError(
-                    "Currently LLM based agentic routing is only supported with OllamaClient."
+                    f"The provided model client ({model_client.__class__.__name__}) does not support tool calling, "
+                    "which is required for Agentic Routing."
                 )
             if db_client:
                 get_logger(component_name).warning(
@@ -240,7 +245,7 @@ class SemanticRouter(LLM):
 
     def _initialize_vector_routes(self):
         """(VECTOR MODE) Create routes by saving route samples in the database."""
-        self.get_logger().info("Initializing all routes")
+        self.get_logger().info("Initializing all routes in VECTOR MODE")
         for idx, (name, route) in enumerate(self.routes_dict.items()):
             route_to_add = {
                 "collection_name": self._internal_config.router_name,
@@ -257,6 +262,7 @@ class SemanticRouter(LLM):
 
     def _setup_llm_routes(self, routes: Dict[str, Route]):
         """(LLM MODE) Configure LLM as the router."""
+        self.get_logger().info("Initializing all routes in LLM (Agentic) MODE")
         # If a system prompt has been set by the user, keep it
         if self._internal_config._system_prompt:
             return
@@ -347,8 +353,10 @@ class SemanticRouter(LLM):
 
         # Response must return tool calls
         routed = False
-        if result and "tool_calls" in result:
-            for tool in result["tool_calls"]:
+        tool_calls = result.get("tool_calls", []) if result else []
+
+        if tool_calls:
+            for tool in tool_calls:
                 fn_name = tool["function"]["name"]
                 # Retreive routing function
                 if func := self._route_funcs.get(fn_name):

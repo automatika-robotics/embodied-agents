@@ -636,9 +636,9 @@ class LLM(ModelComponent):
         my_component.register_tool(tool=my_arbitrary_function, tool_description=my_func_description, send_tool_response_to_model=False)
         ```
         """
-        if not isinstance(self.model_client, OllamaClient):
+        if self.model_client and not self.model_client.supports_tool_calls:
             raise TypeError(
-                "Currently registering tools is only supported when using an Ollama client with the component."
+                f"The provided model client ({self.model_client.__class__.__name__}) does not support tool calling."
             )
         if self.config.stream:
             raise TypeError(

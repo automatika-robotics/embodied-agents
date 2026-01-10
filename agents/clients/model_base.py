@@ -76,6 +76,16 @@ class ModelClient(ABC):
             "inference_timeout": self.inference_timeout,
         }
 
+    @property
+    def supports_tool_calls(self) -> bool:
+        """
+        Check if the client supports tool calling (function calling).
+        Defaults to False. Override in subclasses if supported.
+
+        :rtype: bool
+        """
+        return False
+
     def check_connection(self) -> None:
         """initialize.
         :rtype: None

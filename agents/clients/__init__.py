@@ -31,7 +31,7 @@ Some clients might need additional dependacies, which are provided in the follow
 
 * - **Ollama**
   - [OllamaClient](agents.clients.ollama.OllamaClient)
-  - An HTTP client for interacting with ML models served on [Ollama](https://ollama.com). Supports LLMs/MLLMs and embedding models. It can be invoked with the generic [OllamaModel](agents.models.md#classes).
+  - An HTTP client for interacting with ML models served on [Ollama](https://ollama.com). Supports LLMs/MLLMs and embedding models. It can be invoked with the generic [OllamaModel](agents.models.md#classes). Supports tool calling.
     Requires `pip install ollama`.
 
 * - **LeRobot**
