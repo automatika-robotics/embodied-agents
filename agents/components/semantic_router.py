@@ -5,7 +5,6 @@ from enum import Enum
 
 from ..clients.db_base import DBClient
 from ..clients.model_base import ModelClient
-from ..clients import OllamaClient
 from ..config import SemanticRouterConfig, LLMConfig
 from ..ros import String, Topic, Route, get_logger
 from ..utils import validate_func_args
