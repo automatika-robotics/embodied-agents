@@ -32,7 +32,7 @@ _EmbodiedAgents_ provides a suite of ready-to-use components. These can be compo
   - Provides a spatio-temporal working memory by converting semantic outputs (e.g., from MLLMs or Vision) into a structured map representation. Uses robot localization data and output topics from other components to store information in a vector DB.
 
 * - **[SemanticRouter](../apidocs/agents/agents.components.semantic_router)**
-  - Routes information between topics based on semantic content and predefined routing rules. Uses a vector DB for semantic matching and decision-making. This allows for creating complex graphs of components where a single input source can trigger different information processing pathways.
+  - Routes information between topics based on semantic content and predefined routing rules. Uses a vector DB for semantic matching or an LLM for decision-making. This allows for creating complex graphs of components where a single input source can trigger different information processing pathways.
 
 * - **[Vision](../apidocs/agents/agents.components.vision)**
   - An essential component in all vision powered robots. Performs object detection and tracking on incoming images. Outputs object classes, bounding boxes, and confidence scores. It implements a low-latency small on-board classification model as well.
