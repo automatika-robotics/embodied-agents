@@ -72,6 +72,14 @@ class GenericHTTPClient(ModelClient):
             headers=header,
         )
 
+    @property
+    def supports_tool_calls(self) -> bool:
+        """
+        Generic HTTP client (OpenAI compatible) supports tool calling.
+        :rtype: bool
+        """
+        return True
+
     def _check_connection(self) -> None:
         """
         Checks the connection to the API server by making a simple request.
