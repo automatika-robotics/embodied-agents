@@ -5,9 +5,13 @@ The following model specification classes are meant to define a comman interface
 from typing import Optional, Dict, Any, Literal, List
 from attrs import define, field
 from .ros import BaseAttrs, base_validators
-from .utils import build_lerobot_features_from_dataset_info
+from .utils import build_lerobot_features_from_dataset_info, _LANGUAGE_CODES
 
 __all__ = [
+    "GenericLLM",
+    "GenericMLLM",
+    "GenericTTS",
+    "GenericSTT",
     "TransformersLLM",
     "TransformersMLLM",
     "OllamaModel",
@@ -57,6 +61,188 @@ class LLM(Model):
         return {
             "checkpoint": self.checkpoint,
             "quantization": self.quantization,
+        }
+
+
+@define(kw_only=True)
+class GenericLLM(Model):
+    """
+    A generic LLM configuration for OpenAI-compatible /v1/chat/completions APIs.
+
+    This class supports any model served via an OpenAI-compatible endpoint (e.g., vLLM,
+    LMDeploy, DeepSeek, Groq, or OpenAI itself).
+
+    :param name: An arbitrary name given to the model.
+    :type name: str
+    :param checkpoint: The model identifier on the remote server (e.g., "gpt-4o", "meta-llama/Llama-3-70b").
+               For OpenAI models, consult: https://platform.openai.com/docs/models
+    :type checkpoint: str
+    :param init_timeout: The timeout in seconds for the initialization process. Defaults to None.
+    :type init_timeout: int, optional
+    :param options: Optional dictionary to configure default inference behavior. Options that conflict with component config options such as (max_tokens and temperature) will be overridden if set in component config.
+                    Supported keys match standard OpenAI API parameters:
+                    - temperature (float): Sampling temperature (0-2).
+                    - top_p (float): Nucleus sampling probability.
+                    - max_tokens (int): Max tokens to generate.
+                    - presence_penalty (float): Penalty for new tokens (-2.0 to 2.0).
+                    - frequency_penalty (float): Penalty for frequent tokens (-2.0 to 2.0).
+                    - stop (str or list): Stop sequences.
+                    - seed (int): Random seed for deterministic sampling.
+    :type options: dict, optional
+
+    Example usage:
+    ```python
+    gpt4 = GenericLLM(
+        name='gpt4',
+        checkpoint="gpt-4o",
+        options={"temperature": 0.7, "max_tokens": 500}
+    )
+    ```
+    """
+
+    checkpoint: str = field(default="gpt-4o")
+    options: Optional[Dict[str, Any]] = field(default=None)
+
+    @options.validator
+    def _validate_options(self, _, value):
+        if value is None:
+            return
+        allowed_keys = {
+            "temperature": float,
+            "top_p": float,
+            "max_tokens": int,
+            "presence_penalty": float,
+            "frequency_penalty": float,
+            "stop": List,
+            "seed": int,
+        }
+
+        for key, val in value.items():
+            if key not in allowed_keys:
+                raise ValueError(f"Invalid key in options: {key}")
+            expected_type = allowed_keys[key]
+            if key == "stop":
+                if not isinstance(val, list) or not all(
+                    isinstance(item, str) for item in val
+                ):
+                    raise TypeError(f"Value for key '{key}' must be a list of strings")
+            elif not isinstance(val, expected_type):
+                raise TypeError(
+                    f"Value for key '{key}' must be of type {expected_type.__name__}"
+                )
+
+    def _get_init_params(self) -> Dict:
+        return {"checkpoint": self.checkpoint, "options": self.options}
+
+
+@define(kw_only=True)
+class GenericMLLM(GenericLLM):
+    """
+    A generic Multimodal LLM configuration for OpenAI-compatible APIs.
+
+    Use this for models that accept image/audio inputs alongside text (e.g., GPT-4o,
+    Claude 3.5 Sonnet via wrapper, Gemini via OpenAI adapter).
+
+    :param name: An arbitrary name given to the model.
+    :type name: str
+    :param checkpoint: The model identifier. Consult provider documentation.
+    :type checkpoint: str
+    :param options: Optional dictionary for default inference parameters (see GenericLLM).
+    :type options: dict, optional
+
+    Example usage:
+    ```python
+    gpt4_vision = GenericMLLM(name='gpt4v', checkpoint="gpt-4o")
+    ```
+    """
+
+    checkpoint: str = field(default="gpt-4o")
+
+
+@define(kw_only=True)
+class GenericTTS(Model):
+    """
+    A generic Text-to-Speech model for OpenAI-compatible /v1/audio/speech APIs.
+
+    :param name: An arbitrary name given to the model.
+    :type name: str
+    :param checkpoint: The model identifier (e.g., "tts-1", "tts-1-hd").
+                       For details: https://platform.openai.com/docs/models/tts
+    :type checkpoint: str
+    :param voice: The voice ID to use. OpenAI standard voices: 'alloy', 'echo', 'fable',
+                  'onyx', 'nova', 'shimmer'. Other providers may have different IDs.
+    :type voice: str
+    :param speed: The speed of the generated audio. Select a value from 0.25 to 4.0. Default is 1.0.
+    :type speed: float
+    :param init_timeout: The timeout in seconds for the initialization process. Defaults to None.
+    :type init_timeout: int, optional
+
+    Example usage:
+    ```python
+    tts = GenericTTS(
+        name='openai_tts',
+        checkpoint="tts-1-hd",
+        voice="nova",
+        speed=1.2
+    )
+    ```
+    """
+
+    checkpoint: str = field(default="tts-1")
+    voice: str = field(default="alloy")
+    speed: float = field(
+        default=1.0, validator=base_validators.in_range(min_value=0.25, max_value=4.0)
+    )
+
+    def _get_init_params(self) -> Dict:
+        return {
+            "checkpoint": self.checkpoint,
+            "voice": self.voice,
+            "speed": self.speed,
+        }
+
+
+@define(kw_only=True)
+class GenericSTT(Model):
+    """
+    A generic Speech-to-Text model for OpenAI-compatible /v1/audio/transcriptions APIs.
+
+    :param name: An arbitrary name given to the model.
+    :type name: str
+    :param checkpoint: The model identifier (e.g., "whisper-1").
+                       For details: https://platform.openai.com/docs/models/whisper
+    :type checkpoint: str
+    :param language: The language of the input audio (ISO-639-1 format, e.g., 'en', 'fr').
+                     Improves accuracy if known. Default is None (auto-detect).
+    :type language: str, optional
+    :param temperature: The sampling temperature (0-1). Lower values are more deterministic. Default is 0.
+    :type temperature: float
+    :param init_timeout: The timeout in seconds for the initialization process. Defaults to None.
+    :type init_timeout: int, optional
+
+    Example usage:
+    ```python
+    stt = GenericSTT(
+        name='openai_stt',
+        checkpoint="whisper-1",
+        language="en",
+        temperature=0.2
+    )
+    ```
+    """
+
+    checkpoint: str = field(default="whisper-1")
+    temperature: float = field(default=0.0)
+    language: str = field(
+        default=None,
+        validator=base_validators.in_(_LANGUAGE_CODES),
+    )
+
+    def _get_init_params(self) -> Dict:
+        return {
+            "checkpoint": self.checkpoint,
+            "language": self.language,
+            "temperature": self.temperature,
         }
 
 
@@ -126,7 +312,7 @@ class OllamaModel(LLM):
             "presence_penalty": float,
             "frequency_penalty": float,
             "penalize_newline": bool,
-            "stop": list,
+            "stop": List,
             "numa": bool,
             "num_ctx": int,
             "num_batch": int,

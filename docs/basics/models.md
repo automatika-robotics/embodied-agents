@@ -13,8 +13,20 @@ Clients mentioned earlier take as input a **model** or **vector database (DB)** 
 * - Model Name
   - Description
 
+* - **[GenericLLM](../apidocs/agents/agents.models.md#classes)**
+  - A generic wrapper for LLMs served via OpenAI-compatible `/v1/chat/completions` APIs (e.g., vLLM, LMDeploy, OpenAI). Supports configurable inference options like temperature and max tokens. This wrapper must be used with the **GenericHTTPClient**.
+
+* - **[GenericMLLM](../apidocs/agents/agents.models.md#classes)**
+  - A generic wrapper for Multimodal LLMs (Vision-Language models) served via OpenAI-compatible APIs. Supports image inputs alongside text. This wrapper must be used with the **GenericHTTPClient**.
+
+* - **[GenericTTS](../apidocs/agents/agents.models.md#classes)**
+  - A generic wrapper for Text-to-Speech models served via OpenAI-compatible `/v1/audio/speech` APIs. Supports voice selection (`voice`), speed (`speed`) configuration. This wrapper must be used with the **GenericHTTPClient**.
+
+* - **[GenericSTT](../apidocs/agents/agents.models.md#classes)**
+  - A generic wrapper for Speech-to-Text models served via OpenAI-compatible `/v1/audio/transcriptions` APIs. Supports language hints (`language`) and temperature settings. This wrapper must be used with the **GenericHTTPClient**.
+
 * - **[OllamaModel](../apidocs/agents/agents.models.md#classes)**
-  - A LLM/VLM model loaded from an Ollama checkpoint. Supports configurable generation and deployment options available in Ollama API. Complete list of Ollama models [here](https://ollama.com/library). This wrapper can be used with the OllamaClient.
+  - A LLM/VLM model loaded from an Ollama checkpoint. Supports configurable generation and deployment options available in Ollama API. Complete list of Ollama models [here](https://ollama.com/library). This wrapper must be used with the OllamaClient.
 
 * - **[TransformersLLM](../apidocs/agents/agents.models.md#classes)**
   - LLM models from HuggingFace/ModelScope based checkpoints. Supports quantization ("4bit", "8bit") specification. This model wrapper can be used with the GenericHTTPClient or any of the RoboML clients.
