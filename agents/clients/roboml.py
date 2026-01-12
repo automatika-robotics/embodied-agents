@@ -122,7 +122,7 @@ class RoboMLHTTPClient(ModelClient):
 
     def _inference(
         self, inference_input: Dict[str, Any]
-    ) -> Optional[Dict[str, Union[str, Generator]]]:
+    ) -> Optional[Dict[str, Union[str, Generator, bytes]]]:
         """Call inference on the model using data and inference parameters from the component"""
         # encode any byte or numpy array data
         if "query" in inference_input.keys():
