@@ -1,7 +1,7 @@
 from typing import Optional, Union, Dict, List, Literal, Mapping
 from pathlib import Path
 
-from attrs import define, field, Factory
+from attrs import define, field, Factory, validators
 
 from .ros import base_validators, BaseComponentConfig, Topic, Route
 from .utils import validate_kwargs_from_default, _LANGUAGE_CODES
@@ -542,9 +542,9 @@ class SpeechToTextConfig(ModelComponentConfig):
     """
 
     initial_prompt: Optional[str] = field(default=None)
-    language: str = field(
-        default="en",
-        validator=base_validators.in_(_LANGUAGE_CODES),
+    language: Optional[str] = field(
+        default=None,
+        validator=validators.optional(base_validators.in_(_LANGUAGE_CODES)),
     )
     max_new_tokens: Optional[int] = field(default=None)
     enable_vad: bool = field(default=False)

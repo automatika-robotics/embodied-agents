@@ -9,7 +9,7 @@ import httpx
 
 from .model_base import ModelClient
 from ..models import (
-    LLM,
+    Model,
     GenericLLM,
     GenericSTT,
     GenericTTS,
@@ -29,7 +29,7 @@ class GenericHTTPClient(ModelClient):
     @validate_func_args
     def __init__(
         self,
-        model: Union[LLM, Dict],
+        model: Union[Model, Dict],
         host: str = "127.0.0.1",
         port: Optional[int] = 8000,
         inference_timeout: int = 30,
@@ -63,7 +63,7 @@ class GenericHTTPClient(ModelClient):
             host=host,
             port=port,
             inference_timeout=inference_timeout,
-            init_on_activation=False,
+            init_on_activation=True,
             logging_level=logging_level,
             **kwargs,
         )

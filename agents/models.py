@@ -3,7 +3,7 @@ The following model specification classes are meant to define a comman interface
 """
 
 from typing import Optional, Dict, Any, Literal, List
-from attrs import define, field
+from attrs import define, field, validators
 from .ros import BaseAttrs, base_validators
 from .utils import build_lerobot_features_from_dataset_info, _LANGUAGE_CODES
 
@@ -233,9 +233,9 @@ class GenericSTT(Model):
 
     checkpoint: str = field(default="whisper-1")
     temperature: float = field(default=0.0)
-    language: str = field(
+    language: Optional[str] = field(
         default=None,
-        validator=base_validators.in_(_LANGUAGE_CODES),
+        validator=validators.optional(base_validators.in_(_LANGUAGE_CODES)),
     )
 
     def _get_init_params(self) -> Dict:
@@ -367,7 +367,7 @@ class TransformersLLM(LLM):
 
 
 @define(kw_only=True)
-class TransformersMLLM(LLM):
+class TransformersMLLM(TransformersLLM):
     """An MLLM model that needs to be initialized with any MLLM checkpoint available on HuggingFace transformers. This model can be used with a roboml client.
 
     :param name: An arbitrary name given to the model.
