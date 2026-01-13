@@ -13,6 +13,7 @@ from rclpy.utilities import try_shutdown
 from agents import config as all_configs
 from agents import components as all_components
 from agents import clients
+from agents.clients.model_base import ModelClient
 from agents.ros import (
     Topic,
     FixedInput,
@@ -72,6 +73,11 @@ def _parse_args() -> Tuple[argparse.Namespace, List[str]]:
         "--db_client",
         type=str,
         help="DB Client",
+    )
+    parser.add_argument(
+        "--additional_model_clients",
+        type=str,
+        help="Additional model clients",
     )
     parser.add_argument(
         "--config_file", type=str, help="Path to configuration YAML file"
@@ -202,6 +208,16 @@ def _load_primary_clients(
         db_client = getattr(clients, dbc_json["client_type"])(**dbc_json)
 
     return model_client, db_client
+
+
+def _load_additional_model_clients(
+    additional_clients_json: str,
+) -> Dict[str, ModelClient]:
+    """Initialize additional model clients"""
+    _additional_clients = json.loads(additional_clients_json)
+    for k, v in _additional_clients.items():
+        _additional_clients[k] = getattr(clients, v["client_type"])(**v)
+    return _additional_clients
 
 
 def _parse_ros_args(args_names: List[str]) -> List[str]:
@@ -369,6 +385,13 @@ def main():
     external_processors = args.external_processors or None
     if external_processors:
         component._external_processors_json = external_processors
+
+    # Set additional model clients if any
+    component.additional_model_clients = (
+        _load_additional_model_clients(args.additional_model_clients)
+        if args.additional_model_clients
+        else None
+    )
 
     executor = MultiThreadedExecutor()
 

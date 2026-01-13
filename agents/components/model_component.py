@@ -4,7 +4,7 @@ import json
 import queue
 import threading
 from types import NoneType
-from typing import Any, Optional, Sequence, Union, List, Dict, Type
+from typing import Any, Optional, Sequence, Union, List, Dict, Type, MutableMapping
 import msgpack
 
 
@@ -51,6 +51,46 @@ class ModelComponent(Component):
             component_name,
             **kwargs,
         )
+
+        self._additional_model_clients: Optional[Dict[str, ModelClient]] = None
+
+    @property
+    def additional_model_clients(self) -> Optional[Dict[str, ModelClient]]:
+        """Get additional model clients."""
+        return self._additional_model_clients
+
+    @additional_model_clients.setter
+    def additional_model_clients(self, value: Dict[str, ModelClient]) -> None:
+        """Set additional model clients."""
+        self._additional_model_clients = value
+
+    def change_model_client(self, model_client_name: str):
+        """Change the model client
+
+        This method can change the model client that the component is using, at runtime.
+
+        It can be invoked as a consequent action in response to an event. For example if one client communicating with a cloud model becomes unresponsive, one can replace it with another client for a locally deployed model.
+        """
+        if not self._additional_model_clients:
+            self.get_logger().error(
+                "Cannot change model client as the component was not given any additional model clients at init."
+            )
+            return
+        new_client = self._additional_model_clients.get(model_client_name, None)
+        if not new_client:
+            self.get_logger().info(
+                f"No additional client named {model_client_name} is available in the component. Only the following additional clients were provided {self._additional_model_clients}"
+            )
+            return
+
+        self.get_logger().info(f"Changing model client to {model_client_name}")
+        # Deinitialize any existing client
+        if self.model_client:
+            self.model_client.deinitialize()
+
+        # Set the new client
+        self.model_client = new_client
+        self.model_client.initialize()  # initialize the new client
 
     def custom_on_configure(self):
         """
@@ -209,7 +249,7 @@ class ModelComponent(Component):
 
     def _call_inference(
         self, inference_input: Dict, unpack: bool = False
-    ) -> Optional[Dict]:
+    ) -> Optional[MutableMapping]:
         """Call model inference"""
         if isinstance(self.model_client, RoboMLWSClient):
             self.req_queue.put_nowait(inference_input)
@@ -233,12 +273,18 @@ class ModelComponent(Component):
                     self.get_logger().error(
                         "Did not recieve result in websocket response queue"
                     )
+                    # raise a fallback trigger via health status
+                    self.health_status.set_fail_algorithm()
                     return None
         else:
             if self.model_client:
-                return self.model_client.inference(inference_input)
+                result = self.model_client.inference(inference_input)
+                if not result:
+                    # raise a fallback trigger via health status
+                    self.health_status.set_fail_algorithm()
+                return result
 
-    def _publish(self, result: Dict, **kwargs) -> None:
+    def _publish(self, result: MutableMapping, **kwargs) -> None:
         """
         Publishes the given result to all registered publishers.
 
@@ -259,9 +305,14 @@ class ModelComponent(Component):
             self._get_model_client_json(),
         ]
 
+        self.launch_cmd_args = [
+            "--additional_model_clients",
+            self._get_additional_model_clients_json(),
+        ]
+
     def _get_model_client_json(self) -> Union[str, bytes, bytearray]:
         """
-        Serialize component routes to json
+        Serialize component model client to json
 
         :return: Serialized inputs
         :rtype:  str | bytes | bytearray
@@ -269,3 +320,19 @@ class ModelComponent(Component):
         if not self.model_client:
             return ""
         return json.dumps(self.model_client.serialize())
+
+    def _get_additional_model_clients_json(self) -> Union[str, bytes, bytearray]:
+        """
+        Serialize component additional model clients to json
+
+        :return: Serialized inputs
+        :rtype:  str | bytes | bytearray
+        """
+        if not self._additional_model_clients:
+            return ""
+
+        serialized_clients = {}
+        for client_name, client in self._additional_model_clients.items():
+            serialized_clients[client_name] = client.serialize()
+
+        return json.dumps(serialized_clients)
