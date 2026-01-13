@@ -11,6 +11,7 @@ from ..clients import OllamaClient, GenericHTTPClient
 from ..config import LLMConfig
 from ..ros import (
     FixedInput,
+    Event,
     String,
     Topic,
     DetectionsMultiSource,
@@ -75,7 +76,7 @@ class LLM(ModelComponent):
         model_client: Optional[ModelClient] = None,
         config: Optional[LLMConfig] = None,
         db_client: Optional[DBClient] = None,
-        trigger: Union[Topic, List[Topic], float] = 1.0,
+        trigger: Union[Topic, List[Topic], float, Event] = 1.0,
         component_name: str,
         **kwargs,
     ):
@@ -480,9 +481,11 @@ class LLM(ModelComponent):
         """
 
         if self.run_type is ComponentRunType.EVENT and (trigger := kwargs.get("topic")):
-            if not trigger:
-                return
-            self.get_logger().debug(f"Received trigger on topic {trigger.name}")
+            if trigger:
+                self.get_logger().debug(f"Received trigger on topic {trigger.name}")
+            else:
+                self.get_logger().debug("Got triggered by an event")
+
         else:
             time_stamp = self.get_ros_time().sec
             self.get_logger().debug(f"Sending at {time_stamp}")

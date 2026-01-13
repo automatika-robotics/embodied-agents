@@ -6,6 +6,7 @@ from ..clients.model_base import ModelClient
 from ..config import MLLMConfig
 from ..ros import (
     FixedInput,
+    Event,
     Image,
     String,
     StreamingString,
@@ -70,7 +71,7 @@ class MLLM(LLM):
         model_client: ModelClient,
         config: Optional[MLLMConfig] = None,
         db_client: Optional[DBClient] = None,
-        trigger: Union[Topic, List[Topic], float] = 1.0,
+        trigger: Union[Topic, List[Topic], float, Event] = 1.0,
         component_name: str,
         **kwargs,
     ):

@@ -35,6 +35,8 @@ from ros_sugar import Launcher, UI_EXTENSIONS
 from ros_sugar.utils import component_action
 from ros_sugar.io.utils import run_external_processor
 from ros_sugar.actions import Action
+from ros_sugar.events import Event
+from ros_sugar import events
 
 # AGENTS TYPES
 from automatika_embodied_agents.msg import (
@@ -85,6 +87,8 @@ __all__ = [
     "Route",
     "MutuallyExclusiveCallbackGroup",
     "Action",
+    "events",
+    "Event",
     "VisionLanguageAction",
     "run_external_processor",
 ]

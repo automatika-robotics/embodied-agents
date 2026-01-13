@@ -11,6 +11,8 @@ from ..ros import (
     SupportedType,
     Topic,
     BaseTopic,
+    Event,
+    Action,
 )
 from ..config import BaseComponentConfig
 from ..utils import flatten
@@ -24,7 +26,7 @@ class Component(BaseComponent):
         inputs: Optional[Sequence[Union[Topic, FixedInput]]] = None,
         outputs: Optional[Sequence[Topic]] = None,
         config: Optional[BaseComponentConfig] = None,
-        trigger: Union[Topic, List[Topic], float, NoneType] = 1.0,
+        trigger: Union[Topic, List[Topic], float, Event, NoneType] = 1.0,
         component_name: str = "agents_component",
         **kwargs,
     ):
@@ -82,10 +84,12 @@ class Component(BaseComponent):
         Called by parent BaseComponent
         """
         self.get_logger().info("STARTING ALL SUBSCRIBERS")
-        # TODO: Inspect when component runtype is being set
         all_callbacks = (
             list(self.callbacks.values()) + list(self.trig_callbacks.values())
             if self.run_type is ComponentRunType.EVENT
+            and hasattr(
+                self, "trig_callbacks"
+            )  # second condition is necessary if being triggered by events
             else self.callbacks.values()
         )
         for callback in all_callbacks:
@@ -117,7 +121,7 @@ class Component(BaseComponent):
             if callback._subscriber:
                 self.destroy_subscription(callback._subscriber)
 
-    def trigger(self, trigger: Union[Topic, List[Topic], float, None]) -> None:
+    def trigger(self, trigger: Union[Topic, List[Topic], float, Event, None]) -> None:
         """
         Set component trigger
         """
@@ -141,6 +145,9 @@ class Component(BaseComponent):
             self.run_type = ComponentRunType.EVENT
             self.trig_callbacks = {trigger.name: self.callbacks[trigger.name]}
             del self.callbacks[trigger.name]
+        elif isinstance(trigger, Event):
+            self.run_type = ComponentRunType.EVENT
+            self._add_event_action_pair(trigger, Action(self._execution_step))
 
         elif trigger is None:
             if self.run_type not in [

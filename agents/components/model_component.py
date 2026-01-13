@@ -11,7 +11,13 @@ import msgpack
 from ..clients.model_base import ModelClient
 from ..clients.roboml import RoboMLWSClient
 from ..config import ModelComponentConfig
-from ..ros import FixedInput, Topic, SupportedType, MutuallyExclusiveCallbackGroup
+from ..ros import (
+    FixedInput,
+    Topic,
+    SupportedType,
+    MutuallyExclusiveCallbackGroup,
+    Event,
+)
 from .component_base import Component
 
 
@@ -24,7 +30,7 @@ class ModelComponent(Component):
         outputs: Optional[Sequence[Topic]] = None,
         model_client: Optional[ModelClient] = None,
         config: Optional[ModelComponentConfig] = None,
-        trigger: Union[Topic, List[Topic], float, NoneType] = 1.0,
+        trigger: Union[Topic, List[Topic], float, Event, NoneType] = 1.0,
         component_name: str = "model_component",
         **kwargs,
     ):

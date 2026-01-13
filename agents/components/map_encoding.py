@@ -9,6 +9,7 @@ from ..ros import (
     OccupancyGrid,
     Odometry,
     String,
+    Event,
     Topic,
     Detections,
     DetectionsMultiSource,
@@ -69,7 +70,7 @@ class MapEncoding(Component):
         map_topic: Topic,
         config: MapConfig,
         db_client: DBClient,
-        trigger: Union[Topic, List[Topic], float] = 10.0,
+        trigger: Union[Topic, List[Topic], float, Event] = 10.0,
         component_name: str,
         **kwargs,
     ):
@@ -243,9 +244,10 @@ class MapEncoding(Component):
         time_stamp = self.get_ros_time().sec
         if self.run_type is ComponentRunType.EVENT:
             trigger = kwargs.get("topic")
-            if not trigger:
-                return
-            self.get_logger().debug(f"Received trigger of {trigger.name}")
+            if trigger:
+                self.get_logger().debug(f"Received trigger of {trigger.name}")
+            else:
+                self.get_logger().debug("Map Encoding got triggered by an event.")
         else:
             self.get_logger().debug(f"Sending at {time_stamp}")
 
