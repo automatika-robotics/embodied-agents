@@ -163,7 +163,7 @@ class Component(BaseComponent):
             # Set component loop_rate (Hz)
             self.config.loop_rate = 1 / trigger
 
-        self.trig_topic: Union[Topic, List[Topic], float, None] = trigger
+        self.trig_topic: Union[Topic, List[Topic], float, Event, None] = trigger
 
     def validate_topics(
         self,
@@ -256,12 +256,21 @@ class Component(BaseComponent):
         :return: Serialized inputs
         :rtype:  str | bytes | bytearray
         """
+        serialized_trigger = {}
         if isinstance(self.trig_topic, Topic):
-            return self.trig_topic.to_json()
+            serialized_trigger["trigger_type"] = "Topic"
+            serialized_trigger["trigger"] = self.trig_topic.to_json()
         elif isinstance(self.trig_topic, List):
-            return json.dumps([t.to_json() for t in self.trig_topic])
+            serialized_trigger["trigger_type"] = "List"
+            serialized_trigger["trigger"] = json.dumps([
+                t.to_json() for t in self.trig_topic
+            ])
+        elif isinstance(self.trig_topic, Event):
+            serialized_trigger["trigger_type"] = "Event"
+            serialized_trigger["trigger"] = self.trig_topic.json
         else:
-            return json.dumps(self.trig_topic)
+            serialized_trigger = self.trig_topic
+        return json.dumps(serialized_trigger)
 
     def _replace_input_topic(
         self, topic_name: str, new_name: str, msg_type: str

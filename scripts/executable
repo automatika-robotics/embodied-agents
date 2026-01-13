@@ -13,7 +13,16 @@ from rclpy.utilities import try_shutdown
 from agents import config as all_configs
 from agents import components as all_components
 from agents import clients
-from agents.ros import Topic, FixedInput, MapLayer, Route, QoSConfig, SupportedType
+from agents.ros import (
+    Topic,
+    FixedInput,
+    MapLayer,
+    Route,
+    QoSConfig,
+    SupportedType,
+    Event,
+    events,
+)
 
 
 def _parse_args() -> Tuple[argparse.Namespace, List[str]]:
@@ -129,7 +138,9 @@ def _parse_additional_types(value: str):
     return _additional_types
 
 
-def _parse_trigger(trigger_str: str) -> Union[Topic, List[Topic], float, NoneType]:
+def _parse_trigger(
+    trigger_str: str,
+) -> Union[Topic, List[Topic], float, Event, NoneType]:
     """Parse component trigger json string
 
     :param trigger_str: Trigger JSON string
@@ -139,14 +150,25 @@ def _parse_trigger(trigger_str: str) -> Union[Topic, List[Topic], float, NoneTyp
     :rtype: Topic | List[Topic] | float
     """
     # TODO: Handle additional types here
-    trigger_json = json.loads(trigger_str)
-    if isinstance(trigger_json, List):
-        return [Topic(**json.loads(t)) for t in trigger_json]
-    elif isinstance(trigger_json, Dict):
-        return Topic(**trigger_json)
+
+    # Deserialize main dict or float value
+    trigger_deserialized = json.loads(trigger_str)
+    print(trigger_deserialized)
+    if isinstance(trigger_deserialized, Dict):
+        # Deserialize internal trigger content
+        if trigger_deserialized["trigger_type"] == "List":
+            # List always contains topics
+            return [
+                Topic(**json.loads(t))
+                for t in json.loads(trigger_deserialized["trigger"])
+            ]
+        elif trigger_deserialized["trigger_type"] == "Topic":
+            return Topic(**json.loads(trigger_deserialized["trigger"]))
+        elif trigger_deserialized["trigger_type"] == "Event":
+            return events.event_from_json(trigger_deserialized["trigger"])
     else:
         # return float or None
-        return trigger_json
+        return trigger_deserialized
 
 
 def _deserialize_topics(
@@ -164,7 +186,9 @@ def _deserialize_topics(
     return topic_dicts
 
 
-def _load_clients(args: argparse.Namespace) -> Tuple[Optional[Any], Optional[Any]]:
+def _load_primary_clients(
+    args: argparse.Namespace,
+) -> Tuple[Optional[Any], Optional[Any]]:
     """Instantiates Model and DB clients."""
     model_client = None
     db_client = None
@@ -281,7 +305,7 @@ def main():
     trigger = _parse_trigger(args.trigger)
 
     # Initialize clients
-    model_client, db_client = _load_clients(args)
+    model_client, db_client = _load_primary_clients(args)
 
     # Init the component
     # Semantic Router Component
