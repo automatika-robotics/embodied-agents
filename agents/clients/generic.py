@@ -1,4 +1,4 @@
-from typing import Any, Dict, Generator, Optional, Union, Mapping
+from typing import Any, Dict, Generator, Optional, Union, MutableMapping
 import os
 import json
 import io
@@ -164,7 +164,7 @@ class GenericHTTPClient(ModelClient):
 
     def _inference(
         self, inference_input: Dict[str, Any]
-    ) -> Optional[Mapping[str, Union[str, Generator, bytes]]]:
+    ) -> Optional[MutableMapping[str, Union[str, Generator, bytes]]]:
         """Performs inference using the specified model and input.
 
         :param inference_input: The input for the inference. This should be a
@@ -261,7 +261,7 @@ class GenericHTTPClient(ModelClient):
 
     def _inference_chat(
         self, inference_input: Dict[str, Any]
-    ) -> Optional[Dict[str, Union[str, Generator]]]:
+    ) -> Optional[MutableMapping[str, Union[str, Generator]]]:
         """Helper for chat completion with streaming and tool calling"""
 
         # Handle Images

@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Optional, Dict, Union, Generator, Mapping
+from typing import Any, Optional, Dict, Union, Generator, MutableMapping
 
 from rclpy import logging
 
@@ -99,7 +99,7 @@ class ModelClient(ABC):
         if self.init_on_activation:
             self._initialize()
 
-    def inference(self, inference_input: Dict[str, Any]) -> Optional[Mapping]:
+    def inference(self, inference_input: Dict[str, Any]) -> Optional[MutableMapping]:
         """inference.
         :param inference_input:
         :type inference_input: dict[str, Any]
@@ -135,7 +135,7 @@ class ModelClient(ABC):
     @abstractmethod
     def _inference(
         self, inference_input: Dict[str, Any]
-    ) -> Optional[Mapping[str, Union[str, Generator, bytes]]]:
+    ) -> Optional[MutableMapping[str, Union[str, Generator, bytes]]]:
         """inference.
         :param inference_input:
         :type inference_input: dict[str, Any]
