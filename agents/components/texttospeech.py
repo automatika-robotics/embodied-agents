@@ -545,10 +545,6 @@ class TextToSpeech(ModelComponent):
             # publish result
             self._publish(result)
 
-        else:
-            # raise a fallback trigger via health status
-            self.health_status.set_failure()
-
     def _warmup(self):
         """Warm up and stat check"""
         import time

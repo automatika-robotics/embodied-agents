@@ -313,7 +313,7 @@ class SemanticRouter(LLM):
             "query": self._current_payload,
             "n_results": 1,
         }
-        result = self.db_client.query(db_input)
+        result = self.db_client.query(db_input) if self.db_client else None
 
         # TODO: Add treatment of multiple results by using an averaging function
         if result:
@@ -334,7 +334,7 @@ class SemanticRouter(LLM):
             self.publishers_dict[route].publish(self._current_payload)
 
         else:
-            self.health_status.set_failure()
+            self.health_status.set_fail_algorithm()
 
     def _llm_mode_execution_step(self, **kwargs):
         """LLM Mode Execution"""
@@ -374,7 +374,7 @@ class SemanticRouter(LLM):
                     self._current_payload
                 )
             else:
-                self.health_status.set_failure()
+                self.health_status.set_fail_algorithm()
 
     def _execution_step(self, **kwargs):
         """Execution step for Semantic Router component.

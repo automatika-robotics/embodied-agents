@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Any, Optional, Union, Callable, List, Dict
+from typing import Any, Optional, Union, Callable, List, Dict, MutableMapping
 import msgpack
 import msgpack_numpy as m_pack
 
@@ -261,7 +261,7 @@ class LLM(ModelComponent):
 
         self.messages.append(message)
 
-    def _handle_tool_calls(self, result: Dict) -> Optional[Dict]:
+    def _handle_tool_calls(self, result: MutableMapping) -> Optional[MutableMapping]:
         """Internal handler for tool calling"""
         if not result.get("tool_calls"):
             self.get_logger().warning(
@@ -452,9 +452,9 @@ class LLM(ModelComponent):
         except Exception as e:
             self.get_logger().error(str(e))
             # raise a fallback trigger via health status
-            self.health_status.set_failure()
+            self.health_status.set_fail_algorithm()
 
-    def __handle_streaming_generator(self, result: Dict) -> Optional[List]:
+    def __handle_streaming_generator(self, result: MutableMapping) -> Optional[List]:
         """Handle streaming output"""
         try:
             for token in result["output"]:
@@ -471,7 +471,7 @@ class LLM(ModelComponent):
         except Exception as e:
             self.get_logger().error(str(e))
             # raise a fallback trigger via health status
-            self.health_status.set_failure()
+            self.health_status.set_fail_algorithm()
 
     def _execution_step(self, *args, **kwargs):
         """_execution_step.
@@ -513,15 +513,11 @@ class LLM(ModelComponent):
 
             # raise a fallback trigger via health status
             if not result:
-                self.health_status.set_failure()
+                self.health_status.set_fail_component()
                 return
 
             # publish inference result
             self._publish(result)
-
-        else:
-            # raise a fallback trigger via health status
-            self.health_status.set_failure()
 
     @validate_func_args
     def set_topic_prompt(self, input_topic: Topic, template: Union[str, Path]) -> None:

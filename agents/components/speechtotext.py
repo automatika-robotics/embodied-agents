@@ -378,9 +378,6 @@ class SpeechToText(ModelComponent):
         if result:
             # publish inference result
             self._publish(result)
-        else:
-            # raise a fallback trigger via health status
-            self.health_status.set_failure()
 
     def _warmup(self):
         """Warm up and stat check"""
