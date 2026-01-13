@@ -3,7 +3,7 @@ import os
 import json
 import io
 import numpy as np
-
+import wave
 
 import httpx
 
@@ -199,13 +199,52 @@ class GenericHTTPClient(ModelClient):
             # Speech-to-Text (Multipart in, JSON out)
             elif self.request_type == "multipart":
                 audio_data = inference_input.pop("query")
+                # get sample rate
+                sample_rate = inference_input.pop("sample_rate", 16000)
+                # initialize file obj
+                file_obj: io.BytesIO
 
                 # Convert numpy to bytes if necessary
                 if isinstance(audio_data, np.ndarray):
-                    audio_data = audio_data.tobytes()
+                    # Convert Float32 to Int16 if necessary
+                    if audio_data.dtype.kind == "f":
+                        audio_data = (audio_data * 32767).astype(np.int16)
+                    elif audio_data.dtype != np.int16:
+                        audio_data = audio_data.astype(np.int16)
+
+                    # Wrap in WAV container
+                    buffer = io.BytesIO()
+                    with wave.open(buffer, "wb") as wav_file:
+                        wav_file.setnchannels(1)
+                        wav_file.setsampwidth(2)  # 16-bit
+                        wav_file.setframerate(sample_rate)
+                        wav_file.writeframes(audio_data.tobytes())
+                    buffer.seek(0)
+                    file_obj = buffer
+
+                elif isinstance(audio_data, bytes):
+                    if audio_data.startswith(b"RIFF"):
+                        file_obj = io.BytesIO(audio_data)
+                    else:
+                        # With no header assume raw PCM (from VAD) -> Wrap in WAV
+                        buffer = io.BytesIO()
+                        with wave.open(buffer, "wb") as wav_file:
+                            wav_file.setnchannels(1)
+                            wav_file.setsampwidth(2)  # 16-bit
+                            wav_file.setframerate(sample_rate)
+                            wav_file.writeframes(audio_data)
+                        buffer.seek(0)
+                        file_obj = buffer
+
+                else:
+                    # Raises error if input is neither bytes nor numpy (satisfies type checker)
+                    self.logger.error(
+                        f"Unsupported audio data type: {type(audio_data)}"
+                    )
+                    return
 
                 # Prepare multipart file
-                files = {"file": ("audio.wav", io.BytesIO(audio_data), "audio/wav")}
+                files = {"file": ("audio.wav", file_obj, "audio/wav")}
                 data = {
                     "model": self.model_init_params["checkpoint"],
                     "language": inference_input.get("language")

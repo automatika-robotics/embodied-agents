@@ -543,7 +543,7 @@ class SpeechToTextConfig(ModelComponentConfig):
 
     initial_prompt: Optional[str] = field(default=None)
     language: Optional[str] = field(
-        default=None,
+        default="en",
         validator=validators.optional(base_validators.in_(_LANGUAGE_CODES)),
     )
     max_new_tokens: Optional[int] = field(default=None)
