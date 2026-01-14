@@ -135,7 +135,7 @@ class ModelClient(ABC):
     @abstractmethod
     def _inference(
         self, inference_input: Dict[str, Any]
-    ) -> Optional[MutableMapping[str, Union[str, Generator, bytes]]]:
+    ) -> Optional[MutableMapping[str, Union[str, Generator]]]:
         """inference.
         :param inference_input:
         :type inference_input: dict[str, Any]

@@ -164,7 +164,7 @@ class GenericHTTPClient(ModelClient):
 
     def _inference(
         self, inference_input: Dict[str, Any]
-    ) -> Optional[MutableMapping[str, Union[str, Generator, bytes]]]:
+    ) -> Optional[MutableMapping[str, Union[str, Generator]]]:
         """Performs inference using the specified model and input.
 
         :param inference_input: The input for the inference. This should be a
@@ -194,7 +194,8 @@ class GenericHTTPClient(ModelClient):
                 }
                 response = self.client.post(self.api_endpoint, json=payload)
                 response.raise_for_status()
-                return {"output": response.content}
+                # Send back audio bytes
+                return {"output": response.content}  # type: ignore
 
             # Speech-to-Text (Multipart in, JSON out)
             elif self.request_type == "multipart":
@@ -261,7 +262,7 @@ class GenericHTTPClient(ModelClient):
 
     def _inference_chat(
         self, inference_input: Dict[str, Any]
-    ) -> Optional[MutableMapping[str, Union[str, Generator]]]:
+    ) -> Optional[Dict[str, Union[str, Generator]]]:
         """Helper for chat completion with streaming and tool calling"""
 
         # Handle Images
