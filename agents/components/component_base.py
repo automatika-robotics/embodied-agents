@@ -63,7 +63,6 @@ class Component(BaseComponent):
             outputs=outputs,
             config=self.config,
             callback_group=None,
-            enable_health_broadcast=False,
             **kwargs,
         )
 
