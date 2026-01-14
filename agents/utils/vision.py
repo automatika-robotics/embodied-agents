@@ -40,15 +40,16 @@ class LocalVisionModel:
         self.model = ort.InferenceSession(
             model_path, sess_options=sessionOptions, providers=providers
         )
+        self.original_w: int = 0
+        self.original_h: int = 0
 
     def __resize_with_aspect_ratio(
         self, image, height, width, interpolation=cv2.INTER_LINEAR
     ):
         """Resizes an image while maintaining aspect ratio and pads it."""
-        original_height, original_width = image.shape[:2]
-        ratio = min(width / original_width, height / original_height)
-        new_width = int(original_width * ratio)
-        new_height = int(original_height * ratio)
+        ratio = min(width / self.original_w, height / self.original_h)
+        new_width = int(self.original_w * ratio)
+        new_height = int(self.original_h * ratio)
 
         # Resize the image
         resized_image = cv2.resize(
@@ -108,7 +109,7 @@ class LocalVisionModel:
 
             # NOTE: Handles only one image in the input
             input_image = inference_input["images"][0]
-            original_h, original_w = input_image.shape[:2]
+            self.original_h, self.original_w = input_image.shape[:2]
 
             # Preprocess the image and retrieve the scaling parameters
             processed_image, ratio, pad_left, pad_top = self.__resize_with_aspect_ratio(
@@ -139,7 +140,12 @@ class LocalVisionModel:
                 if scores.size > 0:
                     # Scale the boxes to match the original image dimensions
                     boxes = self.__scale_boxes(
-                        boxes, original_w, original_h, ratio, pad_left, pad_top
+                        boxes,
+                        self.original_w,
+                        self.original_h,
+                        ratio,
+                        pad_left,
+                        pad_top,
                     )
                     # if labels are requested in text
                     if inference_input["get_dataset_labels"]:
