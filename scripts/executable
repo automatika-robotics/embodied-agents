@@ -89,6 +89,9 @@ def _parse_args() -> Tuple[argparse.Namespace, List[str]]:
         "--actions", type=str, help="Actions associated with the component Events"
     )
     parser.add_argument(
+        "--fallbacks", type=str, help="Fallbacks to be executed on component Failure"
+    )
+    parser.add_argument(
         "--external_processors",
         type=str,
         help="External processors associated with the component input and output topics",
@@ -241,6 +244,36 @@ def _parse_ros_args(args_names: List[str]) -> List[str]:
     return ros_specific_args
 
 
+def _setup_component_post_init(component: Any, args: argparse.Namespace) -> None:
+    """Perform post-initialization setup on the component instance.
+
+    :param component: The instantiated component object
+    :param args: Parsed command line arguments
+    """
+    # Init the node with rclpy
+    component.rclpy_init_node()
+
+    # Set events/actions
+    if args.events and args.actions:
+        component._events_json = args.events
+        component._actions_json = args.actions
+
+    # Set fallbacks
+    if fallbacks_json := args.fallbacks:
+        component._fallbacks_json = fallbacks_json
+
+    # Set external processors
+    if args.external_processors:
+        component._external_processors_json = args.external_processors
+
+    # Set additional model clients if any
+    component.additional_model_clients = (
+        _load_additional_model_clients(args.additional_model_clients)
+        if args.additional_model_clients
+        else None
+    )
+
+
 def main():
     """Executable main function to run a component as a ROS2 node in a new process.
     Used to start a node using Sugarcoat Launcher. Extends functionality from ROS Sugar
@@ -370,28 +403,8 @@ def main():
             config_file=config_file,
         )
 
-    # Init the node with rclpy
-    component.rclpy_init_node()
-
-    # Set events/actions
-    events_json = args.events or None
-    actions_json = args.actions or None
-
-    if events_json and actions_json:
-        component._events_json = events_json
-        component._actions_json = actions_json
-
-    # Set external processors
-    external_processors = args.external_processors or None
-    if external_processors:
-        component._external_processors_json = external_processors
-
-    # Set additional model clients if any
-    component.additional_model_clients = (
-        _load_additional_model_clients(args.additional_model_clients)
-        if args.additional_model_clients
-        else None
-    )
+    # Run Post-Init Setup
+    _setup_component_post_init(component, args)
 
     executor = MultiThreadedExecutor()
 
