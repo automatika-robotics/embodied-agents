@@ -2,6 +2,10 @@
 
 Unlike other ROS package, _EmbodiedAgents_ provides a pure pythonic way of describing the node graph using [Sugarcoat🍬](https://automatika-robotics.github.io/sugarcoat/). Copy the following code in a python script and run it.
 
+```{important}
+Depending on the components and clients one uses, _EmbodiedAgents_ will prompt you for extra python packages. The script will throw an error and let you know how you can install these extra pacakges.
+```
+
 ```python
 from agents.clients.ollama import OllamaClient
 from agents.components import VLM
@@ -23,7 +27,7 @@ mllm = VLM(
     inputs=[text0, image0],
     outputs=[text1],
     model_client=llava_client,
-    trigger=[text0],
+    trigger=text0,
     component_name="vqa"
 )
 # Additional prompt settings
@@ -78,12 +82,12 @@ If the use of Ollama as a model serving platform is unclear, checkout [installat
 Now we are ready to setup our component.
 
 ```python
-# Define an MLLM component (A component represents a node with a particular functionality)
+# Define a VLM component (A component represents a node with a particular functionality)
 mllm = VLM(
     inputs=[text0, image0],
     outputs=[text1],
     model_client=llava_client,
-    trigger=[text0],
+    trigger=text0,
     component_name="vqa"
 )
 # Additional prompt settings
@@ -92,7 +96,7 @@ mllm.set_topic_prompt(text0, template="""You are an amazing and funny robot.
 )
 ```
 
-Note how the MLLM type of component, also allows us to set a topic or component level prompt, where a jinja2 template can be used to define a template in which our input string should be embedded. Finally we will launch the component.
+Note how the VLM type of component, also allows us to set a topic or component level prompt, where a jinja2 template can be used to define a template in which our input string should be embedded. Finally we will launch the component.
 
 ```python
 # Launch the component

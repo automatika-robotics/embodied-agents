@@ -96,7 +96,7 @@ mllm = VLM(
     inputs=[text0, image0],
     outputs=[text1],
     model_client=llava_client,
-    trigger=[text0],
+    trigger=text0,
     component_name="vqa"
 )
 # Additional prompt settings
