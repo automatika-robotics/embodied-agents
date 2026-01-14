@@ -17,6 +17,7 @@ from ..ros import (
     SupportedType,
     MutuallyExclusiveCallbackGroup,
     Event,
+    component_fallback,
 )
 from .component_base import Component
 
@@ -64,7 +65,8 @@ class ModelComponent(Component):
         """Set additional model clients."""
         self._additional_model_clients = value
 
-    def change_model_client(self, model_client_name: str):
+    @component_fallback
+    def change_model_client(self, model_client_name: str) -> bool:
         """Change the model client
 
         This method can change the model client that the component is using, at runtime.
@@ -75,22 +77,31 @@ class ModelComponent(Component):
             self.get_logger().error(
                 "Cannot change model client as the component was not given any additional model clients at init."
             )
-            return
+            return False
         new_client = self._additional_model_clients.get(model_client_name, None)
         if not new_client:
             self.get_logger().info(
                 f"No additional client named {model_client_name} is available in the component. Only the following additional clients were provided {self._additional_model_clients}"
             )
-            return
+            return False
 
         self.get_logger().info(f"Changing model client to {model_client_name}")
-        # Deinitialize any existing client
-        if self.model_client:
-            self.model_client.deinitialize()
 
-        # Set the new client
-        self.model_client = new_client
-        self.model_client.initialize()  # initialize the new client
+        try:
+            # Deinitialize any existing client
+            if self.model_client:
+                self.model_client.deinitialize()
+
+            # Set the new client
+            self.model_client = new_client
+            self.model_client.initialize()  # initialize the new client
+        except Exception:
+            self.get_logger().error(
+                "Error encountered during initialization when changing model client"
+            )
+            return False
+
+        return True
 
     def custom_on_configure(self):
         """

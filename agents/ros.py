@@ -32,7 +32,7 @@ from ros_sugar.config import (
 from ros_sugar.core import BaseComponent
 from ros_sugar.core.component import MutuallyExclusiveCallbackGroup
 from ros_sugar import Launcher, UI_EXTENSIONS
-from ros_sugar.utils import component_action
+from ros_sugar.utils import component_action, component_fallback
 from ros_sugar.io.utils import run_external_processor
 from ros_sugar.actions import Action
 from ros_sugar.events import Event
@@ -82,13 +82,14 @@ __all__ = [
     "BaseComponentConfig",
     "ComponentRunType",
     "Launcher",
-    "component_action",
     "MapLayer",
     "Route",
     "MutuallyExclusiveCallbackGroup",
     "Action",
     "events",
     "Event",
+    "component_fallback",
+    "component_action",
     "VisionLanguageAction",
     "run_external_processor",
 ]

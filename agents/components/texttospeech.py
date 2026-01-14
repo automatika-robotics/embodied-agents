@@ -10,7 +10,7 @@ import time
 from ..clients.model_base import ModelClient
 from ..clients import RoboMLWSClient, RoboMLRESPClient
 from ..config import TextToSpeechConfig
-from ..ros import Audio, String, Topic, StreamingString
+from ..ros import Audio, String, Topic, StreamingString, component_action
 from ..utils import validate_func_args
 from .model_component import ModelComponent
 from .component_base import ComponentRunType
@@ -448,6 +448,7 @@ class TextToSpeech(ModelComponent):
                 )
                 self._playback_thread.start()
 
+    @component_action
     def stop_playback(self, wait_for_thread: bool = True):
         """
         Stops the playback thread and clears any pending audio.
@@ -468,6 +469,7 @@ class TextToSpeech(ModelComponent):
             self._playback_thread.join()
             self.get_logger().debug("Thread terminated.")
 
+    @component_action
     @validate_func_args
     def say(self, text: str):
         """
