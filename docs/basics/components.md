@@ -1,4 +1,4 @@
-# Components 🧩
+# Components
 
 A **Component** is the primary execution unit in _EmbodiedAgents_. Conceptually, each component is syntactic sugar over a ROS 2 Lifecycle Node, inheriting all its lifecycle behaviors while also offering additional abstraction to simplify development. Components receive one or more ROS topics as inputs and produce outputs on designated topics. The specific types and formats of these topics depend on the component's function.
 
@@ -20,7 +20,7 @@ _EmbodiedAgents_ provides a suite of ready-to-use components. These can be compo
   - Uses large language models (e.g., LLaMA) to process text input. Can be used for reasoning, tool calling, instruction following, or dialogue. It can also utilize vector DBs for storing and retreiving contextual information.
 
 * - **[VLM](../apidocs/agents/agents.components.mllm)**
-  - Leverages multimodal LLMs (e.g., Llava) for understanding and processing both text and image data. Inherits all functionalities of the LLM component. It can also utilize multimodal LLM based planning models for task specific outputs (e.g. pointing, grounding, affordance etc.)
+  - Leverages multimodal LLMs (e.g., Llava) for understanding and processing both text and image data. Inherits all functionalities of the LLM component. It can also utilize multimodal LLM based planning models for task specific outputs (e.g. pointing, grounding, affordance etc.). This component is also called MLLM.
 
 * - **[SpeechToText](../apidocs/agents/agents.components.speechtotext)**
   - Converts spoken audio into text using speech-to-text models (e.g., Whisper). Suitable for voice command recognition. It also implements small on-board models for Voice Activity Detection (VAD) and Wakeword recognition, using audio capture devices onboard the robot.

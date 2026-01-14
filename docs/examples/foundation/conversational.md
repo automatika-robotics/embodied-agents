@@ -6,7 +6,7 @@ Often times robots are equipped with a speaker system and a microphone. Once the
 from agents.components import VLM, SpeechToText, TextToSpeech
 ```
 
-[Components](../basics/components) are basic functional units in _EmbodiedAgents_. Their inputs and outputs are defined using ROS [Topics](../basics/components.md#topic). And their function can be any input transformation, for example the inference of an ML model. Lets setup these components one by one. Since our input to the robot would be speech, we will setup the speech-to-text component first.
+[Components](../../basics/components) are basic functional units in _EmbodiedAgents_. Their inputs and outputs are defined using ROS [Topics](../../basics/components.md#topic). And their function can be any input transformation, for example the inference of an ML model. Lets setup these components one by one. Since our input to the robot would be speech, we will setup the speech-to-text component first.
 
 ## SpeechToText Component
 
@@ -41,7 +41,7 @@ The _enable_wakeword_ option cannot be enabled without the _enable_vad_ option.
 ```
 
 ```{seealso}
-Check the available defaults and options for the SpeechToTextConfig [here](../apidocs/agents/agents.config)
+Check the available defaults and options for the SpeechToTextConfig [here](../../apidocs/agents/agents.config)
 ```
 
 To initialize the component we also need a model client for a speech to text model. We will be using the WebSocket client for RoboML for this purpose.
@@ -71,17 +71,17 @@ speech_to_text = SpeechToText(
 )
 ```
 
-The trigger parameter lets the component know that it has to perform its function (in this case model inference) when an input is received on this particular topic. In our configuration, the component will be triggered using voice activity detection on the continuous stream of audio being received on the microphone. Next we will setup our MLLM component.
+The trigger parameter lets the component know that it has to perform its function (in this case model inference) when an input is received on this particular topic. In our configuration, the component will be triggered using voice activity detection on the continuous stream of audio being received on the microphone. Next we will setup our VLM component.
 
-## MLLM Component
+## VLM Component
 
-The MLLM component takes as input a text topic (the output of the SpeechToText component) and an image topic, assuming we have a camera device onboard the robot publishing this topic. And just like before we need to provide a model client, this time with an MLLM model. This time we will use the OllamaClient along with _llava:latest_ model, a popular opensource multimodal LLM available on Ollama. Furthermore, we will configure our MLLM component using `MLLMConfig`. We will set `stream=True` to make the MLLM output text, be published as a stream for downstream components that consume this output. In _EmbodiedAgents_, streaming can output can be chunked using a `break_character` in the config (Default: '.').This way the downstream TextToSpeech component can start generating audio as soon as the first sentence is produced by the LLM.
+The VLM component takes as input a text topic (the output of the SpeechToText component) and an image topic, assuming we have a camera device onboard the robot publishing this topic. And just like before we need to provide a model client, this time with an VLM model. This time we will use the OllamaClient along with _llava:latest_ model, a popular opensource multimodal LLM available on Ollama. Furthermore, we will configure our VLM component using `VLMConfig`. We will set `stream=True` to make the VLM output text, be published as a stream for downstream components that consume this output. In _EmbodiedAgents_, streaming can output can be chunked using a `break_character` in the config (Default: '.').This way the downstream TextToSpeech component can start generating audio as soon as the first sentence is produced by the LLM.
 
 ```{note}
 Ollama is one of the most popular local LLM serving projects. Learn about setting up Ollama [here](https://ollama.com).
 ```
 
-Here is the code for our MLLM setup.
+Here is the code for our VLM setup.
 
 ```python
 from agents.clients.ollama import OllamaClient
@@ -109,7 +109,7 @@ mllm = VLM(
 )
 ```
 
-We can further customize the our MLLM component by attaching a context prompt template. This can be done at the component level or at the level of a particular input topic. In this case we will attach a prompt template to the input topic **text_query**.
+We can further customize the our VLM component by attaching a context prompt template. This can be done at the component level or at the level of a particular input topic. In this case we will attach a prompt template to the input topic **text_query**.
 
 ```python
 # Attach a prompt template

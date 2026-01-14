@@ -1,4 +1,4 @@
-# Clients 🔌
+# Clients
 
 Certain components in _EmbodiedAgents_ deal with ML models, vector databases, or both. These components take in a model or DB client as one of their initialization parameters. The reason for this abstraction is to enforce _separation of concerns_. Whether an ML model is running on the edge hardware, on a powerful compute node in the network, or in the cloud, the components running on the robot edge can always use the model (or DB) via a client in a standardized way.
 

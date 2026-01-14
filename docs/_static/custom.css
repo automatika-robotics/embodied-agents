@@ -58,3 +58,17 @@ html[data-theme="light"] a.pst-navbar-icon:hover {
     opacity: 0.85;
     filter: brightness(0) saturate(100%) invert(70%) sepia(0%) saturate(0%) hue-rotate(0deg) brightness(60%) contrast(150%);
 }
+
+/* === Sidebar Navigation Styling === */
+
+/* Make top-level (Tier 1) sidebar navigation items bold */
+/* This targets items like "Recipes", "Installation", "Quickstart" */
+nav.bd-links .bd-sidenav > li > a {
+    font-weight: 700; /* Bold */
+}
+
+/* Ensure sub-menu (Tier 2+) items stay normal weight */
+/* This targets items nested inside, like individual recipe pages */
+nav.bd-links .bd-sidenav > li > ul > li > a {
+    font-weight: 400; /* Normal */
+}

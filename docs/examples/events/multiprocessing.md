@@ -1,6 +1,42 @@
-# Bringing it all together 🤖
+# Making the System Robust And Production Ready
 
-In this example we will combine everything we implemented in the previous examples to create one big graph of components. Afterwards we will analyze what we have accomplished. Here is what the code looks like:
+In the last [recipe](../foundation/complete.md) we saw how we can make a complex graph of components to create an intelligent embodied agent. In this example we will have a look at some of the features that _EmbodiedAgents_ provides to make the same system robust and production-ready.
+
+## Run Components in Separate Processes
+The first thing we want to do is to run each component in a different process. By default our launcher launches each component in a seperate thread, however ROS was designed such that each functional unit (a component in _EmbodiedAgents_, that maps to a node in ROS) runs in a seperate process such that failure of one process does not crash the whole system. In order to enable multiprocessing we simply pass the name of our ROS package, i.e. 'automatika_embodied_agents' and the multiprocessing parameter to our launcher as follows:
+
+```python
+launcher = Launcher()
+launcher.add_pkg(
+    components=[
+        mllm,
+        llm,
+        goto,
+        introspector,
+        map,
+        router,
+        speech_to_text,
+        text_to_speech,
+        vision
+    ],
+    package_name="automatika_embodied_agents",
+    multiprocessing=True
+)
+```
+
+## Adding Fallback Behavior
+_EmbodiedAgents_ provides fallback behaviors in case a component fails. For example in components that send inference requests to machine learning models, a failure can happen if the model client cannot connect to model serving platform due to a connection glitch or a failure at the end of the platform. To handle such a case we can restart our component, which will make it check connection with the model serving platform during its activation. The component will remain in an unhealthy state until it succesfully activates, and it will keep on executing fallback behavior until it remains unhealthy. This fallback behavior can be specified in the launcher which will automatically apply it to all components. We can also add a time interval between consecutive fallback actions. All of this can be done by passing the following parameters to the launcher before bring up:
+
+```python
+launcher.on_fail(action_name="restart")
+launcher.fallback_rate = 1 / 10  # 0.1 Hz or 10 seconds
+```
+
+```{seealso}
+_EmbodiedAgents_ provides advanced fallback behaviors at the component level. To learn more about these, checkout [Sugarcoat🍬](https://automatika-robotics.github.io/sugarcoat/design/fallbacks.html)
+```
+
+With these two simple modifications, our complex graph of an embodied agent can be made significatly more robust to failures and has a graceful fallback behavior in case a failure does occur. The complete agent code is as follows:
 
 ```python
 import numpy as np
@@ -125,7 +161,11 @@ introspector.add_publisher_preprocessor(introspection_answer, introspection_vali
 
 # Define a semantic map using MapEncoding component
 layer1 = MapLayer(subscribes_to=detections_topic, temporal_change=True)
-layer2 = MapLayer(subscribes_to=introspection_answer, resolution_multiple=3)
+layer2 = MapLayer(
+    subscribes_to=introspection_answer,
+    resolution_multiple=3,
+    pre_defined=[(np.array([1.1, 2.1, 3.2]), "The door is here. DOOR.")],
+)
 
 position = Topic(name="odom", msg_type="Odometry")
 map_topic = Topic(name="map", msg_type="OccupancyGrid")
@@ -264,33 +304,11 @@ launcher.add_pkg(
         speech_to_text,
         text_to_speech,
         vision,
-    ]
+    ],
+    package_name="automatika_embodied_agents",
+    multiprocessing=True,
 )
+launcher.on_fail(action_name="restart")
+launcher.fallback_rate = 1 / 10  # 0.1 Hz or 10 seconds
 launcher.bringup()
-```
-```{note}
-Note how we use the same model for _general_q_and_a_ and _goto_to_x_ components. Similarly _visual_q_and_a_ and _introspector_ components share a multimodal LLM model.
-```
-
-In this small code block above, we have setup a fairly sophisticated embodied agent with the following capabilities.
-
-- A conversational interface using speech-to-text and text-to-speech models that uses the robots microphone and playback speaker.
-- The ability to answer contextual queries based on the robots camera, using an MLLM model.
-- The ability to answer generic queries, using an LLM model.
-- A semantic map of the robots observations, that acts as a spatio-temporal memory.
-- The ability to respond to Go-to-X commands utilizing the semantic map.
-- A single input interface that routes the input to different models based on its content.
-
-We can visualize the complete graph in the following diagram:
-```{figure} ../_static/complete_dark.png
-:class: only-dark
-:alt: Complete embodied agent
-:align: center
-Complete embodied agent graph
-```
-```{figure} ../_static/complete_light.png
-:class: only-light
-:alt: Complete embodied agent
-:align: center
-Complete embodied agent graph
 ```

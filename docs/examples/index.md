@@ -1,4 +1,4 @@
-# Recipes ✨
+# Recipes
 
 Welcome to the **_EmbodiedAgents_ Recipes** section!
 
@@ -13,21 +13,28 @@ Each tutorial walks through one or more [components](../basics/components.md) (e
 - How to load and configure components
 - How to connect components in an arbitrary graph
 - How to build complex physical agents that reason and act in simulated or real environments
+- How build agent graphs that can reconfigure themselves based on arbitrary events.
 
 ---
 
-```{toctree}
-:maxdepth: 1
+## Foundation Recipes
 
-conversational
-prompt_engineering
-semantic_map
-goto
-tool_calling
-semantic_router
-complete
-multiprocessing
-planning_model
+These recipes cover the core building blocks of the framework, from basic conversation to semantic mapping and tool usage.
+
+```{toctree}
+:maxdepth: 2
+
+foundation/index
+```
+
+## Events & Actions
+
+These recipes demonstrate how to make your agent robust, reactive, and self-referential using the event-driven architecture.
+
+```{toctree}
+:maxdepth: 2
+
+events/index
 ```
 
 ---
@@ -39,4 +46,4 @@ Each recipe includes:
 - **Conceptual takeaways**
 - **Ways to customize or extend**
 
-Stay curious, and feel free to adapt these examples to your robot, simulation, or use case!
+Stay curious, and feel free to adapt these examples to your robot and use case!

@@ -112,7 +112,7 @@ html_theme_options = {
     "use_source_button": True,
     "use_issues_button": True,
     "use_edit_page_button": True,
-    "show_navbar_depth": 2,
+    "show_navbar_depth": 3,
 }
 
 # --- LLMS.TXT CONFIGURATION ---
@@ -123,19 +123,20 @@ LLMS_TXT_SELECTION = [
     "quickstart.md",
     # Basics - The Core API
     "basics/components.md",
-    "basics/models.md",
     "basics/clients.md",
+    "basics/models.md",
     # Examples - Increasing complexity
-    "examples/conversational.md",
-    "examples/semantic_router.md",
-    "examples/goto.md",
-    "examples/semantic_map.md",
-    "examples/tool_calling.md",
-    "examples/complete.md",
-    "examples/multiprocessing.md",
-    "examples/prompt_engineering.md",
-    "examples/planning_model.md",
-    "examples/complete.md",
+    "examples/foundation/conversational.md",
+    "examples/foundation/prompt_engineering.md",
+    "examples/foundation/semantic_router.md",
+    "examples/foundation/goto.md",
+    "examples/foundation/semantic_map.md",
+    "examples/foundation/tool_calling.md",
+    "examples/foundation/complete.md",
+    "examples/foundation/planning_model.md",
+    "examples/events/multiprocessing.md",
+    "examples/events/fallback.md",
+    "examples/events/event_driven_description.md",
 ]
 
 
