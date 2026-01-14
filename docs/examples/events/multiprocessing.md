@@ -33,7 +33,7 @@ launcher.fallback_rate = 1 / 10  # 0.1 Hz or 10 seconds
 ```
 
 ```{seealso}
-_EmbodiedAgents_ provides advanced fallback behaviors at the component level. To learn more about these, checkout [Sugarcoat🍬](https://automatika-robotics.github.io/sugarcoat/design/fallbacks.html)
+_EmbodiedAgents_ provides advanced fallback behaviors at the component level. To learn more about these, checkout Sugarcoat🍬 [Documentation](https://automatika-robotics.github.io/sugarcoat/design/fallbacks.html).
 ```
 
 With these two simple modifications, our complex graph of an embodied agent can be made significatly more robust to failures and has a graceful fallback behavior in case a failure does occur. The complete agent code is as follows:

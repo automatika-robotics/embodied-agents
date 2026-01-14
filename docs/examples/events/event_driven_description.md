@@ -65,7 +65,7 @@ event_person_detected = events.OnChangeContainsAny(
 ```
 
 ```{seealso}
-Events can be used to create arbitrarily complex agent graphs. Check out all the events available in the Sugarcoat [documentation](https://automatika-robotics.github.io/sugarcoat/design/events.html).
+Events can be used to create arbitrarily complex agent graphs. Check out all the events available in the Sugarcoat🍬 [Documentation](https://automatika-robotics.github.io/sugarcoat/design/events.html).
 ```
 
 ### 3. The Cognition: VLM Component
