@@ -257,7 +257,7 @@ class Vision(ModelComponent):
             )
             if not result:
                 # raise a fallback trigger via health status
-                self.health_status.set_failure()
+                self.health_status.set_fail_algorithm()
                 return
         else:
             raise TypeError(

@@ -323,7 +323,7 @@ class SpeechToText(ModelComponent):
         except Exception as e:
             self.get_logger().error(str(e))
             # raise a fallback trigger via health status
-            self.health_status.set_failure()
+            self.health_status.set_fail_component()
 
     def _create_input(self, *_, **kwargs) -> Optional[Dict[str, Any]]:
         """Create inference input for SpeechToText models
