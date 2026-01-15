@@ -63,7 +63,7 @@ examples/events/event_driven_description
 
 ```{toctree}
 :maxdepth: 1
-:caption: API References
+:caption: Complete Reference
 
 apidocs/index
 ```

@@ -1,4 +1,4 @@
-# Create a semantic router to route text queries between different components
+# Create a Semantic Router to Route Information between Components
 
 The SemanticRouter component in EmbodiedAgents allows you to route text queries to specific components based on the user's intent or the output of a preceeding component.
 
