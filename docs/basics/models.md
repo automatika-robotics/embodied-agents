@@ -34,6 +34,9 @@ Clients mentioned earlier take as input a **model** or **vector database (DB)** 
 * - **[TransformersMLLM](../apidocs/agents/agents.models.md#classes)**
   - Multimodal LLM models from HuggingFace/ModelScope checkpoints for image-text inputs. Supports quantization. This model wrapper can be used with the GenericHTTPClient or any of the RoboML clients.
 
+* - **[LeRobotPolicy](../apidocs/agents/agents.models.md#classes)**
+  - LeRobotPolicy Model provides an interface for loading and running **LeRobot** policies— vision-language-action (VLA) models trained for robotic manipulation tasks. It supports automatic extraction of feature and action specifications directly from dataset metadata, as well as flexible configuration of policy behavior. The policy can be instantiated from any compatible **LeRobot** checkpoint hosted on HuggingFace, making it easy to load pretrained models such as `smolvla_base` or others from LeRobot. This wrapper must be used with the GRPC based LeRobotClient.
+
 * - **[RoboBrain2](../apidocs/agents/agents.models.md#classes)**
   - [RoboBrain 2.0 by BAAI](https://github.com/FlagOpen/RoboBrain2.0) supports interactive reasoning with long-horizon planning and closed-loop feedback, spatial perception for precise point and bbox prediction from complex instructions and temporal perception for future trajectory estimation. Checkpoint defaults to `"BAAI/RoboBrain2.0-7B"`, with larger variants available [here](https://huggingface.co/collections/BAAI/robobrain20-6841eeb1df55c207a4ea0036). This wrapper can be used with any of the RoboML clients.
 
