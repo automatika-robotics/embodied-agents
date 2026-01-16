@@ -396,7 +396,7 @@ class VLA(ModelComponent):
         """Prepare observations from current inputs
 
         :param task: Task string
-        :return: True if inference input is ready, False otherwise
+        :return: Inference input if inference input is available, None otherwise
         """
         if not self._state_topic:
             return

@@ -44,3 +44,6 @@ These recipes cover the journey from a basic multimodal conversational agent to 
 
 - **[Robot Manipulation](vla.md)**
   Control physical actuators using end-to-end Vision Language Action (VLA) models. This recipe demonstrates how to use the VLA component and LeRobot policies to map visual inputs directly to robot joint commands.
+
+- **[Event Driven Robot Manipulation](vla_with_event.md)**
+  Build a closed-loop agent where a VLM acts as a referee for a VLA. This recipe demonstrates how to use Events to automatically stop physical actions based on visual verification of task completion.

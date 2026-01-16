@@ -50,6 +50,13 @@ To drive our VLA component, we need a robot policy. _EmbodiedAgents_ provides th
 
 We will use a finetuned **SmolVLA** model, a lightweight VLA policy trained by LeRobot team and finetuned on our simulation scenario setup above. We also need to provide a `dataset_info_file`. This is useful because the VLA needs to know the statistical distribution of the training data (normalization stats) to correctly interpret the robot's raw inputs. This file is part of the standard LeRobot Dataset format. We will use the info file from the dataset on which our SmolVLA policy was finetuned on.
 
+````{important}
+In order to use the LeRobotClient you will need extra dependencies that can be installed as follows:
+```shell
+pip install grpcio protobuf
+pip install torch --index-url https://download.pytorch.org/whl/cpu # And a lightweight CPU version (recommended) of torch
+````
+
 ```python
 # Specify the LeRobot Policy to use
 policy = LeRobotPolicy(
@@ -101,7 +108,6 @@ config = VLAConfig(
     # URDF is required for safety capping and joint limit verification
     robot_urdf_file="./so101_new_calib.urdf"
 )
-
 ```
 
 ```{warning}
@@ -133,6 +139,8 @@ vla = VLA(
 vla.set_termination_trigger("timesteps", max_timesteps=50)
 ```
 
+Here is the completed section with the terminal command instructions.
+
 ## Launching the Component
 
 ```python
@@ -141,6 +149,18 @@ from agents.ros import Launcher
 launcher = Launcher()
 launcher.add_pkg(components=[vla])
 launcher.bringup()
+```
+
+Now we can send our pick and place command to the component. Since the VLA component acts as a **ROS2 Action Server**, we can trigger it directly from the terminal using the standard `ros2 action` CLI.
+
+Open a new terminal, source your workspace and send the goal (the natural language instruction) to the component. The action server endpoint defaults to `component_name/action_name`.
+
+```bash
+ros2 action send_goal /vla_with_smolvla/vision_language_action automatika_embodied_agents/action/VisionLanguageAction "{task: 'pick up the oranges and place them in the bowl'}"
+```
+
+```{note}
+The `task` string is the natural language instruction that the VLA model conditions its actions on. Ensure this instruction matches the distribution of prompts used during the training of the model (e.g. "pick orange", "put orange in bin" etc).
 ```
 
 And there you have it! You have successfully configured an end-to-end VLA agent. The complete code is available below.

@@ -49,6 +49,7 @@ examples/foundation/planning_model
 :maxdepth: 1
 :caption: Manipulation with VLAs
 examples/foundation/vla
+examples/foundation/vla_with_event
 ```
 
 ```{toctree}

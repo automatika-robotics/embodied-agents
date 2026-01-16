@@ -133,6 +133,8 @@ LLMS_TXT_SELECTION = [
     "examples/foundation/tool_calling.md",
     "examples/foundation/complete.md",
     "examples/foundation/planning_model.md",
+    "examples/foundation/vla.md",
+    "examples/foundation/vla_with_event.md",
     "examples/events/multiprocessing.md",
     "examples/events/fallback.md",
     "examples/events/event_driven_description.md",
