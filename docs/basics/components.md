@@ -3,7 +3,7 @@
 A **Component** is the primary execution unit in _EmbodiedAgents_. They can represent anything that can be termed as functional behaviour. For example the ability to understand the process text. Components can be combined arbitrarily to create more complex systems such as multi-modal agents with perception-action loops. Conceptually, each component is a lot of syntactic sugar over a ROS2 Lifecycle Node, inheriting all its lifecycle behaviors while also offering allied functionality to manage inputs and outputs to simplify development. Components receive one or more ROS topics as inputs and produce outputs on designated topics. The specific types and formats of these topics depend on the component's function.
 
 ```{note}
-To learn more about the internal structure and lifecycle behavior of components, check out the documentation of [Sugarcoat🍬](https://automatika-robotics.github.io/sugarcoat/).
+To learn more about the internal structure and lifecycle behavior of components, check out the documentation of [Sugarcoat🍬](https://automatika-robotics.github.io/sugarcoat/design/component.html).
 ```
 
 ## Components Available in _EmbodiedAgents_
@@ -75,4 +75,4 @@ In _EmbodiedAgents_, components can operate in one of two modes:
 
 Each component maintains an internal health state. This is used to support fallback behaviors and graceful degradation in case of errors or resource unavailability. Health monitoring is essential for building reliable and resilient autonomous agents, especially in real-world environments.
 
-Fallback behaviors can include retry mechanisms, switching to alternate inputs, or deactivating the component safely. For deeper understanding, refer to [Sugarcoat🍬](https://automatika-robotics.github.io/sugarcoat/), which underpins the lifecycle and health management logic.
+Fallback behaviors can include retry mechanisms, switching to alternate inputs, or deactivating the component safely. For deeper understanding, refer to [Sugarcoat🍬](https://automatika-robotics.github.io/sugarcoat/design/fallbacks.html), which underpins the lifecycle and health management logic.
