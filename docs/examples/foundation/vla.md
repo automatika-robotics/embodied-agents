@@ -102,6 +102,10 @@ Now we assemble the component. The `VLA` component acts as a ROS2 Action Server.
 
 We also define a termination trigger. Since VLA tasks (like picking up an object) are finite, we can tell the component to stop after a specific event or a boolean trigger is received.
 
+```{note}
+The termination trigger can be published by another component observing the scene, for example a VLM component that is asking a periodic question to itself with a `FixedInput`.
+```
+
 ```python
 from agents.components import VLA
 from agents.events import OnEqual
@@ -136,11 +140,6 @@ from agents.ros import Launcher
 
 launcher = Launcher()
 launcher.add_pkg(components=[vla])
-
-# If the VLA crashes, attempt to restart it automatically
-launcher.on_fail(action_name="restart")
-launcher.fallback_rate = 0.1 # Check health every 10 seconds
-
 launcher.bringup()
 ```
 
@@ -220,7 +219,5 @@ vla.set_termination_trigger('event', stop_event=termination_event)
 # --- 6. Launch ---
 launcher = Launcher()
 launcher.add_pkg(components=[vla])
-launcher.on_fail(action_name="restart")
-launcher.fallback_rate = 0.1
 launcher.bringup()
 ```
