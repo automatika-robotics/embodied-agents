@@ -88,7 +88,7 @@ class LeRobotClient(ModelClient):
 
                 `python -m lerobot.async_inference.policy_server --host={self.host} --port={self.port}`
 
-                To install LeRobot >= {LEROBOT_MIN_VERSION}, follow instructions on https://github.com/huggingface/lerobot?tab=readme-ov-file#install-lerobot-
+                To install LeRobot >= {LEROBOT_MIN_VERSION}, follow instructions on https://huggingface.co/docs/lerobot/installation
                 """
             )
             raise

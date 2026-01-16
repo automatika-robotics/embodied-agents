@@ -28,7 +28,7 @@ _EmbodiedAgents_ は、生成 AI (Generative AI) と物理ロボット工学の�
 
 ### モデルサービングプラットフォームのインストール
 
-_EmbodiedAgents_ のコアは、特定のモデルサービングプラットフォームに依存しません。現在は [Ollama](https://ollama.com)、[RoboML](https://github.com/automatika-robotics/robo-ml)、および OpenAI 互換 API を備えた任意のプラットフォームやクラウドプロバイダー（例：[vLLM](https://github.com/vllm-project/vllm)、[lmdeploy](https://github.com/InternLM/lmdeploy) など）をサポートしています。これらのいずれかを使用するには、各プロジェクトの指示に従ってインストールしてください。新しいプラットフォームへの対応は継続的に追加されています。特定のプラットフォームをサポートしたい場合は、Issue や PR を提出してください。
+_EmbodiedAgents_ の中核は、モデルサービングプラットフォームに依存しません。[Ollama](https://ollama.com)、[RoboML](https://github.com/automatika-robotics/robo-ml) に加え、OpenAI 互換 API を持つすべてのプラットフォームやクラウドプロバイダー（例：[vLLM](https://github.com/vllm-project/vllm)、[lmdeploy](https://github.com/InternLM/lmdeploy) 等）をサポートしています。VLA モデルについては、_EmbodiedAgents_ は [LeRobot](https://github.com/huggingface/lerobot) の非同期推論サーバー (Async Inference server) 上で提供されるポリシー (policies) に対応しています。各プロジェクトが提供する手順に従って、いずれかをインストールしてください。新たなプラットフォームへのサポートは順次追加されています。特定のプラットフォームへの対応をご希望の場合は、Issue または PR を作成してください。
 
 ### _EmbodiedAgents_ のインストール（Ubuntu）
 

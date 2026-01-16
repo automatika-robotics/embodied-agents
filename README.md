@@ -28,7 +28,7 @@ Dive right in with [Example Recipes](https://automatika-robotics.github.io/embod
 
 ### Install a model serving platform
 
-The core of _EmbodiedAgents_ is agnostic to model serving platforms. It currently supports [Ollama](https://ollama.com), [RoboML](https://github.com/automatika-robotics/robo-ml) and any platform or cloud provider with an OpenAI compatible API (e.g. [vLLM](https://github.com/vllm-project/vllm), [lmdeploy](https://github.com/InternLM/lmdeploy) etc.). Please install either of these by following the instructions provided by respective projects. Support for new platforms is being continuously added. If you would like to support a particular platform, please open an issue/PR.
+The core of _EmbodiedAgents_ is agnostic to model serving platforms. It supports [Ollama](https://ollama.com), [RoboML](https://github.com/automatika-robotics/robo-ml) and all platforms or cloud provider with an OpenAI compatible API (e.g. [vLLM](https://github.com/vllm-project/vllm), [lmdeploy](https://github.com/InternLM/lmdeploy) etc.). For VLA models _EmbodiedAgents_ supports policies severed on the Async Inference server from [LeRobot](https://github.com/huggingface/lerobot). Please install either of these by following the instructions provided by respective projects. Support for new platforms is being continuously added. If you would like to support a particular platform, please open an issue/PR.
 
 ### Install _EmbodiedAgents_ (Ubuntu)
 

@@ -4,6 +4,12 @@ The frontier of Embodied AI is moving away from modular pipelines (perception ->
 
 In this tutorial, we will build an agent capable of performing physical manipulation tasks using the **VLA** component. We will utilize the [LeRobot](https://github.com/huggingface/lerobot) ecosystem to load a pretrained "SmolVLA" policy and connect it to a robot arm.
 
+````{important}
+In order to run this tutorial you will need to install LeRobot as a model serving platform. You can see the installation instructions [here](https://huggingface.co/docs/lerobot/installation). After installation run the LeRobot async inference server as follows.
+```shell
+python -m lerobot.async_inference.policy_server --host=<HOST_ADDRESS> --port=<PORT>
+````
+
 ## Simulation Setup
 
 **TO BE ADDED**
@@ -42,7 +48,7 @@ joints_action = Topic(name="/isaac_joint_command", msg_type="JointState")
 
 To drive our VLA component, we need a robot policy. _EmbodiedAgents_ provides the `LeRobotPolicy` class, which interfaces seamlessly with models trained with LeRobot and hosted on the HuggingFace Hub.
 
-We will use **SmolVLA**, a lightweight VLA policy. We also need to provide a `dataset_info_file`. This is crucial because the VLA needs to know the statistical distribution of the training data (normalization stats) to correctly interpret the robot's raw inputs.
+We will use a finetuned **SmolVLA** model, a lightweight VLA policy trained by LeRobot team and finetuned on our simulation scenario setup above. We also need to provide a `dataset_info_file`. This is useful because the VLA needs to know the statistical distribution of the training data (normalization stats) to correctly interpret the robot's raw inputs. This file is part of the standard LeRobot Dataset format. We will use the info file from the dataset on which our SmolVLA policy was finetuned on.
 
 ```python
 # Specify the LeRobot Policy to use
@@ -99,7 +105,7 @@ config = VLAConfig(
 ```
 
 ```{warning}
-If the `joint_names_map` is incomplete, the component will raise an error during initialization. The VLA model cannot infer actions for joints it cannot see.
+If the `joint_names_map` is incomplete, the component will raise an error during initialization.
 ```
 
 ## The VLA Component

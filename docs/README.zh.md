@@ -28,7 +28,7 @@ _EmbodiedAgents_ 是一个构建于 **ROS2** 之上的生产级框架，旨在�
 
 ### 安装模型部署平台
 
-_EmbodiedAgents_ 的核心与具体的模型部署平台无关。目前支持的平台包括 [Ollama](https://ollama.com)、[RoboML](https://github.com/automatika-robotics/robo-ml)，以及任何兼容 OpenAI API 的平台或云服务提供商（例如 [vLLM](https://github.com/vllm-project/vllm)、[lmdeploy](https://github.com/InternLM/lmdeploy) 等）。请根据各自项目提供的说明进行安装。我们正在持续添加对新平台的支持。如果你希望支持某个平台，请提交 issue 或 PR。
+*EmbodiedAgents* 的核心不依赖于特定的模型服务平台。它支持 [Ollama](https://ollama.com)、[RoboML](https://github.com/automatika-robotics/robo-ml) 以及所有具有 OpenAI 兼容 API 的平台或云服务提供商（例如 [vLLM](https://github.com/vllm-project/vllm)、[lmdeploy](https://github.com/InternLM/lmdeploy) 等）。对于 VLA 模型，*EmbodiedAgents* 支持部署在 [LeRobot](https://github.com/huggingface/lerobot) 的异步推理服务器 (Async Inference server) 上的策略 (policies)。请遵循各项目的官方说明进行安装。我们正在持续增加对新平台的支持。如果您希望支持特定的平台，请提交 issue 或 PR。
 
 ### 安装 _EmbodiedAgents_（Ubuntu）
 
