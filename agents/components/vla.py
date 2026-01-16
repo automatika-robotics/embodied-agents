@@ -210,7 +210,7 @@ class VLA(ModelComponent):
                 f"Action will terminate on {stop_event.name} event or after {max_timesteps}"
             )
             self.config._termination_timesteps = max_timesteps
-            self.events_actions = {stop_event.json: Action(self.signal_done)}
+            self._add_event_action_pair(stop_event, Action(self.signal_done))
 
     def signal_done(self):
         """Signals that the action is complete.
