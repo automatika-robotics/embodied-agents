@@ -4,6 +4,12 @@ The frontier of Embodied AI is moving away from modular pipelines (perception ->
 
 In this tutorial, we will build an agent capable of performing physical manipulation tasks using the **VLA** component. We will utilize the [LeRobot](https://github.com/huggingface/lerobot) ecosystem to load a pretrained "SmolVLA" policy and connect it to a robot arm.
 
+## Simulation Setup
+
+**TO BE ADDED**
+
+## Setting up our VLA based Agent
+
 We will start by importing the relevant components.
 
 ```python
@@ -100,26 +106,14 @@ If the `joint_names_map` is incomplete, the component will raise an error during
 
 Now we assemble the component. The `VLA` component acts as a ROS2 Action Server. It creates a feedback loop: it ingests the state and images, processes them through the `LeRobotClient`, and publishes the resulting actions to the `joints_action` topic.
 
-We also define a termination trigger. Since VLA tasks (like picking up an object) are finite, we can tell the component to stop after a specific event or a boolean trigger is received.
+We also define a termination trigger. Since VLA tasks (like picking up an object) are finite, we can tell the component to stop after a specific number of timesteps.
 
 ```{note}
-The termination trigger can be published by another component observing the scene, for example a VLM component that is asking a periodic question to itself with a `FixedInput`.
+The termination trigger can be `timesteps`, `keyboard` and `event`. The event can be based on a topic published by another component observing the scene, for example a VLM component that is asking a periodic question to itself with a `FixedInput`. Check out the [following tutorial](vla_with_event.md).
 ```
 
 ```python
 from agents.components import VLA
-from agents.events import OnEqual
-
-# Create a manual trigger topic to stop the agent if needed
-trigger_topic = Topic(name="trigger_topic", msg_type="Bool")
-
-# Define a termination event (Stop when trigger_topic is True)
-termination_event = OnEqual(
-    event_name="termination_event",
-    event_source=trigger_topic,
-    trigger_value=True,
-    nested_attributes='data'
-)
 
 vla = VLA(
     inputs=[state, camera1, camera2],
@@ -130,10 +124,10 @@ vla = VLA(
 )
 
 # Attach the stop trigger
-vla.set_termination_trigger('event', stop_event=termination_event)
+vla.set_termination_trigger("timesteps", max_timesteps=50)
 ```
 
-## Launching with Component
+## Launching the Component
 
 ```python
 from agents.ros import Launcher
@@ -156,13 +150,13 @@ from agents.models import LeRobotPolicy
 from agents.ros import Topic, Launcher
 from agents.events import OnEqual
 
-# --- 1. Define Topics ---
+# --- Define Topics ---
 state = Topic(name="/isaac_joint_states", msg_type="JointState")
 camera1 = Topic(name="/front_camera/image_raw", msg_type="Image")
 camera2 = Topic(name="/wrist_camera/image_raw", msg_type="Image")
 joints_action = Topic(name="/isaac_joint_command", msg_type="JointState")
 
-# --- 2. Setup Policy (The Brain) ---
+# --- Setup Policy (The Brain) ---
 policy = LeRobotPolicy(
     name="my_policy",
     policy_type="smolvla",
@@ -172,7 +166,7 @@ policy = LeRobotPolicy(
 
 client = LeRobotClient(model=policy)
 
-# --- 3. Configure Mapping (The Nervous System) ---
+# --- Configure Mapping (The Nervous System) ---
 # Map dataset names -> robot URDF names
 joints_map = {
     "shoulder_pan.pos": "Rotation",
@@ -195,16 +189,7 @@ config = VLAConfig(
     robot_urdf_file="./so101_new_calib.urdf"
 )
 
-# --- 4. Define Triggers ---
-trigger_topic = Topic(name="trigger_topic", msg_type="Bool")
-termination_event = OnEqual(
-    event_name="termination_event",
-    event_source=trigger_topic,
-    trigger_value=True,
-    nested_attributes='data'
-)
-
-# --- 5. Initialize Component ---
+# --- Initialize Component ---
 vla = VLA(
     inputs=[state, camera1, camera2],
     outputs=[joints_action],
@@ -213,10 +198,10 @@ vla = VLA(
     component_name="vla_with_smolvla",
 )
 
-# Set the component to stop when the event fires
-vla.set_termination_trigger('event', stop_event=termination_event)
+# Set the component to stop after a certain number of timesteps
+vla.set_termination_trigger('timesteps', max_timesteps=50)
 
-# --- 6. Launch ---
+# --- Launch ---
 launcher = Launcher()
 launcher.add_pkg(components=[vla])
 launcher.bringup()
