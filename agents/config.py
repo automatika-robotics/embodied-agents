@@ -57,9 +57,9 @@ class LLMConfig(ModelComponentConfig):
     Configuration for the Large Language Model (LLM) component.
 
     It defines various settings that control how the LLM component operates, including
-    whether to enable chat history, retreival augmented generation (RAG) and more.
+    whether to enable chat history, retrieval augmented generation (RAG) and more.
 
-    :param enable_rag: Enables or disables Retreival Augmented Generation.
+    :param enable_rag: Enables or disables Retrieval Augmented Generation.
     :type enable_rag: bool
     :param collection_name: The name of the vectordb collection to use for RAG.
     :type collection_name: Optional[str]
