@@ -17,6 +17,30 @@ def _size_validator(instance, attribute, value):
 
 @define(kw_only=True)
 class JointsData:
+    """
+    JointsData structure representing the state, command, or trajectory for a set of robot joints.
+
+    It encapsulates kinematic and dynamic information such as positions, velocities,
+    accelerations, and efforts, along with timing constraints.
+
+    :param joints_names: A list of unique identifiers/names for the joints.
+    :type joints_names: List[str]
+    :param positions: An array of joint positions (e.g., angles in radians for revolute joints
+        or meters for prismatic joints). Defaults to an empty array.
+    :type positions: np.ndarray
+    :param velocities: An array of joint velocities. Defaults to an empty array.
+    :type velocities: np.ndarray
+    :param accelerations: An array of joint accelerations. Defaults to an empty array.
+    :type accelerations: np.ndarray
+    :param efforts: An array of joint efforts (e.g., torque or force). Defaults to an empty array.
+    :type efforts: np.ndarray
+    :param duration: The time duration associated with this joint state (e.g., time to reach
+        this state). Defaults to 0.0.
+    :type duration: float
+    :param delay: A time delay to wait before applying or processing this joint data.
+        Defaults to 0.0.
+    :type delay: float
+    """
     joints_names: List[str] = field()
     positions: np.ndarray = field(
         default=np.array([], dtype=np.float64), validator=_size_validator

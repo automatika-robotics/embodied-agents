@@ -138,7 +138,7 @@ def get_prompt_template(template: Union[str, Path]) -> Template:
             return env.get_template(Path(template).name)
         except Exception as e:
             raise Exception(
-                f"Exception occured while reading template from file: {e}"
+                f"Exception occurred while reading template from file: {e}"
             ) from e
     else:
         # read from string
@@ -147,7 +147,7 @@ def get_prompt_template(template: Union[str, Path]) -> Template:
             return env.from_string(format(template))
         except Exception as e:
             raise Exception(
-                f"Exception occured while reading template from string: {e}"
+                f"Exception occurred while reading template from string: {e}"
             ) from e
 
 
@@ -313,7 +313,7 @@ def load_model(model_name: str, model_path: str) -> str:
             progress_bar = tqdm(
                 total=total_size, unit="iB", unit_scale=True, desc=f"{model_name}"
             )
-            # delete the file if an exception occurs while downloadin
+            # delete the file if an exception occurs while downloading
             try:
                 with open(model_full_path, "wb") as f:
                     for chunk in r.iter_bytes(chunk_size=1024):
@@ -323,7 +323,7 @@ def load_model(model_name: str, model_path: str) -> str:
                 import logging
 
                 logging.error(
-                    f"Error occured while downloading model {model_name} from given url. Try restarting your components."
+                    f"Error occurred while downloading model {model_name} from given url. Try restarting your components."
                 )
                 if model_full_path.exists():
                     model_full_path.unlink()
