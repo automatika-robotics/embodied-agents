@@ -165,7 +165,7 @@ class MLLM(LLM):
         if not query or not images:
             return None
 
-        # get RAG results if enabled in config and if docs retreived
+        # get RAG results if enabled in config and if docs retrieved
         rag_result = self._handle_rag_query(query) if self.config.enable_rag else None
 
         # set system prompt template

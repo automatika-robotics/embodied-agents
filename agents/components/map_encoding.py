@@ -133,7 +133,7 @@ class MapEncoding(Component):
         :rtype: None
         """
         self.get_logger().info(
-            f"Adding points to map colletion: {self.config.map_name}"
+            f"Adding points to map collection: {self.config.map_name}"
         )
 
         time_stamp = self.get_ros_time().sec
@@ -223,7 +223,7 @@ class MapEncoding(Component):
                     to_be_added["metadatas"].append(metadata)
                     to_be_added["documents"].append(item)
                 else:
-                    # time value remains 0 if layer assumed to be temporaly static
+                    # time value remains 0 if layer assumed to be temporary static
                     to_be_checked["ids"].append(f"{name}:{coordinates_string}:0")
                     to_be_checked["metadatas"].append(metadata)
                     to_be_checked["documents"].append(item)

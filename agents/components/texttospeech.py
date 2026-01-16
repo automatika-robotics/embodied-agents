@@ -226,7 +226,7 @@ class TextToSpeech(ModelComponent):
                 self.get_logger().debug("Event set, stopping data feed.")
                 return
 
-        # Wait until playback is finished after last chunck
+        # Wait until playback is finished after last chunk
         wait_start_time = time.monotonic()
         estimated_remaining_blocks = self._stream_queue.qsize()
         max_wait_timeout = estimated_remaining_blocks * (
@@ -418,7 +418,7 @@ class TextToSpeech(ModelComponent):
         """
         self._incoming_queue.put(audio_chunk)
 
-        # If the playback thread doesnt exist or isn't alive, start it.
+        # If the playback thread doesn't exist or isn't alive, start it.
         with self._thread_lock:
             if self._playback_thread is None or not self._playback_thread.is_alive():
                 self.get_logger().debug(

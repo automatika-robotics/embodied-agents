@@ -171,7 +171,7 @@ class ModelComponent(Component):
                 # stop running thread
                 self.client_stop_event.set()
                 self.client_thread.join(timeout=10)
-                # mark any pendings tasks as finished
+                # mark any pending tasks as finished
                 while not self.resp_queue.empty():
                     try:
                         self.resp_queue.get_nowait()
@@ -282,7 +282,7 @@ class ModelComponent(Component):
                     return result
                 except queue.Empty:
                     self.get_logger().error(
-                        "Did not recieve result in websocket response queue"
+                        "Did not receive result in websocket response queue"
                     )
                     # raise a fallback trigger via health status
                     self.health_status.set_fail_algorithm()

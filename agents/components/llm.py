@@ -177,7 +177,7 @@ class LLM(ModelComponent):
     def add_documents(
         self, ids: List[str], metadatas: List[Dict], documents: List[str]
     ) -> None:
-        """Add documents to vector DB for Retreival Augmented Generation (RAG).
+        """Add documents to vector DB for Retrieval Augmented Generation (RAG).
 
         ```{important}
         Documents can be provided after parsing them using a document parser. Checkout various document parsers, available in packages like [langchain_community](https://github.com/langchain-ai/langchain/tree/master/libs/community/langchain_community/document_loaders/parsers)
@@ -207,7 +207,7 @@ class LLM(ModelComponent):
         self.db_client.add(db_input)
 
     def _handle_rag_query(self, query: str) -> Optional[str]:
-        """Internal handler for retreiving documents for RAG.
+        """Internal handler for retrieving documents for RAG.
         :param query:
         :type query: str
         :rtype: str | None
@@ -372,7 +372,7 @@ class LLM(ModelComponent):
         if query is None:
             return None
 
-        # get RAG results if enabled in config and if docs retreived
+        # get RAG results if enabled in config and if docs retrieved
         rag_result = self._handle_rag_query(query) if self.config.enable_rag else None
 
         # set system prompt template

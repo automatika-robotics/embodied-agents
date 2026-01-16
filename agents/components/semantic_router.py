@@ -357,7 +357,7 @@ class SemanticRouter(LLM):
         if tool_calls:
             for tool in tool_calls:
                 fn_name = tool["function"]["name"]
-                # Retreive routing function
+                # Retrieve routing function
                 if func := self._route_funcs.get(fn_name):
                     self.get_logger().debug(f"Routing payload to: {fn_name}")
                     func()

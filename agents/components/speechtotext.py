@@ -308,7 +308,7 @@ class SpeechToText(ModelComponent):
                 if newly_committed_words := self.transcript_buffer.flush():
                     self.result_partial.extend(newly_committed_words)
 
-            # publish output when termination token resceived
+            # publish output when termination token received
             else:
                 # Get any last words not currently confirmed in hypothesis
                 if remaining_words := self.transcript_buffer.complete():

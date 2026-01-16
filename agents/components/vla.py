@@ -101,7 +101,7 @@ class VLA(ModelComponent):
 
         if not isinstance(self.model_client, LeRobotClient):
             raise TypeError(
-                "Currenlty VLA component only takes in LeRobotClient. Please use LeRobot Policy Server to serve your VLA."
+                "Currently VLA component only takes in LeRobotClient. Please use LeRobot Policy Server to serve your VLA."
             )
 
         if self.config.warmup:
@@ -327,7 +327,7 @@ class VLA(ModelComponent):
         return self.config.joint_limits
 
     def _receive_actions_from_client(self):
-        """Timer callback for continuosly receiving actions from client"""
+        """Timer callback for continuously receiving actions from client"""
         latest_actions = self.model_client.receive_actions()
         if latest_actions:
             self._update_actions_queue(latest_actions)
@@ -441,7 +441,7 @@ class VLA(ModelComponent):
             if not self._actions_received.empty():
                 # Return the immediate next action
                 action_to_pub = self._actions_received.get()
-                # TODO: Remove torch depenedency here once server can send numpy arrays
+                # TODO: Remove torch dependency here once server can send numpy arrays
                 action_to_pub_data = action_to_pub.action.numpy()
             else:
                 return

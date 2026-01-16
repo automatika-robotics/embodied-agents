@@ -156,7 +156,7 @@ class Vision(ModelComponent):
         super().custom_on_deactivate()
 
     def _visualize(self):
-        """CV2 based visualization of infereance results"""
+        """CV2 based visualization of inference results"""
         cv2.namedWindow(self.node_name)
 
         while not self.stop_event.is_set():
@@ -261,7 +261,7 @@ class Vision(ModelComponent):
                 return
         else:
             raise TypeError(
-                "Vision component either requires a model client or enable_local_classifier needs to be set True in the VisionConfig. If latter was done, make sure no errors occured during initialization of the local classifier model."
+                "Vision component either requires a model client or enable_local_classifier needs to be set True in the VisionConfig. If latter was done, make sure no errors occurred during initialization of the local classifier model."
             )
 
         # result acquired, publish inference result
