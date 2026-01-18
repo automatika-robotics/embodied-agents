@@ -17,6 +17,11 @@
     font-weight: normal;
 }
 
+.text-blue {
+    color: var(--automatika-secondary);
+    font-weight: normal;
+}
+
 /* === Global link styling === */
 a {
     color: var(--automatika-secondary);

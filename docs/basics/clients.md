@@ -1,6 +1,6 @@
 # Clients
 
-Clients are execution backends that instantiate and call inference on ML models. Certain components in _EmbodiedAgents_ deal with ML models, vector databases, or both. These components take in a model or DB client as one of their initialization parameters. The reason for this abstraction is to enforce _separation of concerns_. Whether an ML model is running on the edge hardware, on a powerful compute node in the network, or in the cloud, the components running on the robot edge can always use the model (or DB) via a client in a standardized way.
+Clients are execution <span class="text-red-strong">backends that instantiate and call inference on ML models</span>. Certain components in _EmbodiedAgents_ deal with ML models, vector databases, or both. These components take in a <span class="text-blue">model client or DB client</span> as one of their initialization parameters. The reason for this abstraction is to enforce _separation of concerns_. Whether an ML model is running on the edge hardware, on a powerful compute node in the network, or in the cloud, the components running on the robot edge can always use the model (or DB) via a client in a standardized way.
 
 This approach makes components independent of the model serving platforms, which may implement various inference optimizations depending on the model type. As a result, developers can choose an ML serving platform that offers the best latency/accuracy tradeoff based on the application’s requirements.
 
