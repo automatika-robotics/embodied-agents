@@ -72,6 +72,14 @@ Now we need an **Action**. In `EmbodiedAgents`, components have built-in methods
 
 We wrap this method in an `Action` so it can be triggered by an event.
 
+```{note}
+All components implement some default actions as well as component specific actions. In this case we are implementing a component specific action.
+```
+
+```{seealso}
+To see a list of default actions available to all components, checkout Sugarcoat🍬 [Documentation](https://automatika-robotics.github.io/sugarcoat/design/actions.html)
+```
+
 ```python
 # Define the Fallback Action
 # This action calls the component's internal method `change_model_client`.
