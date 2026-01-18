@@ -114,7 +114,7 @@ When a task is specified in MLLMConfig, the MLLM component automatically produce
 Learn about installing Kompass [here](https://automatika-robotics.github.io/kompass/install.html)
 ```
 
-_Kompass_ allows for various kinds of navigation behaviour configured in the same recipe. However, we will only be using point-to-point navigation and the default configuration for its components. Since _Kompass_ is a navigation stack, as a first step, we will configure the robot and its motion model as follows:
+_Kompass_ allows for various kinds of navigation behaviour configured in the same recipe. However, we will only be using point-to-point navigation and the default configuration for its components. Since _Kompass_ is a navigation stack, as a first step, we will configure the robot and its motion model. _Kompass_ provides a `RobotConfig` primitive where you can add your robot's motion model (ACKERMANN, OMNI, DIFFERENTIAL_DRIVE), the robot geometry parameters and the robot control limits:
 
 ```python
 import numpy as np

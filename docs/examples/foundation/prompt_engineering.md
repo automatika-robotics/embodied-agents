@@ -1,6 +1,6 @@
-# Prompt engineering for LLMs/MLLMs using vision models
+# Prompt engineering for LLMs/VLMs using vision models
 
-In this recipe we will use the output of an object detection component to enrich the prompt of an MLLM component. Let us start by importing the components.
+In this recipe we will use the output of an object detection component to enrich the prompt of a VLM (MLLM) component. Let us start by importing the components.
 ```python
 from agents.components import Vision, MLLM
 ```

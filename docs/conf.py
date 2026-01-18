@@ -4,6 +4,7 @@ import sys
 from datetime import date
 import xml.etree.ElementTree as ET
 import shutil
+from pathlib import Path
 
 sys.path.insert(0, os.path.abspath(".."))
 version = ET.parse("../package.xml").getroot()[1].text
@@ -111,8 +112,81 @@ html_theme_options = {
     "use_source_button": True,
     "use_issues_button": True,
     "use_edit_page_button": True,
-    "show_navbar_depth": 2,
 }
+
+# --- LLMS.TXT CONFIGURATION ---
+# Defines the order of manual documentation for the curriculum
+LLMS_TXT_SELECTION = [
+    "intro.md",
+    "installation.md",
+    "quickstart.md",
+    # Basics - The Core API
+    "basics/components.md",
+    "basics/clients.md",
+    "basics/models.md",
+    # Examples - Increasing complexity
+    "examples/foundation/conversational.md",
+    "examples/foundation/prompt_engineering.md",
+    "examples/foundation/semantic_router.md",
+    "examples/foundation/goto.md",
+    "examples/foundation/semantic_map.md",
+    "examples/foundation/tool_calling.md",
+    "examples/foundation/complete.md",
+    "examples/foundation/planning_model.md",
+    "examples/foundation/vla.md",
+    "examples/foundation/vla_with_event.md",
+    "examples/events/multiprocessing.md",
+    "examples/events/fallback.md",
+    "examples/events/event_driven_description.md",
+]
+
+
+def format_for_llm(filename: str, content: str) -> str:
+    """Helper to wrap content in a readable format for LLMs."""
+    # Clean up HTML image tags to reduce noise
+    lines = content.split("\n")
+    cleaned_lines = [line for line in lines if "<img src=" not in line]
+    cleaned_content = "\n".join(cleaned_lines).strip()
+
+    return f"## File: {filename}\n```markdown\n{cleaned_content}\n```\n\n"
+
+
+def generate_llms_txt(app, exception):
+    """Generates llms.txt combining manual docs and autodoc2 API docs."""
+    if exception is not None:
+        return  # Do not generate if build failed
+
+    print("[llms.txt] Starting generation...")
+
+    src_dir = Path(app.srcdir)
+    out_dir = Path(app.outdir)
+    full_text = []
+
+    # Add Preamble
+    preamble = (
+        "# EmbodiedAgents Documentation\n\n"
+        "The following text contains the documentation for the EmbodiedAgents framework "
+        "by Automatika Robotics. It is optimized for context ingestion.\n\n"
+    )
+    full_text.append(preamble)
+
+    # Process Manual Docs (Curated List)
+    print(f"[llms.txt] Processing {len(LLMS_TXT_SELECTION)} manual files...")
+    for relative_path in LLMS_TXT_SELECTION:
+        file_path = src_dir / relative_path
+        if file_path.exists():
+            content = file_path.read_text(encoding="utf-8")
+            full_text.append(format_for_llm(relative_path, content))
+        else:
+            print(f"[llms.txt] Warning: Manual file not found: {relative_path}")
+
+    # Write output to the build root
+    output_path = out_dir / "llms.txt"
+    try:
+        output_path.write_text("".join(full_text), encoding="utf-8")
+        print(f"[llms.txt] Successfully generated: {output_path}")
+    except Exception as e:
+        print(f"[llms.txt] Error writing file: {e}")
 
 
 def copy_markdown_files(app, exception):
@@ -153,3 +227,4 @@ def setup(app):
     """Plugin to post build and copy markdowns as well"""
     app.connect("build-finished", copy_markdown_files)
     app.connect("build-finished", create_robots_txt)
+    app.connect("build-finished", generate_llms_txt)

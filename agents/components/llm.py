@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Any, Optional, Union, Callable, List, Dict
+from typing import Any, Optional, Union, Callable, List, Dict, MutableMapping
 import msgpack
 import msgpack_numpy as m_pack
 
@@ -11,6 +11,7 @@ from ..clients import OllamaClient, GenericHTTPClient
 from ..config import LLMConfig
 from ..ros import (
     FixedInput,
+    Event,
     String,
     Topic,
     DetectionsMultiSource,
@@ -72,10 +73,10 @@ class LLM(ModelComponent):
         *,
         inputs: List[Union[Topic, FixedInput]],
         outputs: List[Topic],
-        model_client: ModelClient,
+        model_client: Optional[ModelClient] = None,
         config: Optional[LLMConfig] = None,
         db_client: Optional[DBClient] = None,
-        trigger: Union[Topic, List[Topic], float] = 1.0,
+        trigger: Union[Topic, List[Topic], float, Event] = 1.0,
         component_name: str,
         **kwargs,
     ):
@@ -90,6 +91,11 @@ class LLM(ModelComponent):
             }
         )
         self.handled_outputs = [String, StreamingString]
+
+        if type(self) is LLM and not model_client:
+            raise RuntimeError(
+                "LLM component cannot be initialized without a model_client. Please pass a valid model_client."
+            )
 
         self.model_client = model_client
 
@@ -171,7 +177,7 @@ class LLM(ModelComponent):
     def add_documents(
         self, ids: List[str], metadatas: List[Dict], documents: List[str]
     ) -> None:
-        """Add documents to vector DB for Retreival Augmented Generation (RAG).
+        """Add documents to vector DB for Retrieval Augmented Generation (RAG).
 
         ```{important}
         Documents can be provided after parsing them using a document parser. Checkout various document parsers, available in packages like [langchain_community](https://github.com/langchain-ai/langchain/tree/master/libs/community/langchain_community/document_loaders/parsers)
@@ -201,7 +207,7 @@ class LLM(ModelComponent):
         self.db_client.add(db_input)
 
     def _handle_rag_query(self, query: str) -> Optional[str]:
-        """Internal handler for retreiving documents for RAG.
+        """Internal handler for retrieving documents for RAG.
         :param query:
         :type query: str
         :rtype: str | None
@@ -223,7 +229,9 @@ class LLM(ModelComponent):
                 "\n".join(
                     f"{str(meta)}, {doc}"
                     for meta, doc in zip(
-                        result["output"]["metadatas"], result["output"]["documents"]
+                        result["output"]["metadatas"],
+                        result["output"]["documents"],
+                        strict=True,
                     )
                 )
                 if self.config.add_metadata
@@ -253,7 +261,7 @@ class LLM(ModelComponent):
 
         self.messages.append(message)
 
-    def _handle_tool_calls(self, result: Dict) -> Optional[Dict]:
+    def _handle_tool_calls(self, result: MutableMapping) -> Optional[MutableMapping]:
         """Internal handler for tool calling"""
         if not result.get("tool_calls"):
             self.get_logger().warning(
@@ -310,7 +318,8 @@ class LLM(ModelComponent):
                 "query": self.messages,
                 **self.config._get_inference_params(),
             }
-            return self.model_client.inference(input)
+            if self.model_client:
+                return self.model_client.inference(input)
 
         else:
             # return result with its output set to last function response
@@ -363,7 +372,7 @@ class LLM(ModelComponent):
         if query is None:
             return None
 
-        # get RAG results if enabled in config and if docs retreived
+        # get RAG results if enabled in config and if docs retrieved
         rag_result = self._handle_rag_query(query) if self.config.enable_rag else None
 
         # set system prompt template
@@ -443,9 +452,9 @@ class LLM(ModelComponent):
         except Exception as e:
             self.get_logger().error(str(e))
             # raise a fallback trigger via health status
-            self.health_status.set_failure()
+            self.health_status.set_fail_algorithm()
 
-    def __handle_streaming_generator(self, result: Dict) -> Optional[List]:
+    def __handle_streaming_generator(self, result: MutableMapping) -> Optional[List]:
         """Handle streaming output"""
         try:
             for token in result["output"]:
@@ -462,7 +471,7 @@ class LLM(ModelComponent):
         except Exception as e:
             self.get_logger().error(str(e))
             # raise a fallback trigger via health status
-            self.health_status.set_failure()
+            self.health_status.set_fail_algorithm()
 
     def _execution_step(self, *args, **kwargs):
         """_execution_step.
@@ -472,9 +481,11 @@ class LLM(ModelComponent):
         """
 
         if self.run_type is ComponentRunType.EVENT and (trigger := kwargs.get("topic")):
-            if not trigger:
-                return
-            self.get_logger().debug(f"Received trigger on topic {trigger.name}")
+            if trigger:
+                self.get_logger().debug(f"Received trigger on topic {trigger.name}")
+            else:
+                self.get_logger().debug("Got triggered by an event")
+
         else:
             time_stamp = self.get_ros_time().sec
             self.get_logger().debug(f"Sending at {time_stamp}")
@@ -502,15 +513,11 @@ class LLM(ModelComponent):
 
             # raise a fallback trigger via health status
             if not result:
-                self.health_status.set_failure()
+                self.health_status.set_fail_component()
                 return
 
             # publish inference result
             self._publish(result)
-
-        else:
-            # raise a fallback trigger via health status
-            self.health_status.set_failure()
 
     @validate_func_args
     def set_topic_prompt(self, input_topic: Topic, template: Union[str, Path]) -> None:
@@ -628,9 +635,9 @@ class LLM(ModelComponent):
         my_component.register_tool(tool=my_arbitrary_function, tool_description=my_func_description, send_tool_response_to_model=False)
         ```
         """
-        if not isinstance(self.model_client, OllamaClient):
+        if self.model_client and not self.model_client.supports_tool_calls:
             raise TypeError(
-                "Currently registering tools is only supported when using an Ollama client with the component."
+                f"The provided model client ({self.model_client.__class__.__name__}) does not support tool calling."
             )
         if self.config.stream:
             raise TypeError(
@@ -675,11 +682,15 @@ class LLM(ModelComponent):
         inference_input = {"query": [message], **self.inference_params}
 
         # Run inference once to warm up and once to measure time
-        self.model_client.inference(inference_input)
+        if self.model_client:
+            self.model_client.inference(inference_input)
 
         inference_input = {"query": [message], **self.config._get_inference_params()}
         start_time = time.time()
-        result = self.model_client.inference(inference_input)
+        if self.model_client:
+            result = self.model_client.inference(inference_input)
+        else:
+            result = None
         elapsed_time = time.time() - start_time
 
         if result:

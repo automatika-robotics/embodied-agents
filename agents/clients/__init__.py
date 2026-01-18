@@ -14,7 +14,7 @@ Some clients might need additional dependacies, which are provided in the follow
 
 * - **Generic**
   - [GenericHTTPClient](agents.clients.generic.GenericHTTPClient)
-  - A generic client for interacting with OpenAI-compatible APIs, including vLLM, ms-swift, lmdeploy, Google Gemini, etc. Supports both standard and streaming responses, and works with LLMS and multimodal LLMs. Designed to be compatible with any API following the OpenAI standard.
+  - A generic client for interacting with OpenAI-compatible APIs, including vLLM, ms-swift, lmdeploy, Google Gemini, etc. Supports both standard and streaming responses, and works with LLMS and multimodal LLMs. Designed to be compatible with any API following the OpenAI standard. Supports tool calling.
 
 * - **RoboML**
   - [RoboMLHTTPClient](agents.clients.roboml.RoboMLHTTPClient)
@@ -31,8 +31,15 @@ Some clients might need additional dependacies, which are provided in the follow
 
 * - **Ollama**
   - [OllamaClient](agents.clients.ollama.OllamaClient)
-  - An HTTP client for interacting with ML models served on [Ollama](https://ollama.com). Supports LLMs/MLLMs and embedding models. It can be invoked with the generic [OllamaModel](agents.models.md#classes).
+  - An HTTP client for interacting with ML models served on [Ollama](https://ollama.com). Supports LLMs/MLLMs and embedding models. It can be invoked with the generic [OllamaModel](agents.models.md#classes). Supports tool calling.
     Requires `pip install ollama`.
+
+* - **LeRobot**
+  - [LeRobotClient](agents.clients.lerobot.LeRobotClient)
+  - A GRPC based asynchronous client for vision-language-action (VLA) policies served on LeRobot Policy Server. Supports various robot action policies available in LeRobot package by HuggingFace. It can be invoked with the generic wrapper [LeRobotPolicy](agents.models.md#classes).
+    Requires grpc and torch (at least the CPU version):<br/>
+    `pip install grpcio`<br/>
+    `pip install torch --index-url https://download.pytorch.org/whl/cpu`
 
 * - **ChromaDB**
   - [ChromaClient](agents.clients.chroma.ChromaClient)
@@ -49,12 +56,14 @@ from .roboml import (
     RoboMLRESPClient,
     RoboMLWSClient,
 )
+from .lerobot import LeRobotClient
 from .chroma import ChromaClient
 
 
 __all__ = [
     "GenericHTTPClient",
     "OllamaClient",
+    "LeRobotClient",
     "ChromaClient",
     "RoboMLHTTPClient",
     "RoboMLRESPClient",

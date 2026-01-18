@@ -1,6 +1,7 @@
 import json
 from abc import abstractmethod
 from copy import deepcopy
+from types import NoneType
 from typing import Optional, Sequence, Union, List, Dict, Type
 
 from ..ros import (
@@ -10,6 +11,8 @@ from ..ros import (
     SupportedType,
     Topic,
     BaseTopic,
+    Event,
+    Action,
 )
 from ..config import BaseComponentConfig
 from ..utils import flatten
@@ -23,7 +26,7 @@ class Component(BaseComponent):
         inputs: Optional[Sequence[Union[Topic, FixedInput]]] = None,
         outputs: Optional[Sequence[Topic]] = None,
         config: Optional[BaseComponentConfig] = None,
-        trigger: Union[Topic, List[Topic], float] = 1.0,
+        trigger: Union[Topic, List[Topic], float, Event, NoneType] = 1.0,
         component_name: str = "agents_component",
         **kwargs,
     ):
@@ -60,7 +63,6 @@ class Component(BaseComponent):
             outputs=outputs,
             config=self.config,
             callback_group=None,
-            enable_health_broadcast=False,
             **kwargs,
         )
 
@@ -81,10 +83,12 @@ class Component(BaseComponent):
         Called by parent BaseComponent
         """
         self.get_logger().info("STARTING ALL SUBSCRIBERS")
-        # TODO: Inspect when component runtype is being set
         all_callbacks = (
             list(self.callbacks.values()) + list(self.trig_callbacks.values())
             if self.run_type is ComponentRunType.EVENT
+            and hasattr(
+                self, "trig_callbacks"
+            )  # second condition is necessary if being triggered by events
             else self.callbacks.values()
         )
         for callback in all_callbacks:
@@ -116,7 +120,7 @@ class Component(BaseComponent):
             if callback._subscriber:
                 self.destroy_subscription(callback._subscriber)
 
-    def trigger(self, trigger: Union[Topic, List[Topic], float]) -> None:
+    def trigger(self, trigger: Union[Topic, List[Topic], float, Event, None]) -> None:
         """
         Set component trigger
         """
@@ -140,13 +144,25 @@ class Component(BaseComponent):
             self.run_type = ComponentRunType.EVENT
             self.trig_callbacks = {trigger.name: self.callbacks[trigger.name]}
             del self.callbacks[trigger.name]
+        elif isinstance(trigger, Event):
+            self.run_type = ComponentRunType.EVENT
+            self._add_event_action_pair(trigger, Action(self._execution_step))
+
+        elif trigger is None:
+            if self.run_type not in [
+                ComponentRunType.ACTION_SERVER,
+                ComponentRunType.SERVER,
+            ]:
+                raise TypeError(
+                    f"Component run type is set to `{self.run_type}` but no trigger is provided. Trigger can only be set to None when component run type is `ACTION_SERVER` or `SERVER`."
+                )
 
         else:
             self.run_type = ComponentRunType.TIMED
             # Set component loop_rate (Hz)
             self.config.loop_rate = 1 / trigger
 
-        self.trig_topic: Union[Topic, List[Topic], float] = trigger
+        self.trig_topic: Union[Topic, List[Topic], float, Event, None] = trigger
 
     def validate_topics(
         self,
@@ -218,7 +234,7 @@ class Component(BaseComponent):
         :param kwargs:
         """
         raise NotImplementedError(
-            "This method needs to be implemented by child components."
+            "_execution_step method needs to be implemented by child components."
         )
 
     def _update_cmd_args_list(self):
@@ -239,9 +255,76 @@ class Component(BaseComponent):
         :return: Serialized inputs
         :rtype:  str | bytes | bytearray
         """
+        serialized_trigger = {}
         if isinstance(self.trig_topic, Topic):
-            return self.trig_topic.to_json()
+            serialized_trigger["trigger_type"] = "Topic"
+            serialized_trigger["trigger"] = self.trig_topic.to_json()
         elif isinstance(self.trig_topic, List):
-            return json.dumps([t.to_json() for t in self.trig_topic])
+            serialized_trigger["trigger_type"] = "List"
+            serialized_trigger["trigger"] = json.dumps([
+                t.to_json() for t in self.trig_topic
+            ])
+        elif isinstance(self.trig_topic, Event):
+            serialized_trigger["trigger_type"] = "Event"
+            serialized_trigger["trigger"] = self.trig_topic.json
         else:
-            return json.dumps(self.trig_topic)
+            serialized_trigger = self.trig_topic
+        return json.dumps(serialized_trigger)
+
+    def _replace_input_topic(
+        self, topic_name: str, new_name: str, msg_type: str
+    ) -> Optional[str]:
+        """Replaces a component input topic by a new topic. Overrides parent method to handle trigger callbacks
+
+        :param topic_name: Old Topic name
+        :type topic_name: str
+        :param new_name: New topic name
+        :type new_name: str
+        :param msg_type: New topic message type
+        :type msg_type: str
+        :return: Error message or None if no errors are found
+        :rtype: Optional[str]
+        """
+        error_msg = super()._replace_input_topic(topic_name, new_name, msg_type)
+        if not error_msg:
+            return
+
+        # topic to be replaced is not found in callbacks -> check in trigger callbacks
+        normalized_topic_name = (
+            topic_name[1:] if topic_name.startswith("/") else topic_name
+        )
+
+        if topic_name not in self.trig_callbacks:
+            error_msg = f"Topic {topic_name} is not found in Component inputs"
+            return error_msg
+
+        old_callback = self.trig_callbacks[normalized_topic_name]
+
+        # Create New Topic/Callback
+        try:
+            new_topic = Topic(name=new_name, msg_type=msg_type)
+            new_callback = new_topic.msg_type.callback(
+                new_topic, node_name=self.node_name
+            )
+        except Exception as e:
+            error_msg = f"Invalid topic parameters: {e}"
+            return error_msg
+
+        # Handle Active Subscriber
+        if old_callback._subscriber:
+            self.get_logger().info(
+                f"Destroying subscriber for old topic '{topic_name}'"
+            )
+            self.destroy_subscription(old_callback._subscriber)
+
+            new_callback.set_subscriber(self._add_ros_subscriber(new_callback))
+
+        # Update callbacks dictionary
+        self.trig_callbacks.pop(normalized_topic_name)
+        self.trig_callbacks[new_name] = new_callback
+
+        # update the internal lists
+        old_topic = old_callback.input_topic
+        self._update_inactive_input_topic(old_topic, new_topic)
+
+        return None

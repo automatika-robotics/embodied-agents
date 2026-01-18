@@ -1,6 +1,6 @@
-# Clients 🔌
+# Clients
 
-Certain components in _EmbodiedAgents_ deal with ML models, vector databases, or both. These components take in a model or DB client as one of their initialization parameters. The reason for this abstraction is to enforce _separation of concerns_. Whether an ML model is running on the edge hardware, on a powerful compute node in the network, or in the cloud, the components running on the robot edge can always use the model (or DB) via a client in a standardized way.
+Clients are execution <span class="text-red-strong">backends that instantiate and call inference on ML models</span>. Certain components in _EmbodiedAgents_ deal with ML models, vector databases, or both. These components take in a <span class="text-blue">model client or DB client</span> as one of their initialization parameters. The reason for this abstraction is to enforce _separation of concerns_. Whether an ML model is running on the edge hardware, on a powerful compute node in the network, or in the cloud, the components running on the robot edge can always use the model (or DB) via a client in a standardized way.
 
 This approach makes components independent of the model serving platforms, which may implement various inference optimizations depending on the model type. As a result, developers can choose an ML serving platform that offers the best latency/accuracy tradeoff based on the application’s requirements.
 
@@ -21,7 +21,7 @@ Some clients may require additional dependencies, which are detailed in the tabl
 
 * - **Generic**
   - GenericHTTPClient
-  - A generic client for interacting with OpenAI-compatible APIs, including vLLM, ms-swift, lmdeploy, Google Gemini, etc. Supports both standard and streaming responses, and works with LLMS and multimodal LLMs. Designed to be compatible with any API following the OpenAI standard.
+  - A generic client for interacting with OpenAI-compatible APIs, including vLLM, ms-swift, lmdeploy, Google Gemini, etc. Supports both standard and streaming responses, and works with LLMS and multimodal LLMs. Designed to be compatible with any API following the OpenAI standard. Supports tool calling.
 
 * - **RoboML**
   - RoboMLHTTPClient
@@ -38,8 +38,15 @@ Some clients may require additional dependencies, which are detailed in the tabl
 
 * - **Ollama**
   - OllamaClient
-  - An HTTP client for interacting with ML models served on [Ollama](https://ollama.com). Supports LLMs/MLLMs and embedding models. It can be invoked with the generic [OllamaModel](../apidocs/agents/agents.models.md#classes).
+  - An HTTP client for interacting with ML models served on [Ollama](https://ollama.com). Supports LLMs/MLLMs and embedding models. It can be invoked with the generic [OllamaModel](../apidocs/agents/agents.models.md#classes). Supports tool calling.
     Requires `pip install ollama`.
+
+* - **LeRobot**
+  - LeRobotClient
+  - A GRPC based asynchronous client for vision-language-action (VLA) policies served on LeRobot Policy Server. Supports various robot action policies available in LeRobot package by HuggingFace. It can be invoked with the generic wrapper [LeRobotPolicy](../apidocs/agents/agents.models.md#classes).
+    Requires grpc and torch (at least the CPU version):<br/>
+    `pip install grpcio`<br/>
+    `pip install torch --index-url https://download.pytorch.org/whl/cpu`
 
 * - **ChromaDB**
   - ChromaClient

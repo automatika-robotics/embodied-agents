@@ -105,16 +105,28 @@ llm_route = Route(
     ],
 )
 
+# --- MODE 1: VECTOR ROUTING (Active) ---
 router_config = SemanticRouterConfig(router_name="go-to-router", distance_func="l2")
-# Initialize the router component
+
 router = SemanticRouter(
     inputs=[query_topic],
     routes=[llm_route, goto_route],
     default_route=llm_route,  # If none of the routes fall within a distance threshold
     config=router_config,
-    db_client=chroma_client,  # reusing the db_client from the previous example
+    db_client=chroma_client,  # Vector mode requires db_client
     component_name="router",
 )
+
+# --- MODE 2: LLM ROUTING (Commented Out) ---
+# To use LLM routing (Agentic), comment out the block above and uncomment this:
+#
+# router = SemanticRouter(
+#     inputs=[query_topic],
+#     routes=[llm_route, goto_route],
+#     default_route=llm_route,
+#     model_client=llama_client, # LLM mode requires model_client
+#     component_name="router",
+# )
 
 # Launch the components
 launcher = Launcher()

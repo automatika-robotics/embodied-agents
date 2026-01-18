@@ -9,6 +9,7 @@ from ..ros import (
     OccupancyGrid,
     Odometry,
     String,
+    Event,
     Topic,
     Detections,
     DetectionsMultiSource,
@@ -69,7 +70,7 @@ class MapEncoding(Component):
         map_topic: Topic,
         config: MapConfig,
         db_client: DBClient,
-        trigger: Union[Topic, List[Topic], float] = 10.0,
+        trigger: Union[Topic, List[Topic], float, Event] = 10.0,
         component_name: str,
         **kwargs,
     ):
@@ -132,7 +133,7 @@ class MapEncoding(Component):
         :rtype: None
         """
         self.get_logger().info(
-            f"Adding points to map colletion: {self.config.map_name}"
+            f"Adding points to map collection: {self.config.map_name}"
         )
 
         time_stamp = self.get_ros_time().sec
@@ -222,7 +223,7 @@ class MapEncoding(Component):
                     to_be_added["metadatas"].append(metadata)
                     to_be_added["documents"].append(item)
                 else:
-                    # time value remains 0 if layer assumed to be temporaly static
+                    # time value remains 0 if layer assumed to be temporary static
                     to_be_checked["ids"].append(f"{name}:{coordinates_string}:0")
                     to_be_checked["metadatas"].append(metadata)
                     to_be_checked["documents"].append(item)
@@ -243,9 +244,10 @@ class MapEncoding(Component):
         time_stamp = self.get_ros_time().sec
         if self.run_type is ComponentRunType.EVENT:
             trigger = kwargs.get("topic")
-            if not trigger:
-                return
-            self.get_logger().debug(f"Received trigger of {trigger.name}")
+            if trigger:
+                self.get_logger().debug(f"Received trigger of {trigger.name}")
+            else:
+                self.get_logger().debug("Map Encoding got triggered by an event.")
         else:
             self.get_logger().debug(f"Sending at {time_stamp}")
 

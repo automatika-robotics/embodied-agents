@@ -24,7 +24,6 @@ from ..utils import (
     draw_points_2d,
     draw_detection_bounding_boxes,
 )
-from ..utils.vision import LocalVisionModel
 from .model_component import ModelComponent
 from .component_base import ComponentRunType
 
@@ -131,6 +130,14 @@ class Vision(ModelComponent):
 
         # deploy local model if enabled
         if not self.model_client and self.config.enable_local_classifier:
+            from ..utils.vision import LocalVisionModel, _MS_COCO_LABELS
+
+            if not self.config.dataset_labels:
+                self.get_logger().warning(
+                    "No dataset labels provided for the local model, using default MS_COCO labels"
+                )
+                self.config.dataset_labels = _MS_COCO_LABELS
+
             self.local_classifier = LocalVisionModel(
                 model_path=load_model(
                     "local_classifier", self.config.local_classifier_model_path
@@ -149,7 +156,7 @@ class Vision(ModelComponent):
         super().custom_on_deactivate()
 
     def _visualize(self):
-        """CV2 based visualization of infereance results"""
+        """CV2 based visualization of inference results"""
         cv2.namedWindow(self.node_name)
 
         while not self.stop_event.is_set():
@@ -239,6 +246,8 @@ class Vision(ModelComponent):
         # conduct inference
         if self.model_client:
             result = self._call_inference(inference_input, unpack=True)
+            if not result:
+                return
         elif self.config.enable_local_classifier:
             result = self.local_classifier(
                 inference_input,
@@ -246,24 +255,24 @@ class Vision(ModelComponent):
                 self.config.input_width,
                 self.config.dataset_labels,
             )
+            if not result:
+                # raise a fallback trigger via health status
+                self.health_status.set_fail_algorithm()
+                return
         else:
             raise TypeError(
-                "Vision component either requires a model client or enable_local_classifier needs to be set True in the VisionConfig. If latter was done, make sure no errors occured during initialization of the local classifier model."
+                "Vision component either requires a model client or enable_local_classifier needs to be set True in the VisionConfig. If latter was done, make sure no errors occurred during initialization of the local classifier model."
             )
 
-        # raise a fallback trigger via health status
-        if result:
-            # publish inference result
-            self._publish(
-                result,
-                images=self._images,
-                time_stamp=self.get_ros_time(),
-            )
-            if self.config.enable_visualization:
-                result["images"] = inference_input["images"]
-                self.queue.put_nowait(result)
-        else:
-            self.health_status.set_failure()
+        # result acquired, publish inference result
+        self._publish(
+            result,
+            images=self._images,
+            time_stamp=self.get_ros_time(),
+        )
+        if self.config.enable_visualization:
+            result["images"] = inference_input["images"]
+            self.queue.put_nowait(result)
 
     def _warmup(self):
         """Warm up and stat check"""

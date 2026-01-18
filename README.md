@@ -7,13 +7,12 @@
 
 🇨🇳 [简体中文](docs/README.zh.md) | 🇯🇵 [日本語](docs/README.ja.md)
 
-**_EmbodiedAgents_** is a fully-loaded ROS2 based framework for creating interactive physical agents that can understand, remember, and act upon contextual information from their environment.
+_EmbodiedAgents_ is a production-grade framework, built on top of **ROS2**, designed to deploy Physical AI on real world robots. It enables you to create interactive, physical agents that do not just chat, but **understand**, **move**, **manipulate**, and **adapt** to their environment.
 
-- **Production Ready Physical Agents:** Designed to be used with autonomous robot systems that operate in real world dynamic environments. _EmbodiedAgents_ makes it simple to create systems that make use of Physical AI.
-- **Intuitive API**: Simple pythonic API to utilize local or cloud based ML models (specifically **Multimodal LLMs** and other **transformer based architectures**) on robots, with all the benefits of component lifecycle management, health monitoring and fallback mechanisms to make your agents robust.
+- **Production Ready Physical Agents:** Designed to be used with autonomous robot systems that operate in real world dynamic environments. _EmbodiedAgents_ makes it simple to create systems that make use of Physical AI. It provides an orchestration layer for **Adaptive Intelligence**.
 - **Self-referential and Event Driven**: An agent created with _EmbodiedAgents_ can start, stop or reconfigure its own components based on internal and external events. For example, an agent can change the ML model for planning based on its location on the map or input from the vision model. _EmbodiedAgents_ makes it simple to create agents that are self-referential [Gödel machines](https://en.wikipedia.org/wiki/G%C3%B6del_machine).
 - **Semantic Memory**: Integrates vector databases, semantic routing and other supporting components to quickly build arbitrarily complex graphs for agentic information flow. No need to utilize bloated "GenAI" frameworks on your robot.
-- **Made in ROS2**: Utilizes ROS2 as the underlying distributed communications backbone. Theoretically, all devices that provide a ROS2 package can be utilized to send data to ML models, with callbacks implemented for most commonly used data types and infinite extensibility.
+- **Pure Python, Native ROS2**: Define complex asynchronous graphs in standard Python without touching XML launch files. Yet, underneath, it is pure ROS2 compatible with the entire ecosystem of hardware drivers, simulation tools, and visualization suites.
 
 Join our [Discord](https://discord.gg/B9ZU6qjzND) 👾
 
@@ -21,15 +20,15 @@ Checkout [Installation Instructions](https://automatika-robotics.github.io/embod
 
 Get started with the [Quickstart Guide](https://automatika-robotics.github.io/embodied-agents/quickstart.html) 🚀
 
-Get familiar with [Basic Concepts](https://automatika-robotics.github.io/embodied-agents/basics/index.html) 📚
+Get familiar with [Basic Concepts](https://automatika-robotics.github.io/embodied-agents/basics/components.html) 📚
 
-Dive right in with [Example Recipes](https://automatika-robotics.github.io/embodied-agents/examples/index.html) ✨
+Dive right in with [Example Recipes](https://automatika-robotics.github.io/embodied-agents/examples/foundation/index.html) ✨
 
 ## Installation 🛠️
 
 ### Install a model serving platform
 
-The core of _EmbodiedAgents_ is agnostic to model serving platforms. It currently supports [Ollama](https://ollama.com), [RoboML](https://github.com/automatika-robotics/robo-ml) and any platform or cloud provider with an OpenAI compatible API (e.g. [vLLM](https://github.com/vllm-project/vllm), [lmdeploy](https://github.com/InternLM/lmdeploy) etc.). Please install either of these by following the instructions provided by respective projects. Support for new platforms is being continuously added. If you would like to support a particular platform, please open an issue/PR.
+The core of _EmbodiedAgents_ is agnostic to model serving platforms. It supports [Ollama](https://ollama.com), [RoboML](https://github.com/automatika-robotics/robo-ml) and all platforms or cloud provider with an OpenAI compatible API (e.g. [vLLM](https://github.com/vllm-project/vllm), [lmdeploy](https://github.com/InternLM/lmdeploy) etc.). For VLA models _EmbodiedAgents_ supports policies severed on the Async Inference server from [LeRobot](https://github.com/huggingface/lerobot). Please install either of these by following the instructions provided by respective projects. Support for new platforms is being continuously added. If you would like to support a particular platform, please open an issue/PR.
 
 ### Install _EmbodiedAgents_ (Ubuntu)
 
@@ -52,7 +51,7 @@ If the attrs version from your package manager is < 23.2, install it using pip a
 Install python dependencies
 
 ```shell
-pip install numpy opencv-python-headless 'attrs>=23.2.0' jinja2 httpx setproctitle msgpack msgpack-numpy platformdirs tqdm websockets onnxruntime
+pip install numpy opencv-python-headless 'attrs>=23.2.0' jinja2 httpx setproctitle msgpack msgpack-numpy platformdirs tqdm websockets
 ```
 
 Download Sugarcoat🍬
@@ -96,7 +95,7 @@ mllm = VLM(
     inputs=[text0, image0],
     outputs=[text1],
     model_client=llava_client,
-    trigger=[text0],
+    trigger=text0,
     component_name="vqa"
 )
 # Additional prompt settings
@@ -113,7 +112,7 @@ And just like that we have an agent that can answer questions like **'What do yo
 
 ## Complex Physical Agents
 
-The quickstart example above is just an amuse-bouche of what is possible with _EmbodiedAgents_. In _EmbodiedAgents_ we can create arbitrarily sophisticated component graphs. And furthermore our system can be configured to even change or reconfigure itself based on events internal or external to the system. Check out the code for the following agent [here](https://automatika-robotics.github.io/embodied-agents/examples/complete.html).
+The quickstart example above is just an amuse-bouche of what is possible with _EmbodiedAgents_. In _EmbodiedAgents_ we can create arbitrarily sophisticated component graphs. And furthermore our system can be configured to even change or reconfigure itself based on events internal or external to the system. Check out the code for the following agent [here](https://automatika-robotics.github.io/embodied-agents/examples/foundation/complete.html).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/_static/complete_dark.png">
@@ -126,9 +125,10 @@ The quickstart example above is just an amuse-bouche of what is possible with _E
 Leveraging the power of the underlying [**Sugarcoat**](https://github.com/automatika-robotics/sugarcoat) framework, **_EmbodiedAgents_** offers a **fully dynamic, auto-generated Web UI** for every recipe. This feature is built with **FastHTML** and eliminates manual GUI development, instantly providing a responsive interface for control and visualization.
 
 The UI automatically creates:
-* Settings interfaces for all the components used in the recipe.
-* Real-time data visualizations and controls for component inputs/outputs.
-* WebSocket-based data streaming for all supported message types.
+
+- Settings interfaces for all the components used in the recipe.
+- Real-time data visualizations and controls for component inputs/outputs.
+- WebSocket-based data streaming for all supported message types.
 
 ### Example: VLM Agent UI
 

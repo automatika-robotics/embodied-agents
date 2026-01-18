@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Optional, Dict, Union, Generator
+from typing import Any, Optional, Dict, Union, Generator, MutableMapping
 
 from rclpy import logging
 
@@ -76,6 +76,16 @@ class ModelClient(ABC):
             "inference_timeout": self.inference_timeout,
         }
 
+    @property
+    def supports_tool_calls(self) -> bool:
+        """
+        Check if the client supports tool calling (function calling).
+        Defaults to False. Override in subclasses if supported.
+
+        :rtype: bool
+        """
+        return False
+
     def check_connection(self) -> None:
         """initialize.
         :rtype: None
@@ -89,7 +99,7 @@ class ModelClient(ABC):
         if self.init_on_activation:
             self._initialize()
 
-    def inference(self, inference_input: Dict[str, Any]) -> Optional[Dict]:
+    def inference(self, inference_input: Dict[str, Any]) -> Optional[MutableMapping]:
         """inference.
         :param inference_input:
         :type inference_input: dict[str, Any]
@@ -110,7 +120,7 @@ class ModelClient(ABC):
         :rtype: None
         """
         raise NotImplementedError(
-            "This method needs to be implemented in a child class"
+            "_check_connection method needs to be implemented in a child class"
         )
 
     @abstractmethod
@@ -119,25 +129,25 @@ class ModelClient(ABC):
         :rtype: None
         """
         raise NotImplementedError(
-            "This method needs to be implemented in a child class"
+            "_initialize method needs to be implemented in a child class"
         )
 
     @abstractmethod
     def _inference(
         self, inference_input: Dict[str, Any]
-    ) -> Optional[Dict[str, Union[str, Generator]]]:
+    ) -> Optional[MutableMapping[str, Union[str, Generator]]]:
         """inference.
         :param inference_input:
         :type inference_input: dict[str, Any]
         :rtype: dict | None
         """
         raise NotImplementedError(
-            "This method needs to be implemented in a child class"
+            "_inference method needs to be implemented in a child class"
         )
 
     @abstractmethod
     def _deinitialize(self):
         """deinitialize."""
         raise NotImplementedError(
-            "This method needs to be implemented in a child class"
+            "_deinitialize method needs to be implemented in a child class"
         )

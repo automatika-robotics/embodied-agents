@@ -1,9 +1,12 @@
 """The following classes provide wrappers for data being transmitted via ROS topics. These classes form the inputs and outputs of [Components](agents.components.md)."""
 
-from typing import Union, Any, Dict, List, Tuple
+from typing import Union, Any, Dict, List, Tuple, Optional
 import numpy as np
 from attrs import define, field, Factory
 from importlib.util import find_spec
+from rclpy.logging import get_logger
+
+from sensor_msgs.msg import JointState as JointStateROS
 
 # FROM SUGARCOAT
 from ros_sugar.supported_types import (
@@ -28,8 +31,13 @@ from ros_sugar.config import (
 )
 from ros_sugar.core import BaseComponent
 from ros_sugar.core.component import MutuallyExclusiveCallbackGroup
+from ros_sugar.core.component_actions import ComponentActions
 from ros_sugar import Launcher, UI_EXTENSIONS
-from ros_sugar.utils import component_action
+from ros_sugar.utils import component_action, component_fallback
+from ros_sugar.io.utils import run_external_processor
+from ros_sugar.actions import Action
+from ros_sugar.events import Event
+from ros_sugar import events
 
 # AGENTS TYPES
 from automatika_embodied_agents.msg import (
@@ -45,6 +53,7 @@ from automatika_embodied_agents.msg import (
     TrackingsMultiSource as ROSTrackingsMultiSource,
     PointsOfInterest as ROSPointsOfInterest,
 )
+from automatika_embodied_agents.action import VisionLanguageAction
 from .callbacks import (
     DetectionsCallback,
     DetectionsMultiSourceCallback,
@@ -52,16 +61,30 @@ from .callbacks import (
     RGBDCallback,
     VideoCallback,
     StreamingStringCallback,
+    JointStateCallback,
 )
+
+from .utils.actions import JointsData
 
 __all__ = [
     "String",
     "StreamingString",
+    "Video",
     "Audio",
     "Image",
     "CompressedImage",
     "OccupancyGrid",
     "Odometry",
+    "Detections",
+    "DetectionsMultiSource",
+    "PointsOfInterest",
+    "Trackings",
+    "TrackingsMultiSource",
+    "RGBD",
+    "JointTrajectoryPoint",
+    "JointTrajectory",
+    "JointJog",
+    "JointState",
     "Topic",
     "QoSConfig",
     "FixedInput",
@@ -71,15 +94,29 @@ __all__ = [
     "BaseComponentConfig",
     "ComponentRunType",
     "Launcher",
-    "component_action",
     "MapLayer",
     "Route",
     "MutuallyExclusiveCallbackGroup",
+    "Action",
+    "ComponentActions",
+    "events",
+    "Event",
+    "component_fallback",
+    "component_action",
+    "VisionLanguageAction",
+    "run_external_processor",
 ]
 
 
 class StreamingString(SupportedType):
-    """Custom Message: StreamingString"""
+    """
+    Wraps the `automatika_embodied_agents.msg.StreamingString` message type.
+
+    This type represents a string that is being streamed (e.g., token by token from an LLM).
+    It contains fields to indicate if the stream is active and if the transmission is complete.
+
+    **ROS2 Message Type**: `automatika_embodied_agents/msg/StreamingString`
+    """
 
     callback = StreamingStringCallback
     _ros_type = ROSStreamingString
@@ -104,7 +141,13 @@ class StreamingString(SupportedType):
 
 
 class Video(SupportedType):
-    """Custom Message: Video."""
+    """
+    Wraps the `automatika_embodied_agents.msg.Video` message type.
+
+    This type represents a sequence of images (frames). It can handle both raw images and compressed images, bundling them into a single video message structure.
+
+    **ROS2 Message Type**: `automatika_embodied_agents/msg/Video`
+    """
 
     _ros_type = ROSVideo
     callback = VideoCallback
@@ -133,7 +176,14 @@ class Video(SupportedType):
 
 
 class Detections(SupportedType):
-    """Custom Message: Detection."""
+    """
+    Wraps the `automatika_embodied_agents.msg.Detections2D` message type.
+
+    This type represents 2D object detections, including bounding boxes, labels, and confidence scores.
+    It can optionally bundle the source image (RGB or RGBD) associated with the detections.
+
+    **ROS2 Message Type**: `automatika_embodied_agents/msg/Detections2D`
+    """
 
     _ros_type = Detections2D
     callback = DetectionsCallback
@@ -186,7 +236,14 @@ class Detections(SupportedType):
 
 
 class DetectionsMultiSource(SupportedType):
-    """Custom Message: Detections."""
+    """
+    Wraps the `automatika_embodied_agents.msg.Detections2DMultiSource` message type.
+
+    This type handles a list of `Detections2D` messages, typically used when receiving
+    detection data from multiple cameras or sources simultaneously.
+
+    **ROS2 Message Type**: `automatika_embodied_agents/msg/Detections2DMultiSource`
+    """
 
     _ros_type = Detections2DMultiSource
     callback = DetectionsMultiSourceCallback
@@ -200,14 +257,21 @@ class DetectionsMultiSource(SupportedType):
         """
         msg = Detections2DMultiSource()
         detections = []
-        for img, detection in zip(images, output):
+        for img, detection in zip(images, output, strict=True):
             detections.append(Detections.convert(detection, img))
         msg.detections = detections
         return msg
 
 
 class PointsOfInterest(SupportedType):
-    """Custom Message: PointsOfInterest."""
+    """
+    Wraps the `automatika_embodied_agents.msg.PointsOfInterest` message type.
+
+    This type represents a set of 2D coordinates (x, y) on an image that are of interest,
+    bundled with the source image or depth map.
+
+    **ROS2 Message Type**: `automatika_embodied_agents/msg/PointsOfInterest`
+    """
 
     _ros_type = ROSPointsOfInterest
     callback = PointsOfInterestCallback  # not defined
@@ -245,7 +309,14 @@ class PointsOfInterest(SupportedType):
 
 
 class Trackings(SupportedType):
-    """Custom Message: Tracking."""
+    """
+    Wraps the `automatika_embodied_agents.msg.Trackings` message type.
+
+    This type represents tracked objects over time. It includes object IDs, tracked labels,
+    bounding boxes, centroids, and estimated velocities, along with the source image.
+
+    **ROS2 Message Type**: `automatika_embodied_agents/msg/Trackings`
+    """
 
     _ros_type = ROSTrackings
     callback = None  # Not defined in EmbodiedAgents
@@ -316,7 +387,14 @@ class Trackings(SupportedType):
 
 
 class TrackingsMultiSource(SupportedType):
-    """Custom Message: Trackings."""
+    """
+    Wraps the `automatika_embodied_agents.msg.TrackingsMultiSource` message type.
+
+    This type handles a list of `Trackings` messages, typically used for multi-camera
+    tracking scenarios.
+
+    **ROS2 Message Type**: `automatika_embodied_agents/msg/TrackingsMultiSource`
+    """
 
     _ros_type = ROSTrackingsMultiSource
     callback = None  # Not defined
@@ -330,14 +408,21 @@ class TrackingsMultiSource(SupportedType):
         """
         msg = ROSTrackingsMultiSource()
         trackings = []
-        for img, tracking in zip(images, output):
+        for img, tracking in zip(images, output, strict=True):
             trackings.append(Trackings.convert(tracking, img))
         msg.trackings = trackings
         return msg
 
 
 class RGBD(SupportedType):
-    """Adds callback for realsense2 aligned rgb and depth msg (rgbd)"""
+    """
+    Wraps the `realsense2_camera_msgs.msg.RGBD` message type.
+
+    This type represents aligned RGB and Depth images typically produced by RealSense cameras.
+    It requires the `realsense2_camera_msgs` package to be installed.
+
+    **ROS2 Message Type**: `realsense2_camera_msgs/msg/RGBD`
+    """
 
     callback = RGBDCallback
 
@@ -352,6 +437,179 @@ class RGBD(SupportedType):
         return RealSenseRGBD
 
 
+class JointTrajectoryPoint(SupportedType):
+    """
+    Wraps the `trajectory_msgs.msg.JointTrajectoryPoint` message type.
+
+    This type represents a single point in a joint trajectory, including positions,
+    velocities, accelerations, and effort for a specific point in time.
+
+    **ROS2 Message Type**: `trajectory_msgs/msg/JointTrajectoryPoint`
+    """
+
+    @classmethod
+    def get_ros_type(cls) -> type:
+        if find_spec("trajectory_msgs") is None:
+            raise ModuleNotFoundError(
+                "'trajectory_msgs' module is required to use 'JointTrajectory' msg type but it is not installed. Please install the 'ros-<distro>-trajectory-msgs' package."
+            )
+        from trajectory_msgs.msg import JointTrajectoryPoint as JointTrajectoryPointROS
+
+        return JointTrajectoryPointROS
+
+    @classmethod
+    def convert(cls, output: JointsData, index: Optional[int] = None, **_) -> Any:
+        """
+        Takes joint state data and converts it into a ROS message
+        of type JointTrajectoryPoint
+
+        :return: JointTrajectory
+        """
+        msg = cls.get_ros_type()()
+        msg.time_from_start = output.delay
+
+        if index is None:
+            msg.positions = output.positions.tolist()
+            msg.velocities = output.velocities.tolist()
+            msg.accelerations = output.velocities.tolist()
+            msg.effort = output.efforts.tolist()
+            return msg
+
+        if index < output.positions.shape[0]:
+            msg.positions = output.positions[index].tolist()
+        if index < output.velocities.shape[0]:
+            msg.velocities = output.velocities[index].tolist()
+        if index < output.accelerations.shape[0]:
+            msg.accelerations = output.accelerations[index].tolist()
+        if index < output.efforts.shape[0]:
+            msg.effort = output.efforts[index].tolist()
+        return msg
+
+
+class JointTrajectory(SupportedType):
+    """
+    Wraps the `trajectory_msgs.msg.JointTrajectory` message type.
+
+    This type represents a full joint trajectory, containing a list of `JointTrajectoryPoint`s
+    and the names of the joints being controlled.
+
+    **ROS2 Message Type**: `trajectory_msgs/msg/JointTrajectory`
+    """
+
+    callback = None
+
+    @classmethod
+    def get_ros_type(cls) -> type:
+        if find_spec("trajectory_msgs") is None:
+            raise ModuleNotFoundError(
+                "'trajectory_msgs' module is required to use 'JointTrajectory' msg type but it is not installed. Please install the 'ros-<distro>-trajectory-msgs' package."
+            )
+        from trajectory_msgs.msg import JointTrajectory as JointTrajectoryROS
+
+        return JointTrajectoryROS
+
+    @classmethod
+    def convert(cls, output: JointsData, **_) -> Any:
+        """
+        Takes joint state data and converts it into a ROS message
+        of type JointTrajectory
+
+        :return: JointTrajectory
+        """
+        msg = cls.get_ros_type()()
+        msg.joint_names = output.joints_names
+        msg.points = []
+
+        if output.positions.ndim == 1:
+            # a single point
+            point_msg = JointTrajectoryPoint.convert(output)
+            msg.points.append(point_msg)
+            return msg
+
+        if output.positions.ndim != 2:
+            get_logger("joint_trajectory_publisher").error(
+                f"Trying to publish invalid joint trajectory data. Expecting joint positions array dimension 2, got: `{output.positions.ndim}`"
+            )
+            return None
+
+        # Get points data
+        for idx in range(output.positions.shape[0]):
+            point_msg = JointTrajectoryPoint.convert(output, index=idx)
+            msg.points.append(point_msg)
+        return msg
+
+
+class JointJog(SupportedType):
+    """
+    Wraps the `control_msgs.msg.JointJog` message type.
+
+    This type represents a command to jog joints, specifying displacements, velocities,
+    or duration for immediate execution.
+
+    **ROS2 Message Type**: `control_msgs/msg/JointJog`
+    """
+
+    callback = None
+
+    @classmethod
+    def get_ros_type(cls) -> type:
+        if find_spec("control_msgs") is None:
+            raise ModuleNotFoundError(
+                "'control_msgs' module is required to use 'JointJog' msg type but it is not installed. Please install the 'ros-<distro>-control-msgs' package."
+            )
+        from control_msgs.msg import JointJog as JointJogROS
+
+        return JointJogROS
+
+    @classmethod
+    def convert(cls, output: JointsData, **_) -> Any:
+        """
+        Takes joint state data and converts it into a ROS message
+        of type JointJog
+
+        :return: JointJog
+        """
+        msg = cls.get_ros_type()()
+        msg.joint_names = output.joints_names
+
+        msg.displacements = output.positions.tolist()
+        msg.velocities = output.velocities.tolist()
+        msg.duration = output.duration.tolist()
+
+        return msg
+
+
+class JointState(SupportedType):
+    """
+    Wraps the `sensor_msgs.msg.JointState` message type.
+
+    This type represents the current state of a set of joints, including their names,
+    positions, velocities, and efforts.
+
+    **ROS2 Message Type**: `sensor_msgs/msg/JointState`
+    """
+
+    _ros_type = JointStateROS
+    callback = JointStateCallback
+
+    @classmethod
+    def convert(cls, output: JointsData, **_) -> JointStateROS:
+        """
+        Takes joint state data and converts it into a ROS message
+        of type JointState
+
+        :return: JointState
+        """
+        msg = JointStateROS()
+        msg.name = output.joints_names
+
+        msg.position = output.positions.tolist()
+        msg.velocity = output.velocities.tolist()
+        msg.effort = output.efforts.tolist()
+
+        return msg
+
+
 agent_types = [
     StreamingString,
     Video,
@@ -361,6 +619,10 @@ agent_types = [
     TrackingsMultiSource,
     PointsOfInterest,
     RGBD,
+    JointState,
+    JointJog,
+    JointTrajectory,
+    JointTrajectoryPoint,
 ]
 
 

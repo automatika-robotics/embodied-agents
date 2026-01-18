@@ -2,12 +2,16 @@
 The following model specification classes are meant to define a comman interface for initialization parameters for ML models across supported model serving platforms.
 """
 
-from typing import Optional, Dict, Any
-
-from attrs import define, field
+from typing import Optional, Dict, Any, Literal, List
+from attrs import define, field, validators
 from .ros import BaseAttrs, base_validators
+from .utils import build_lerobot_features_from_dataset_info, _LANGUAGE_CODES
 
 __all__ = [
+    "GenericLLM",
+    "GenericMLLM",
+    "GenericTTS",
+    "GenericSTT",
     "TransformersLLM",
     "TransformersMLLM",
     "OllamaModel",
@@ -33,7 +37,7 @@ class Model(BaseAttrs):
 
     def _get_init_params(self) -> Dict:
         raise NotImplementedError(
-            "This method needs to be implemented by model definition classes"
+            "_get_init_params method needs to be implemented by model definition classes"
         )
 
 
@@ -57,6 +61,188 @@ class LLM(Model):
         return {
             "checkpoint": self.checkpoint,
             "quantization": self.quantization,
+        }
+
+
+@define(kw_only=True)
+class GenericLLM(Model):
+    """
+    A generic LLM configuration for OpenAI-compatible /v1/chat/completions APIs.
+
+    This class supports any model served via an OpenAI-compatible endpoint (e.g., vLLM,
+    LMDeploy, DeepSeek, Groq, or OpenAI itself).
+
+    :param name: An arbitrary name given to the model.
+    :type name: str
+    :param checkpoint: The model identifier on the remote server (e.g., "gpt-4o", "meta-llama/Llama-3-70b").
+               For OpenAI models, consult: https://platform.openai.com/docs/models
+    :type checkpoint: str
+    :param init_timeout: The timeout in seconds for the initialization process. Defaults to None.
+    :type init_timeout: int, optional
+    :param options: Optional dictionary to configure default inference behavior. Options that conflict with component config options such as (max_tokens and temperature) will be overridden if set in component config.
+                    Supported keys match standard OpenAI API parameters:
+                    - temperature (float): Sampling temperature (0-2).
+                    - top_p (float): Nucleus sampling probability.
+                    - max_tokens (int): Max tokens to generate.
+                    - presence_penalty (float): Penalty for new tokens (-2.0 to 2.0).
+                    - frequency_penalty (float): Penalty for frequent tokens (-2.0 to 2.0).
+                    - stop (str or list): Stop sequences.
+                    - seed (int): Random seed for deterministic sampling.
+    :type options: dict, optional
+
+    Example usage:
+    ```python
+    gpt4 = GenericLLM(
+        name='gpt4',
+        checkpoint="gpt-4o",
+        options={"temperature": 0.7, "max_tokens": 500}
+    )
+    ```
+    """
+
+    checkpoint: str = field(default="gpt-4o")
+    options: Optional[Dict[str, Any]] = field(default=None)
+
+    @options.validator
+    def _validate_options(self, _, value):
+        if value is None:
+            return
+        allowed_keys = {
+            "temperature": float,
+            "top_p": float,
+            "max_tokens": int,
+            "presence_penalty": float,
+            "frequency_penalty": float,
+            "stop": List,
+            "seed": int,
+        }
+
+        for key, val in value.items():
+            if key not in allowed_keys:
+                raise ValueError(f"Invalid key in options: {key}")
+            expected_type = allowed_keys[key]
+            if key == "stop":
+                if not isinstance(val, list) or not all(
+                    isinstance(item, str) for item in val
+                ):
+                    raise TypeError(f"Value for key '{key}' must be a list of strings")
+            elif not isinstance(val, expected_type):
+                raise TypeError(
+                    f"Value for key '{key}' must be of type {expected_type.__name__}"
+                )
+
+    def _get_init_params(self) -> Dict:
+        return {"checkpoint": self.checkpoint, "options": self.options}
+
+
+@define(kw_only=True)
+class GenericMLLM(GenericLLM):
+    """
+    A generic Multimodal LLM configuration for OpenAI-compatible APIs.
+
+    Use this for models that accept image/audio inputs alongside text (e.g., GPT-4o,
+    Claude 3.5 Sonnet via wrapper, Gemini via OpenAI adapter).
+
+    :param name: An arbitrary name given to the model.
+    :type name: str
+    :param checkpoint: The model identifier. Consult provider documentation.
+    :type checkpoint: str
+    :param options: Optional dictionary for default inference parameters (see GenericLLM).
+    :type options: dict, optional
+
+    Example usage:
+    ```python
+    gpt4_vision = GenericMLLM(name='gpt4v', checkpoint="gpt-4o")
+    ```
+    """
+
+    checkpoint: str = field(default="gpt-4o")
+
+
+@define(kw_only=True)
+class GenericTTS(Model):
+    """
+    A generic Text-to-Speech model for OpenAI-compatible /v1/audio/speech APIs.
+
+    :param name: An arbitrary name given to the model.
+    :type name: str
+    :param checkpoint: The model identifier (e.g., "tts-1", "tts-1-hd").
+                       For details: https://platform.openai.com/docs/models/tts
+    :type checkpoint: str
+    :param voice: The voice ID to use. OpenAI standard voices: 'alloy', 'echo', 'fable',
+                  'onyx', 'nova', 'shimmer'. Other providers may have different IDs.
+    :type voice: str
+    :param speed: The speed of the generated audio. Select a value from 0.25 to 4.0. Default is 1.0.
+    :type speed: float
+    :param init_timeout: The timeout in seconds for the initialization process. Defaults to None.
+    :type init_timeout: int, optional
+
+    Example usage:
+    ```python
+    tts = GenericTTS(
+        name='openai_tts',
+        checkpoint="tts-1-hd",
+        voice="nova",
+        speed=1.2
+    )
+    ```
+    """
+
+    checkpoint: str = field(default="tts-1")
+    voice: str = field(default="alloy")
+    speed: float = field(
+        default=1.0, validator=base_validators.in_range(min_value=0.25, max_value=4.0)
+    )
+
+    def _get_init_params(self) -> Dict:
+        return {
+            "checkpoint": self.checkpoint,
+            "voice": self.voice,
+            "speed": self.speed,
+        }
+
+
+@define(kw_only=True)
+class GenericSTT(Model):
+    """
+    A generic Speech-to-Text model for OpenAI-compatible /v1/audio/transcriptions APIs.
+
+    :param name: An arbitrary name given to the model.
+    :type name: str
+    :param checkpoint: The model identifier (e.g., "whisper-1").
+                       For details: https://platform.openai.com/docs/models/whisper
+    :type checkpoint: str
+    :param language: The language of the input audio (ISO-639-1 format, e.g., 'en', 'fr').
+                     Improves accuracy if known. Default is None (auto-detect).
+    :type language: str, optional
+    :param temperature: The sampling temperature (0-1). Lower values are more deterministic. Default is 0.
+    :type temperature: float
+    :param init_timeout: The timeout in seconds for the initialization process. Defaults to None.
+    :type init_timeout: int, optional
+
+    Example usage:
+    ```python
+    stt = GenericSTT(
+        name='openai_stt',
+        checkpoint="whisper-1",
+        language="en",
+        temperature=0.2
+    )
+    ```
+    """
+
+    checkpoint: str = field(default="whisper-1")
+    temperature: float = field(default=0.0)
+    language: Optional[str] = field(
+        default=None,
+        validator=validators.optional(base_validators.in_(_LANGUAGE_CODES)),
+    )
+
+    def _get_init_params(self) -> Dict:
+        return {
+            "checkpoint": self.checkpoint,
+            "language": self.language,
+            "temperature": self.temperature,
         }
 
 
@@ -126,7 +312,7 @@ class OllamaModel(LLM):
             "presence_penalty": float,
             "frequency_penalty": float,
             "penalize_newline": bool,
-            "stop": list,
+            "stop": List,
             "numa": bool,
             "num_ctx": int,
             "num_batch": int,
@@ -181,7 +367,7 @@ class TransformersLLM(LLM):
 
 
 @define(kw_only=True)
-class TransformersMLLM(LLM):
+class TransformersMLLM(TransformersLLM):
     """An MLLM model that needs to be initialized with any MLLM checkpoint available on HuggingFace transformers. This model can be used with a roboml client.
 
     :param name: An arbitrary name given to the model.
@@ -411,4 +597,98 @@ class VisionModel(Model):
             "tracking_distance_function": self.tracking_distance_function,
             "tracking_distance_threshold": self.tracking_distance_threshold,
             "deploy_tensorrt": self.deploy_tensorrt,
+        }
+
+
+@define(kw_only=True)
+class LeRobotPolicy(Model):
+    """LeRobot Policy Model for Vision-Language-Action Robotics.
+
+    This model provides a high-level interface for loading and running **LeRobot** policies— vision-language-action (VLA) models trained for robotic manipulation tasks.
+
+    It supports automatic extraction of feature and action specifications directly from dataset metadata, as well as flexible configuration of policy behavior.
+
+    The policy can be instantiated from any compatible **LeRobot** checkpoint hosted on
+    HuggingFace, making it easy to load pretrained models such as `smolvla_base` or others from LeRobot. Upon initialization, the wrapper downloads and parses the dataset
+    metadata file to derive the feature schema and action space that the policy expects.
+
+    :param checkpoint:
+        The name or HuggingFace repository ID of the pretrained LeRobot checkpoint to load.
+        Default: `"lerobot/smolvla_base"`.
+    :type checkpoint: str
+    :param policy_type:
+    The type of LeRobot policy to load.
+    Supported values are:
+    - `"diffusion"` — Diffusion-based action generation policy
+    - `"act"` — Action Chunk Transformer policy
+    - `"smolvla"` — General VLA from HuggingFace
+    - `"pi0"` — General VLA from Physical Intelligence
+    - `"pi05"` — General VLA from Physical Intelligence
+    This field determines how the checkpoint is interpreted and which policy architecture is instantiated.
+    Default: `"smolvla"`.
+    :param dataset_info_file:
+        URL or local path to the dataset metadata file (`info.json`).
+        This file defines the input features and action structure that the policy must follow. Empty by default. If not provided, an attempt will be made by the VLA component to auto-generate it from the component config.
+    :type dataset_info_file: str, optional
+    :param policy_type:
+    The device on which the server should initialize the policy.
+    Supported values are:
+    - `"cuda"` — NVIDIA GPU available on server
+    - `"cpu"` — GPU not available on server
+    Default: `"cuda"`.
+    :param actions_per_chunk:
+        The number of predicted actions produced per inference chunk. This is only applicable for certain policy types that implement Real Time Chunking (RTC) such as Pi0, and SmolVLA
+        Default: `50`.
+    :type actions_per_chunk: int
+    :param init_timeout:
+        Optional timeout (in seconds) for initialization.
+        Default: `None`.
+    :type init_timeout: int, optional
+
+    ### Example
+    ```python
+    # Load a standard LeRobot policy
+    policy = LeRobotPolicy(
+        checkpoint="lerobot/smolvla_base",
+        policy_type="smolvla"
+    )
+
+    # Load a policy with a different dataset specification
+    policy = LeRobotPolicy(
+        checkpoint="my_own/smolvla_finetuned",
+        policy_type="smolvla"
+        dataset_info_file="path/to/my_dataset/info.json",
+        actions_per_chunk=25,
+    )
+    """
+
+    checkpoint: str = field(default="lerobot/smolvla_base")
+    policy_type: Literal["smolvla", "diffusion", "act", "pi0", "pi05"] = field(
+        default="smolvla"
+    )
+    actions_per_chunk: int = field(default=50)
+    policy_device: Literal["cpu", "cuda"] = field(default="cuda")
+    dataset_info_file: Optional[str] = field(default=None)
+    _features: Dict = field(default={})  # Created in the component if missing
+    _actions: Optional[Dict] = field(default=None)
+    _image_keys: Optional[List] = field(default=None)
+    _joint_keys: Optional[List] = field(default=None)
+
+    def __attrs_post_init__(self):
+        if self.dataset_info_file:
+            lerobot_features = build_lerobot_features_from_dataset_info(
+                self.dataset_info_file
+            )
+            self._features = lerobot_features["features"]
+            self._actions = lerobot_features["actions"]
+            self._image_keys = lerobot_features["image_keys"]
+            self._joint_keys = self._features["observation.state"]["names"]
+
+    def _get_init_params(self):
+        return {
+            "checkpoint": self.checkpoint,
+            "policy_type": self.policy_type,
+            "features": self._features,
+            "actions_per_chunk": self.actions_per_chunk,
+            "device": self.policy_device,
         }

@@ -1,4 +1,4 @@
-from typing import Any, Union, Optional, List, Dict, Literal
+from typing import Any, Union, Optional, List, Dict, Literal, MutableMapping
 
 import numpy as np
 from ..clients.db_base import DBClient
@@ -6,6 +6,7 @@ from ..clients.model_base import ModelClient
 from ..config import MLLMConfig
 from ..ros import (
     FixedInput,
+    Event,
     Image,
     String,
     StreamingString,
@@ -70,7 +71,7 @@ class MLLM(LLM):
         model_client: ModelClient,
         config: Optional[MLLMConfig] = None,
         db_client: Optional[DBClient] = None,
-        trigger: Union[Topic, List[Topic], float] = 1.0,
+        trigger: Union[Topic, List[Topic], float, Event] = 1.0,
         component_name: str,
         **kwargs,
     ):
@@ -164,7 +165,7 @@ class MLLM(LLM):
         if not query or not images:
             return None
 
-        # get RAG results if enabled in config and if docs retreived
+        # get RAG results if enabled in config and if docs retrieved
         rag_result = self._handle_rag_query(query) if self.config.enable_rag else None
 
         # set system prompt template
@@ -212,7 +213,7 @@ class MLLM(LLM):
         self.config.stream = False
         self.inference_params = self.config.get_inference_params()
 
-    def _publish_task_specific_outputs(self, result: Dict[str, Any]) -> None:
+    def _publish_task_specific_outputs(self, result: MutableMapping) -> None:
         """Publish outputs based on task type"""
         if self._task == "general":
             self.messages.append({"role": "assistant", "content": result["output"]})
@@ -287,10 +288,6 @@ class MLLM(LLM):
             if result.get("thinking"):
                 self.get_logger().info(f"<think>{result['thinking']}</think>")
 
-        else:
-            # raise a fallback trigger via health status
-            self.health_status.set_failure()
-
     def _warmup(self):
         """Warm up and stat check"""
         import time
@@ -307,7 +304,8 @@ class MLLM(LLM):
         }
 
         # Run inference once to warm up and once to measure time
-        self.model_client.inference(inference_input)
+        if self.model_client:
+            self.model_client.inference(inference_input)
 
         inference_input = {
             "query": [message],
@@ -315,7 +313,10 @@ class MLLM(LLM):
             **self.config._get_inference_params(),
         }
         start_time = time.time()
-        result = self.model_client.inference(inference_input)
+        if self.model_client:
+            result = self.model_client.inference(inference_input)
+        else:
+            result = None
         elapsed_time = time.time() - start_time
 
         if result:

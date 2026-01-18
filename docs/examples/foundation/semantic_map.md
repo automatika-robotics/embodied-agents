@@ -1,4 +1,4 @@
-# Create a spatio-temporal semantic map
+# Create a Spatio-Temporal Semantic Map
 
 Autonomous Mobile Robots (AMRs) keep a representation of their environment in the form of occupancy maps. One can layer semantic information on top of these occupancy maps and with the use of MLLMs one can even add answers to arbitrary questions about the environment to this map. In _EmbodiedAgents_ such maps can be created using vector databases which are specifically designed to store natural language data and retreive it based on natural language queries. Thus an embodied agent can keep a text based _spatio-temporal memory_, from which it can do retreival to answer questions or do spatial planning.
 

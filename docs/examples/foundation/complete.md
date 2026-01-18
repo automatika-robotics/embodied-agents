@@ -282,13 +282,13 @@ In this small code block above, we have setup a fairly sophisticated embodied ag
 - A single input interface that routes the input to different models based on its content.
 
 We can visualize the complete graph in the following diagram:
-```{figure} ../_static/complete_dark.png
+```{figure} ../../_static/complete_dark.png
 :class: only-dark
 :alt: Complete embodied agent
 :align: center
 Complete embodied agent graph
 ```
-```{figure} ../_static/complete_light.png
+```{figure} ../../_static/complete_light.png
 :class: only-light
 :alt: Complete embodied agent
 :align: center

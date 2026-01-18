@@ -76,11 +76,11 @@ class RoboMLHTTPClient(ModelClient):
         self.logger.info("Checking connection with remote RoboML")
         try:
             self.client.get("/").raise_for_status()
-        except Exception as e:
+        except Exception:
             self.logger.error(
-                f"""Failed to connect to RoboML server at {self.url} {e}
+                f"""Failed to connect to RoboML server at {self.url}
 
-                Make sure an RoboML is running on the given url by executing the following command:
+                Make sure an instance of RoboML is running on the given url by executing the following command:
 
                 `roboml --host {self.host} --port {self.port}`
 
@@ -411,9 +411,9 @@ class RoboMLRESPClient(ModelClient):
         self.logger.info("Checking connection with remote RoboML")
         try:
             self.redis.execute_command(b"PING")
-        except Exception as e:
+        except Exception:
             self.logger.error(
-                f"""Failed to connect to RoboML resp server at {self.host}:{self.port} {e}
+                f"""Failed to connect to RoboML resp server at {self.host}:{self.port}
 
                 Make sure an RoboML is running on the given url by executing the following command:
 

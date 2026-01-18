@@ -45,17 +45,26 @@ class OllamaClient(ModelClient):
         )
         self._check_connection()
 
+    @property
+    def supports_tool_calls(self) -> bool:
+        """
+        Ollama client supports tool calling.
+
+        :rtype: bool
+        """
+        return True
+
     def _check_connection(self) -> None:
         """Check if the platfrom is being served on specified IP and port"""
         # Ping remote server to check connection
         self.logger.info("Checking connection with remote_host Ollama")
         try:
             httpx.get(f"http://{self.host}:{self.port}").raise_for_status()
-        except Exception as e:
+        except Exception:
             self.logger.error(
-                f"""Failed to connect to Ollama server at {self.host}:{self.port} {e}
+                f"""Failed to connect to Ollama server at {self.host}:{self.port}
 
-                Make sure an Ollama is running on the given url by executing the following command:
+                Make sure an Ollama instance is running on the given url by executing the following command:
 
                 `export OLLAMA_HOST={self.host}:{self.port}  # if not using default`
                 `ollama serve`

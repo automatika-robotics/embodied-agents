@@ -1,6 +1,10 @@
-# Quick Start 🚀
+# Quick Start
 
 Unlike other ROS package, _EmbodiedAgents_ provides a pure pythonic way of describing the node graph using [Sugarcoat🍬](https://automatika-robotics.github.io/sugarcoat/). Copy the following code in a python script and run it.
+
+```{important}
+Depending on the components and clients you use, _EmbodiedAgents_ will prompt you for extra python packages. The script will throw an error and let you know how you can install these extra pacakges.
+```
 
 ```python
 from agents.clients.ollama import OllamaClient
@@ -23,7 +27,7 @@ mllm = VLM(
     inputs=[text0, image0],
     outputs=[text1],
     model_client=llava_client,
-    trigger=[text0],
+    trigger=text0,
     component_name="vqa"
 )
 # Additional prompt settings
@@ -56,7 +60,7 @@ image0 = Topic(name="NAME_OF_THE_TOPIC", msg_type="Image")
 If you are running _EmbodiedAgents_ on a testing machine, and the machine has a webcam, you can install the [**ROS2 USB Cam**](https://github.com/klintan/ros2_usb_camera). Make sure you use the correct name of the image topic as above.
 ```
 
-Then we will create a multimodal LLM component. Components are functional units in _EmbodiedAgents_. To learn more about them, check out [Basic Concepts](basics/index.md). Other than input/output topics, the MLLM component expects a model client. So first we will create a model client that can utilize a [Llava](https://ollama.com/library/llava) model on [Ollama](https://ollama.com) as its model serving platform.
+Then we will create a multimodal LLM component. Components are functional units in _EmbodiedAgents_. To learn more about them, check out [Basic Concepts](basics/components.md). Other than input/output topics, the VLM component expects a model client. So first we will create a model client that can utilize a [Llava](https://ollama.com/library/llava) model on [Ollama](https://ollama.com) as its model serving platform.
 
 ```python
 # Define a model client (working with Ollama in this case)
@@ -78,12 +82,12 @@ If the use of Ollama as a model serving platform is unclear, checkout [installat
 Now we are ready to setup our component.
 
 ```python
-# Define an MLLM component (A component represents a node with a particular functionality)
+# Define a VLM component (A component represents a node with a particular functionality)
 mllm = VLM(
     inputs=[text0, image0],
     outputs=[text1],
     model_client=llava_client,
-    trigger=[text0],
+    trigger=text0,
     component_name="vqa"
 )
 # Additional prompt settings
@@ -92,7 +96,7 @@ mllm.set_topic_prompt(text0, template="""You are an amazing and funny robot.
 )
 ```
 
-Note how the MLLM type of component, also allows us to set a topic or component level prompt, where a jinja2 template can be used to define a template in which our input string should be embedded. Finally we will launch the component.
+Note how the VLM type of component, also allows us to set a topic or component level prompt, where a jinja2 template can be used to define a template in which our input string should be embedded. Finally we will launch the component.
 
 ```python
 # Launch the component

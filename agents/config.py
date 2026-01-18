@@ -1,16 +1,16 @@
-from typing import Optional, Union, Dict, List, Literal
+from typing import Optional, Union, Dict, List, Literal, Mapping
 from pathlib import Path
 
-from attrs import define, field, Factory
+from attrs import define, field, Factory, validators
 
 from .ros import base_validators, BaseComponentConfig, Topic, Route
 from .utils import validate_kwargs_from_default, _LANGUAGE_CODES
-from .utils.vision import _MS_COCO_LABELS
 
 __all__ = [
     "LLMConfig",
     "MLLMConfig",
     "VLMConfig",
+    "VLAConfig",
     "SpeechToTextConfig",
     "TextToSpeechConfig",
     "SemanticRouterConfig",
@@ -18,6 +18,23 @@ __all__ = [
     "VideoMessageMakerConfig",
     "VisionConfig",
 ]
+
+
+# --- HELPERS ---
+def _get_optional_topic(topic: Union[Topic, Dict]) -> Optional[Topic]:
+    if not topic:
+        return
+    if isinstance(topic, Topic):
+        return topic
+    return Topic(**topic)
+
+
+def _get_optional_route(route: Union[Route, Dict]) -> Optional[Route]:
+    if not route:
+        return
+    if isinstance(route, Route):
+        return route
+    return Route(**route)
 
 
 @define(kw_only=True)
@@ -30,7 +47,7 @@ class ModelComponentConfig(BaseComponentConfig):
 
     def _get_inference_params(self) -> Dict:
         raise NotImplementedError(
-            "This method needs to be implemented by model config classes"
+            "_get_inference_params method needs to be implemented by model config classes"
         )
 
 
@@ -40,9 +57,9 @@ class LLMConfig(ModelComponentConfig):
     Configuration for the Large Language Model (LLM) component.
 
     It defines various settings that control how the LLM component operates, including
-    whether to enable chat history, retreival augmented generation (RAG) and more.
+    whether to enable chat history, retrieval augmented generation (RAG) and more.
 
-    :param enable_rag: Enables or disables Retreival Augmented Generation.
+    :param enable_rag: Enables or disables Retrieval Augmented Generation.
     :type enable_rag: bool
     :param collection_name: The name of the vectordb collection to use for RAG.
     :type collection_name: Optional[str]
@@ -108,6 +125,9 @@ class LLMConfig(ModelComponentConfig):
     _tool_response_flags: Dict[str, bool] = field(
         default=Factory(dict), alias="_tool_response_flags"
     )
+    _default_route: Optional[Union[Route, Dict]] = field(
+        default=None, converter=_get_optional_route, alias="_default_route"
+    )  # Only used when LLM is used as a router
 
     @response_terminator.validator
     def _not_empty(self, _, value):
@@ -200,6 +220,53 @@ VLMConfig = MLLMConfig
 
 
 @define(kw_only=True)
+class VLAConfig(ModelComponentConfig):
+    """
+    Configuration for the Vision-Language-Agent (VLA) component.
+    """
+
+    joint_names_map: Dict[str, str] = field()
+    camera_inputs_map: Mapping[str, Union[Topic, Dict]] = field()
+    # TODO: One can make models that take multiple state input types.
+    # This parameter would have to be revised in that case
+    state_input_type: Literal["positions", "velocities", "accelerations", "efforts"] = (
+        field(default="positions")
+    )
+    # TODO: One can make models that produce multiple action output types.
+    # This parameter would have to be revised in that case
+    action_output_type: Literal[
+        "positions", "velocities", "accelerations", "efforts"
+    ] = field(default="positions")
+    observation_sending_rate: float = field(
+        default=10.0, validator=base_validators.in_range(min_value=1e-6, max_value=1e6)
+    )
+    action_sending_rate: float = field(
+        default=10.0, validator=base_validators.in_range(min_value=1e-6, max_value=1e6)
+    )
+    input_timeout: float = field(
+        default=30.0, validator=base_validators.in_range(min_value=1e-6, max_value=1e6)
+    )  # seconds
+    robot_urdf_file: Optional[str] = field(default=None)
+    joint_limits: Optional[Dict] = field(default=None)
+    _termination_mode: Literal["timesteps", "keyboard", "event"] = field(
+        default="timesteps", alias="_termination_mode"
+    )
+    _termination_timesteps: int = field(
+        default=50, validator=base_validators.gt(0), alias="_termination_timesteps"
+    )
+    _termination_key: str = field(default="q", alias="_termination_key")
+
+    def __attrs_post_init__(self):
+        """Post Init"""
+        # Main action loop is executed at the loop rate
+        # So we set the loop rate equal to observation sending rate
+        self.loop_rate = self.observation_sending_rate
+
+    def _get_inference_params(self) -> Dict:
+        return {}
+
+
+@define(kw_only=True)
 class VisionConfig(ModelComponentConfig):
     """Configuration for a detection component.
 
@@ -243,7 +310,7 @@ class VisionConfig(ModelComponentConfig):
     enable_local_classifier: bool = field(default=False)
     input_height: int = field(default=640)
     input_width: int = field(default=640)
-    dataset_labels: Dict = field(default=_MS_COCO_LABELS)
+    dataset_labels: Optional[Dict] = field(default=None)
     device_local_classifier: Literal["cpu", "cuda", "tensorrt"] = field(default="cuda")
     ncpu_local_classifier: int = field(default=1)
     local_classifier_model_path: str = field(
@@ -475,9 +542,9 @@ class SpeechToTextConfig(ModelComponentConfig):
     """
 
     initial_prompt: Optional[str] = field(default=None)
-    language: str = field(
+    language: Optional[str] = field(
         default="en",
-        validator=base_validators.in_(_LANGUAGE_CODES),
+        validator=validators.optional(base_validators.in_(_LANGUAGE_CODES)),
     )
     max_new_tokens: Optional[int] = field(default=None)
     enable_vad: bool = field(default=False)
@@ -549,14 +616,6 @@ class SpeechToTextConfig(ModelComponentConfig):
         }
 
 
-def _get_optional_topic(topic: Union[Topic, Dict]) -> Optional[Topic]:
-    if not topic:
-        return
-    if isinstance(topic, Topic):
-        return topic
-    return Topic(**topic)
-
-
 @define(kw_only=True)
 class MapConfig(BaseComponentConfig):
     """Configuration for a MapEncoding component.
@@ -582,16 +641,8 @@ class MapConfig(BaseComponentConfig):
     )
 
 
-def _get_optional_route(route: Union[Route, Dict]) -> Optional[Route]:
-    if not route:
-        return
-    if isinstance(route, Route):
-        return route
-    return Route(**route)
-
-
 @define(kw_only=True)
-class SemanticRouterConfig(BaseComponentConfig):
+class SemanticRouterConfig(ModelComponentConfig):
     """Configuration parameters for a semantic router component.
 
     :param router_name: The name of the router.
@@ -617,6 +668,10 @@ class SemanticRouterConfig(BaseComponentConfig):
     _default_route: Optional[Union[Route, Dict]] = field(
         default=None, converter=_get_optional_route, alias="_default_route"
     )
+
+    def _get_inference_params(self):
+        """Dummy method to avoid check if semantic router is used in vector mode"""
+        return {}
 
 
 @define(kw_only=True)

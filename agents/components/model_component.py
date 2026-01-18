@@ -3,14 +3,22 @@ import inspect
 import json
 import queue
 import threading
-from typing import Any, Optional, Sequence, Union, List, Dict, Type
+from types import NoneType
+from typing import Any, Optional, Sequence, Union, List, Dict, Type, MutableMapping
 import msgpack
 
 
 from ..clients.model_base import ModelClient
 from ..clients.roboml import RoboMLWSClient
 from ..config import ModelComponentConfig
-from ..ros import FixedInput, Topic, SupportedType, MutuallyExclusiveCallbackGroup
+from ..ros import (
+    FixedInput,
+    Topic,
+    SupportedType,
+    MutuallyExclusiveCallbackGroup,
+    Event,
+    component_fallback,
+)
 from .component_base import Component
 
 
@@ -23,7 +31,7 @@ class ModelComponent(Component):
         outputs: Optional[Sequence[Topic]] = None,
         model_client: Optional[ModelClient] = None,
         config: Optional[ModelComponentConfig] = None,
-        trigger: Union[Topic, List[Topic], float] = 1.0,
+        trigger: Union[Topic, List[Topic], float, Event, NoneType] = 1.0,
         component_name: str = "model_component",
         **kwargs,
     ):
@@ -44,6 +52,56 @@ class ModelComponent(Component):
             component_name,
             **kwargs,
         )
+
+        self._additional_model_clients: Optional[Dict[str, ModelClient]] = None
+
+    @property
+    def additional_model_clients(self) -> Optional[Dict[str, ModelClient]]:
+        """Get additional model clients."""
+        return self._additional_model_clients
+
+    @additional_model_clients.setter
+    def additional_model_clients(self, value: Dict[str, ModelClient]) -> None:
+        """Set additional model clients."""
+        self._additional_model_clients = value
+
+    @component_fallback
+    def change_model_client(self, model_client_name: str) -> bool:
+        """Change the model client
+
+        This method can change the model client that the component is using, at runtime.
+
+        It can be invoked as a consequent action in response to an event. For example if one client communicating with a cloud model becomes unresponsive, one can replace it with another client for a locally deployed model.
+        """
+        if not self._additional_model_clients:
+            self.get_logger().error(
+                "Cannot change model client as the component was not given any additional model clients at init."
+            )
+            return False
+        new_client = self._additional_model_clients.get(model_client_name, None)
+        if not new_client:
+            self.get_logger().info(
+                f"No additional client named {model_client_name} is available in the component. Only the following additional clients were provided {self._additional_model_clients}"
+            )
+            return False
+
+        self.get_logger().info(f"Changing model client to {model_client_name}")
+
+        try:
+            # Deinitialize any existing client
+            if self.model_client:
+                self.model_client.deinitialize()
+
+            # Set the new client
+            self.model_client = new_client
+            self.model_client.initialize()  # initialize the new client
+        except Exception:
+            self.get_logger().error(
+                "Error encountered during initialization when changing model client"
+            )
+            return False
+
+        return True
 
     def custom_on_configure(self):
         """
@@ -78,7 +136,7 @@ class ModelComponent(Component):
                 # asynchronously in case of streaming. The callback is implemented
                 # in child components and gets executed in a blocking manner
                 if getattr(self.config, "stream", None):
-                    self.create_timer(
+                    self.__stream_timer = self.create_timer(
                         timer_period_sec=0.001,
                         callback=self._handle_websocket_streaming,
                         callback_group=MutuallyExclusiveCallbackGroup(),
@@ -113,7 +171,7 @@ class ModelComponent(Component):
                 # stop running thread
                 self.client_stop_event.set()
                 self.client_thread.join(timeout=10)
-                # mark any pendings tasks as finished
+                # mark any pending tasks as finished
                 while not self.resp_queue.empty():
                     try:
                         self.resp_queue.get_nowait()
@@ -126,6 +184,10 @@ class ModelComponent(Component):
                         self.req_queue.task_done()
                     except queue.Empty:
                         break
+
+        # Destroy any stream timer if it exists
+        if hasattr(self, "__stream_timer"):
+            self.destroy_timer(self.__stream_timer)
 
     def _validate_output_topics(self) -> None:
         """
@@ -198,7 +260,7 @@ class ModelComponent(Component):
 
     def _call_inference(
         self, inference_input: Dict, unpack: bool = False
-    ) -> Optional[Dict]:
+    ) -> Optional[MutableMapping]:
         """Call model inference"""
         if isinstance(self.model_client, RoboMLWSClient):
             self.req_queue.put_nowait(inference_input)
@@ -220,14 +282,20 @@ class ModelComponent(Component):
                     return result
                 except queue.Empty:
                     self.get_logger().error(
-                        "Did not recieve result in websocket response queue"
+                        "Did not receive result in websocket response queue"
                     )
+                    # raise a fallback trigger via health status
+                    self.health_status.set_fail_algorithm()
                     return None
         else:
             if self.model_client:
-                return self.model_client.inference(inference_input)
+                result = self.model_client.inference(inference_input)
+                if not result:
+                    # raise a fallback trigger via health status
+                    self.health_status.set_fail_algorithm()
+                return result
 
-    def _publish(self, result: Dict, **kwargs) -> None:
+    def _publish(self, result: MutableMapping, **kwargs) -> None:
         """
         Publishes the given result to all registered publishers.
 
@@ -248,9 +316,14 @@ class ModelComponent(Component):
             self._get_model_client_json(),
         ]
 
+        self.launch_cmd_args = [
+            "--additional_model_clients",
+            self._get_additional_model_clients_json(),
+        ]
+
     def _get_model_client_json(self) -> Union[str, bytes, bytearray]:
         """
-        Serialize component routes to json
+        Serialize component model client to json
 
         :return: Serialized inputs
         :rtype:  str | bytes | bytearray
@@ -258,3 +331,19 @@ class ModelComponent(Component):
         if not self.model_client:
             return ""
         return json.dumps(self.model_client.serialize())
+
+    def _get_additional_model_clients_json(self) -> Union[str, bytes, bytearray]:
+        """
+        Serialize component additional model clients to json
+
+        :return: Serialized inputs
+        :rtype:  str | bytes | bytearray
+        """
+        if not self._additional_model_clients:
+            return ""
+
+        serialized_clients = {}
+        for client_name, client in self._additional_model_clients.items():
+            serialized_clients[client_name] = client.serialize()
+
+        return json.dumps(serialized_clients)

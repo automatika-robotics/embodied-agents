@@ -308,7 +308,7 @@ class SpeechToText(ModelComponent):
                 if newly_committed_words := self.transcript_buffer.flush():
                     self.result_partial.extend(newly_committed_words)
 
-            # publish output when termination token resceived
+            # publish output when termination token received
             else:
                 # Get any last words not currently confirmed in hypothesis
                 if remaining_words := self.transcript_buffer.complete():
@@ -323,7 +323,7 @@ class SpeechToText(ModelComponent):
         except Exception as e:
             self.get_logger().error(str(e))
             # raise a fallback trigger via health status
-            self.health_status.set_failure()
+            self.health_status.set_fail_component()
 
     def _create_input(self, *_, **kwargs) -> Optional[Dict[str, Any]]:
         """Create inference input for SpeechToText models
@@ -378,9 +378,6 @@ class SpeechToText(ModelComponent):
         if result:
             # publish inference result
             self._publish(result)
-        else:
-            # raise a fallback trigger via health status
-            self.health_status.set_failure()
 
     def _warmup(self):
         """Warm up and stat check"""

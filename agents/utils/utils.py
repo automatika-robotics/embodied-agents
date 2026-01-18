@@ -1,4 +1,5 @@
 import base64
+import json
 import inspect
 import uuid
 from functools import wraps
@@ -8,6 +9,7 @@ from pathlib import Path
 from typing import (
     List,
     Dict,
+    Literal,
     Optional,
     Union,
     get_args,
@@ -15,6 +17,7 @@ from typing import (
     _GenericAlias,
 )
 from collections.abc import Iterable
+import xml.etree.ElementTree as ET
 
 import cv2
 import httpx
@@ -135,7 +138,7 @@ def get_prompt_template(template: Union[str, Path]) -> Template:
             return env.get_template(Path(template).name)
         except Exception as e:
             raise Exception(
-                f"Exception occured while reading template from file: {e}"
+                f"Exception occurred while reading template from file: {e}"
             ) from e
     else:
         # read from string
@@ -144,7 +147,7 @@ def get_prompt_template(template: Union[str, Path]) -> Template:
             return env.from_string(format(template))
         except Exception as e:
             raise Exception(
-                f"Exception occured while reading template from string: {e}"
+                f"Exception occurred while reading template from string: {e}"
             ) from e
 
 
@@ -234,7 +237,7 @@ def validate_func_args(func):
         fn_params = inspect.signature(func).parameters
 
         # for parameters with annotation, preference is given to checking by annotation
-        for arg, param in zip(args, list(fn_params)[:args_count]):
+        for arg, param in zip(args, list(fn_params)[:args_count], strict=True):
             if fn_params[param].annotation is not fn_params[param].empty:
                 _check_type_from_signature(arg, fn_params[param])
             elif fn_params[param].default is not fn_params[param].empty:
@@ -310,7 +313,7 @@ def load_model(model_name: str, model_path: str) -> str:
             progress_bar = tqdm(
                 total=total_size, unit="iB", unit_scale=True, desc=f"{model_name}"
             )
-            # delete the file if an exception occurs while downloadin
+            # delete the file if an exception occurs while downloading
             try:
                 with open(model_full_path, "wb") as f:
                     for chunk in r.iter_bytes(chunk_size=1024):
@@ -320,7 +323,7 @@ def load_model(model_name: str, model_path: str) -> str:
                 import logging
 
                 logging.error(
-                    f"Error occured while downloading model {model_name} from given url. Try restarting your components."
+                    f"Error occurred while downloading model {model_name} from given url. Try restarting your components."
                 )
                 if model_full_path.exists():
                     model_full_path.unlink()
@@ -337,6 +340,164 @@ def flatten(xs):
             yield from flatten(x)
         else:
             yield x
+
+
+def find_missing_values(check_list, string_list: List) -> List:
+    """
+    Return strings from `string_list` that do NOT appear in the dictionary's values.
+    """
+    # Convert values to a set for efficient lookup
+    value_set = set(check_list)
+    # Collect strings that are not found among the values
+    missing = [s for s in string_list if s not in value_set]
+
+    return missing
+
+
+def _read_spec_file_from_url(url: str, spec_type: Literal["json", "xml"] = "json"):
+    """Read from URL"""
+    try:
+        resp = httpx.get(url, timeout=10, follow_redirects=True).raise_for_status()
+    except httpx.RequestError as e:
+        raise RuntimeError(f"Failed to connect to URL '{url}'. Error: {e}") from e
+
+    except httpx.HTTPStatusError as e:
+        raise RuntimeError(f"Failed to fetch URL '{url}'. ") from e
+
+    if spec_type == "json":
+        try:
+            return resp.json()
+        except json.JSONDecodeError as e:
+            raise RuntimeError(
+                f"URL '{url}' returned non-JSON content. Error: {e}"
+            ) from e
+    elif spec_type == "xml":
+        try:
+            return ET.fromstring(resp.text)
+        except ET.ParseError as e:
+            raise ET.ParseError(f"Failed to parse XML from URL '{url}': {e}") from e
+
+
+def _read_spec_file_from_path(path: str, spec_type: Literal["json", "xml"] = "json"):
+    """Read from path"""
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(f"File not found: '{p}'")
+
+    if not p.is_file():
+        raise RuntimeError(f"Path exists but is not a file: '{p}'")
+    try:
+        if spec_type == "json":
+            return json.loads(p.read_text(encoding="utf-8"))
+        elif spec_type == "xml":
+            tree = ET.parse(p)
+            return tree.getroot()
+    except ET.ParseError as e:
+        raise ET.ParseError(f"Failed to parse XML from URL '{path}': {e}") from e
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"File '{p}' does not contain valid JSON. Error: {e}") from e
+    except PermissionError as e:
+        raise PermissionError(f"Permission denied when reading file '{p}'.") from e
+
+
+def _read_spec_file(path_or_url: str, spec_type: Literal["json", "xml"] = "json"):
+    # Load JSON from URL
+    if path_or_url.startswith(("http://", "https://")):
+        return _read_spec_file_from_url(path_or_url, spec_type)
+    else:
+        return _read_spec_file_from_path(path_or_url, spec_type)
+
+
+def _normalize_names(names: Optional[Union[List, Dict]]) -> Optional[List]:
+    """Helper for normalizing inside dataset features:
+    list, dict, or None -> return list or None"""
+
+    if names is None:
+        return None
+
+    if isinstance(names, List):
+        return names
+
+    if isinstance(names, Dict):
+        result = []
+
+        def recurse(prefix, obj):
+            if isinstance(obj, List):
+                for item in obj:
+                    result.append(f"{prefix}.{item}")
+            elif isinstance(obj, Dict):
+                for k, v in obj.items():
+                    recurse(f"{prefix}.{k}" if prefix else k, v)
+
+        recurse("", names)
+        return result
+
+
+def _normalize_entry(spec: Dict) -> Dict:
+    """Helper for normalizing dataset info entries"""
+
+    # Map dtypes -> types
+    # NOTE: As of now only dtypes are used by the server for sorting inputs
+    TYPE_MAP = {
+        "video": "VISUAL",
+        "image": "VISUAL",
+        "float32": "STATE",
+        "float64": "STATE",
+    }
+
+    dtype = spec.get("dtype", "").lower()
+    shape_raw = spec.get("shape", [])
+    shape = tuple(shape_raw) if isinstance(shape_raw, (list, tuple)) else ()
+
+    feature_type = TYPE_MAP.get(dtype, None)
+    if not feature_type:
+        return {}
+
+    names = _normalize_names(spec.get("names"))
+
+    entry = {
+        "dtype": dtype,
+        "shape": shape,
+        "type": feature_type,
+    }
+    if names:
+        entry["names"] = names
+
+    return entry
+
+
+def build_lerobot_features_from_dataset_info(
+    path_or_url: str,
+) -> Dict:
+    """
+    Load LeRobot dataset info.json from a local file or URL and build
+    the feature and actions dict.
+    """
+    # Read features dict
+    dataset_json = _read_spec_file(path_or_url)
+
+    if not dataset_json:
+        raise RuntimeError(f"Could not read spec file at {path_or_url}")
+
+    # Build feature dictionary
+    raw_features = dataset_json.get("features", {})
+
+    features = {}
+    image_keys = []
+    actions = {}
+
+    for key, spec in raw_features.items():
+        # NOTE: Only checking for state, images and action for now
+        if key == "observation.state":
+            features[key] = _normalize_entry(spec)
+        elif key.startswith("observation.images."):
+            features[key] = _normalize_entry(spec)
+            image_keys.append(key.removeprefix("observation.images."))
+
+    action_spec = raw_features.get("action", {})
+    actions = _normalize_entry(action_spec)
+
+    return {"features": features, "actions": actions, "image_keys": image_keys}
 
 
 class PDFReader:

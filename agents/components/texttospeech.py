@@ -10,7 +10,7 @@ import time
 from ..clients.model_base import ModelClient
 from ..clients import RoboMLWSClient, RoboMLRESPClient
 from ..config import TextToSpeechConfig
-from ..ros import Audio, String, Topic, StreamingString
+from ..ros import Audio, String, Topic, StreamingString, component_action
 from ..utils import validate_func_args
 from .model_component import ModelComponent
 from .component_base import ComponentRunType
@@ -226,7 +226,7 @@ class TextToSpeech(ModelComponent):
                 self.get_logger().debug("Event set, stopping data feed.")
                 return
 
-        # Wait until playback is finished after last chunck
+        # Wait until playback is finished after last chunk
         wait_start_time = time.monotonic()
         estimated_remaining_blocks = self._stream_queue.qsize()
         max_wait_timeout = estimated_remaining_blocks * (
@@ -418,7 +418,7 @@ class TextToSpeech(ModelComponent):
         """
         self._incoming_queue.put(audio_chunk)
 
-        # If the playback thread doesnt exist or isn't alive, start it.
+        # If the playback thread doesn't exist or isn't alive, start it.
         with self._thread_lock:
             if self._playback_thread is None or not self._playback_thread.is_alive():
                 self.get_logger().debug(
@@ -448,6 +448,7 @@ class TextToSpeech(ModelComponent):
                 )
                 self._playback_thread.start()
 
+    @component_action
     def stop_playback(self, wait_for_thread: bool = True):
         """
         Stops the playback thread and clears any pending audio.
@@ -468,6 +469,7 @@ class TextToSpeech(ModelComponent):
             self._playback_thread.join()
             self.get_logger().debug("Thread terminated.")
 
+    @component_action
     @validate_func_args
     def say(self, text: str):
         """
@@ -493,7 +495,7 @@ class TextToSpeech(ModelComponent):
         except Exception as e:
             self.get_logger().error(str(e))
             # raise a fallback trigger via health status
-            self.health_status.set_failure()
+            self.health_status.set_fail_component()
 
     def _create_input(self, *_, **kwargs) -> Optional[Dict[str, Any]]:
         """Create inference input for TextToSpeech models
@@ -544,10 +546,6 @@ class TextToSpeech(ModelComponent):
 
             # publish result
             self._publish(result)
-
-        else:
-            # raise a fallback trigger via health status
-            self.health_status.set_failure()
 
     def _warmup(self):
         """Warm up and stat check"""

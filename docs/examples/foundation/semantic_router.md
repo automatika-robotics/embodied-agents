@@ -1,8 +1,14 @@
-# Create a semantic router to route text queries between different components
+# Create a Semantic Router to Route Information between Components
 
-While semantic routing can be implemented with an LLM component, _EmbodiedAgents_ also provides a convenient SemanticRouter component that works directly with text encoding distances and can be utilized with a vector DB.
+The SemanticRouter component in EmbodiedAgents allows you to route text queries to specific components based on the user's intent or the output of a preceeding component.
 
-In this recipe we will use the SemanticRouter component to route text queries between two components, a general purpose LLM and a Go-to-X component that we built in the previous [example](goto.md). Lets start by setting up our components.
+The router operates in two distinct modes:
+
+1. Vector Mode (Default): This mode uses a Vector DB to calculate the mathematical similarity (distance) between the incoming query and the samples defined in your routes. It is extremely fast and lightweight.
+
+2. LLM Mode (Agentic): This mode uses an LLM to intelligently analyze the intent of the query and triggers routes accordingly. This is more computationally expensive but can handle complex nuances, context, and negation (e.g., "Don't go to the kitchen" might be routed differently by an agent than a simple vector similarity search).
+
+In this recipe, we will route queries between two components: a General Purpose LLM (for chatting) and a Go-to-X Component (for navigation commands) that we built in the previous [example](goto.md). Lets start by setting up our components.
 
 ## Setting up the components
 
@@ -98,7 +104,7 @@ In the code block above we are using the same DB client that was setup in this [
 
 ## Creating the SemanticRouter
 
-The SemanticRouter takes an input _String_ topic and sends whatever is published on that topic to a _Route_. A _Route_ is a thin wrapper around _Topic_ and takes in the name of a topic to publish on and example queries, that would match a potential query that should be published to a particular topic. For example, if we ask our robot a general question, like "Whats the capital of France?", we do not want that question to be routed to a Go-to-X component, but to a generic LLM. Thus in its route, we would provide examples of general questions. The SemanticRouter component works by storing these examples in a vector DB. Distance is calculated between an incoming query's embedding and the embeddings of example queries to determine which _Route_(_Topic_) the query should be sent on. Lets start by creating our routes for the input topics of the two components above.
+The SemanticRouter takes an input _String_ topic and sends whatever is published on that topic to a _Route_. A _Route_ is a thin wrapper around _Topic_ and takes in the name of a topic to publish on and example queries, that would match a potential query that should be published to a particular topic. For example, if we ask our robot a general question, like "Whats the capital of France?", we do not want that question to be routed to a Go-to-X component, but to a generic LLM. Thus in its route, we would provide examples of general questions. Lets start by creating our routes for the input topics of the two components above.
 
 ```python
 from agents.ros import Route
@@ -117,7 +123,9 @@ llm_route = Route(routes_to=llm_in,
         "How many tablespoons in a cup?", "How are you today?", "Whats up?"])
 ```
 
-For the database client we will use the ChromaDB client setup in [this example](semantic_map.md). We will specify a router name in our router config, which will act as a _collection_name_ in the database.
+## Option 1: Vector Mode (Similarity)
+
+This is the standard approach. In Vector mode, the SemanticRouter component works by storing these examples in a vector DB. Distance is calculated between an incoming query's embedding and the embeddings of example queries to determine which _Route_(_Topic_) the query should be sent on. For the database client we will use the ChromaDB client setup in [this example](semantic_map.md). We will specify a router name in our router config, which will act as a _collection_name_ in the database.
 
 ```python
 from agents.components import SemanticRouter
@@ -130,9 +138,28 @@ router = SemanticRouter(
     routes=[llm_route, goto_route],
     default_route=llm_route,  # If none of the routes fall within a distance threshold
     config=router_config,
-    db_client=chroma_client,  # reusing the db_client from the previous example
+    db_client=chroma_client,  # Providing db_client enables Vector Mode
     component_name="router"
 )
+```
+
+## Option 2: LLM Mode (Agentic)
+
+Alternatively, we can use an LLM to make routing decisions. This is useful if your routes require "understanding" rather than just similarity. We simply provide a `model_client` instead of a `db_client`.
+
+```{note}
+We can even use the same LLM (`model_client`) as we are using for our other Q&A components.
+```
+
+```python
+# No SemanticRouterConfig needed, we can use LLMConfig or let it be default
+router = SemanticRouter(
+    inputs=[query_topic],
+    routes=[llm_route, goto_route],
+    model_client=llama_client, # Providing model_client enables LLM Mode
+    component_name="smart_router"
+)
+
 ```
 
 And that is it. Whenever something is published on the input topic **question**, it will be routed, either to a Go-to-X component or an LLM component. We can now expose this topic to our command interface. The complete code for setting up the router is given below:
@@ -247,16 +274,28 @@ llm_route = Route(
     ],
 )
 
+# --- MODE 1: VECTOR ROUTING (Active) ---
 router_config = SemanticRouterConfig(router_name="go-to-router", distance_func="l2")
-# Initialize the router component
+
 router = SemanticRouter(
     inputs=[query_topic],
     routes=[llm_route, goto_route],
-    default_route=llm_route,  # If none of the routes fall within a distance threshold
+    default_route=llm_route,
     config=router_config,
-    db_client=chroma_client,  # reusing the db_client from the previous example
+    db_client=chroma_client, # Vector mode requires db_client
     component_name="router",
 )
+
+# --- MODE 2: LLM ROUTING (Commented Out) ---
+# To use LLM routing (Agentic), comment out the block above and uncomment this:
+#
+# router = SemanticRouter(
+#     inputs=[query_topic],
+#     routes=[llm_route, goto_route],
+#     default_route=llm_route,
+#     model_client=llama_client, # LLM mode requires model_client
+#     component_name="router",
+# )
 
 # Launch the components
 launcher = Launcher()
