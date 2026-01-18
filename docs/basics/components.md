@@ -47,10 +47,119 @@ _EmbodiedAgents_ provides a suite of ready-to-use components. These can be compo
 
 ## Topic
 
-A [topic](../apidocs/agents/agents.ros) is an idomatic wrapper for a ROS2 topic. Topics can be given as inputs or outputs to components. When given as inputs, components automatically create listeners for the topics upon their activation. And when given as outputs, components create publishers for publishing to the topic. Each topic has a name (duh?) and a data type, defining its listening callback and publishing behavior. The data type can be provided to the topic as a string. Checkout the list of supported data types [here](https://automatika-robotics.github.io/sugarcoat/advanced/types.html).
+A [topic](../apidocs/agents/agents.ros) is an idomatic wrapper for a ROS2 topic. Topics can be given as inputs or outputs to components. When given as inputs, components automatically create listeners for the topics upon their activation. And when given as outputs, components create publishers for publishing to the topic. Each topic has a name (duh?) and a data type, defining its listening callback and publishing behavior. The data type can be provided to the topic as a string. The list of supported data types below.
 
 ```{note}
 Learn more about Topics in [Sugarcoat🍬](https://automatika-robotics.github.io/sugarcoat/).
+```
+
+```{list-table}
+:widths: 20 40 40
+:header-rows: 1
+
+* - Message
+  - ROS2 package
+  - Description
+
+* - **[String](https://automatika-robotics.github.io/sugarcoat/apidocs/ros_sugar/ros_sugar.io.supported_types.md/#classes)**
+  - [std_msgs](https://docs.ros2.org/foxy/api/std_msgs/msg/String.html)
+  - Standard text message.
+
+* - **[Bool](https://automatika-robotics.github.io/sugarcoat/apidocs/ros_sugar/ros_sugar.io.supported_types.md/#classes)**
+  - [std_msgs](https://docs.ros2.org/foxy/api/std_msgs/msg/Bool.html)
+  - Boolean value (True/False).
+
+* - **[Float32](https://automatika-robotics.github.io/sugarcoat/apidocs/ros_sugar/ros_sugar.io.supported_types.md/#classes)**
+  - [std_msgs](https://docs.ros2.org/foxy/api/std_msgs/msg/Float32.html)
+  - Single-precision floating point number.
+
+* - **[Float32MultiArray](https://automatika-robotics.github.io/sugarcoat/apidocs/ros_sugar/ros_sugar.io.supported_types.md/#classes)**
+  - [std_msgs](https://docs.ros2.org/foxy/api/std_msgs/msg/Float32MultiArray.html)
+  - Array of single-precision floating point numbers.
+
+* - **[Float64](https://automatika-robotics.github.io/sugarcoat/apidocs/ros_sugar/ros_sugar.io.supported_types.md/#classes)**
+  - [std_msgs](https://docs.ros2.org/foxy/api/std_msgs/msg/Float64.html)
+  - Double-precision floating point number.
+
+* - **[Float64MultiArray](https://automatika-robotics.github.io/sugarcoat/apidocs/ros_sugar/ros_sugar.io.supported_types.md/#classes)**
+  - [std_msgs](https://docs.ros2.org/foxy/api/std_msgs/msg/Float64MultiArray.html)
+  - Array of double-precision floating point numbers.
+
+* - **[Twist](https://automatika-robotics.github.io/sugarcoat/apidocs/ros_sugar/ros_sugar.io.supported_types.html)**
+  - [geometry_msgs](https://docs.ros2.org/foxy/api/geometry_msgs/msg/Twist.html)
+  - Velocity expressed as linear and angular components.
+
+* - **[Image](https://automatika-robotics.github.io/sugarcoat/apidocs/ros_sugar/ros_sugar.io.supported_types.html)**
+  - [sensor_msgs](https://docs.ros2.org/foxy/api/sensor_msgs/msg/Image.html)
+  - Raw image data.
+
+* - **[CompressedImage](https://automatika-robotics.github.io/sugarcoat/apidocs/ros_sugar/ros_sugar.io.supported_types.html)**
+  - [sensor_msgs](https://docs.ros2.org/foxy/api/sensor_msgs/msg/CompressedImage.html)
+  - Compressed image data (e.g., JPEG, PNG).
+
+* - **[Audio](https://automatika-robotics.github.io/sugarcoat/apidocs/ros_sugar/ros_sugar.io.supported_types.html)**
+  - [sensor_msgs](https://docs.ros2.org/foxy/api/sensor_msgs/msg/Audio.html)
+  - Audio stream data.
+
+* - **[Path](https://automatika-robotics.github.io/sugarcoat/apidocs/ros_sugar/ros_sugar.io.supported_types.html)**
+  - [nav_msgs](https://docs.ros2.org/foxy/api/nav_msgs/msg/Path.html)
+  - An array of poses representing a navigation path.
+
+* - **[OccupancyGrid](https://automatika-robotics.github.io/sugarcoat/apidocs/ros_sugar/ros_sugar.io.supported_types.html)**
+  - [nav_msgs](https://docs.ros2.org/foxy/api/nav_msgs/msg/OccupancyGrid.html)
+  - 2D grid map where each cell represents occupancy probability.
+
+* - **[ComponentStatus](https://automatika-robotics.github.io/sugarcoat/apidocs/ros_sugar/ros_sugar.io.supported_types.html)**
+  - [automatika_ros_sugar](https://github.com/automatika-robotics/sugarcoat/blob/main/msg/ComponentStatus.msg)
+  - Lifecycle status and health information of a component.
+
+* - **[StreamingString](../apidocs/agents/agents.ros.md#classes)**
+  - [automatika_embodied_agents](https://github.com/automatika-robotics/ros-agents/tree/main/msg/StreamingString.msg)
+  - String chunk for streaming applications (e.g., LLM tokens).
+
+* - **[Video](../apidocs/agents/agents.ros.md#classes)**
+  - [automatika_embodied_agents](https://github.com/automatika-robotics/ros-agents/tree/main/msg/Video.msg)
+  - A sequence of image frames.
+
+* - **[Detections](../apidocs/agents/agents.ros.md#classes)**
+  - [automatika_embodied_agents](https://github.com/automatika-robotics/ros-agents/blob/main/msg/Detections2D.msg)
+  - 2D bounding boxes with labels and confidence scores.
+
+* - **[DetectionsMultiSource](../apidocs/agents/agents.ros.md#classes)**
+  - [automatika_embodied_agents](https://github.com/automatika-robotics/ros-agents/tree/main/msg/Detections2DMultiSource.msg)
+  - List of 2D detections from multiple input sources.
+
+* - **[PointsOfInterest](../apidocs/agents/agents.ros.md#classes)**
+  - [automatika_embodied_agents](https://github.com/automatika-robotics/ros-agents/tree/main/msg/PointsOfInterest.msg)
+  - Specific 2D coordinates of interest within an image.
+
+* - **[Trackings](../apidocs/agents/agents.ros.md#classes)**
+  - [automatika_embodied_agents](https://github.com/automatika-robotics/ros-agents/blob/main/msg/Trackings.msg)
+  - Object tracking data including IDs, labels, and trajectories.
+
+* - **[TrackingsMultiSource](../apidocs/agents/agents.ros.md#classes)**
+  - [automatika_embodied_agents](https://github.com/automatika-robotics/ros-agents/tree/main/msg/TrackingsMultiSource.msg)
+  - Object tracking data from multiple sources.
+
+* - **[RGBD](../apidocs/agents/agents.ros.md#classes)**
+  - [realsense2_camera_msgs](https://github.com/IntelRealSense/realsense-ros)
+  - Synchronized RGB and Depth image pair.
+
+* - **[JointTrajectoryPoint](../apidocs/agents/agents.ros.md#classes)**
+  - [trajectory_msgs](https://docs.ros2.org/foxy/api/trajectory_msgs/msg/JointTrajectoryPoint.html)
+  - Position, velocity, and acceleration for joints at a specific time.
+
+* - **[JointTrajectory](../apidocs/agents/agents.ros.md#classes)**
+  - [trajectory_msgs](https://docs.ros2.org/foxy/api/trajectory_msgs/msg/JointTrajectory.html)
+  - A sequence of waypoints for joint control.
+
+* - **[JointJog](../apidocs/agents/agents.ros.md#classes)**
+  - [control_msgs](https://github.com/ros-controls/control_msgs)
+  - Immediate displacement or velocity commands for joints.
+
+* - **[JointState](../apidocs/agents/agents.ros.md#classes)**
+  - [sensor_msgs](https://docs.ros2.org/foxy/api/sensor_msgs/msg/JointState.html)
+  - Instantaneous position, velocity, and effort of joints.
 ```
 
 ## Component Config
@@ -67,8 +176,10 @@ In _EmbodiedAgents_, components can operate in one of two modes:
 :widths: 10 80
 * - **Timed**
   - Executes its main function at regular time intervals (e.g., every N milliseconds).
-* - **Event**
-  - Executes in response to specific incoming messages or events on one or more trigger topics.
+* - **Reactive**
+  - Executes in response to trigger. A trigger can be either incoming messages on one or more trigger topics, OR an `Event`.
+* - **Action Server**
+  - Executes in response to an action request. Components of this type execute a long running task (action) and can return feedback while the execution is ongoing.
 ```
 
 ## Health Check and Fallback

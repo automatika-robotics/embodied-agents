@@ -12,7 +12,7 @@ python -m lerobot.async_inference.policy_server --host=<HOST_ADDRESS> --port=<PO
 
 ## Simulation Setup
 
-**TO BE ADDED**
+**WILL BE ADDED SOON**
 
 ## Setting up our VLA based Agent
 
