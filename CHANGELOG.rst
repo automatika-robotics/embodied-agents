@@ -2,8 +2,8 @@
 Changelog for package automatika_embodied_agents
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+0.5.0 (2026-01-19)
+------------------
 * (docs) Adds supported types table and component runtype in basics
 * (docs) Adds VLA tutorial to docs and refactors them
 * (docs) Adds tutorials and examples for using events/fallbacks
