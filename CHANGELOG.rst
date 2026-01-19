@@ -2,6 +2,48 @@
 Changelog for package automatika_embodied_agents
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+* (docs) Adds supported types table and component runtype in basics
+* (docs) Adds VLA tutorial to docs and refactors them
+* (docs) Adds tutorials and examples for using events/fallbacks
+* (refactor) Enables health broadcast by default
+* (feautre) Adds feature for passing additional model clients to components
+  Component can switch model clients based on events
+* (feature) Adds external events as component triggers for certain components that can be run in a timed way
+* (feature) Adds stt and tts endpoints and generic model wrappers for the generic http client (openai compatible)
+* (feature) Enables support for tool calls in generic http client
+* (feature) Adds llms.txt in docs
+* (docs) Adds explanation of both routing modes to semantic router docs
+* (feature) Adds LLM based agentic routing to semantic router
+* (feature) Adds timeout for event based termination if the event doesnt happen within max_timesteps
+* (feature) Create observation spec form mapping dicts if dataset info.json is not provided
+* (feature) Adds publisher for joint state msg
+* (feature) Adds parameter to regulate observation sending rate
+* (fix) Adds various fixes for running in multiprocessing (vla)
+* (feature) Adds dynamically adjusting loop rate to action server (vla)
+* (feature) Adds termination logic to the VLA action server
+* (feature) Adds capping of actions based on joint limits before publishing
+* (feature) Adds action sending in VLA for multiple datatypes
+* (feature) Adds a setter for passing an external aggregation function
+* (feature) Adds mapping between LeRobot dataset keys and robot urdf and topics
+  - Adds warning and errors for mapped keys, topics
+  - Adds creation of input for VLA
+  - Adds action receiving and aggregation
+* (feature) Adds utility for reading joint limits from URDF files/urls
+  - Adds mapping utility function in internal joint state class
+* (fix) Adds destruction of stream timer if its created for async websocket clients
+* (docs) Adds documentaion for lerobot client
+* (feature) Adds an async grpc client for lerobot
+* (docs) Removes onnxruntime as a mandatory dependancy, its only required for local models
+* (feature) Adds LeRobotPolicy wrapper in models
+  Adds utility for extracting features and actions from info.json
+* (feature) Implements replacing input topics to handle trigger callbacks
+* (feature) Enables None triggers for Server components
+* (fix) Fixes unnecessary logging causing error before component activation
+* (fix) Fixes deserialization of map layers and routes in multiprocess run
+* Contributors: ahr, mkabtoul
+
 0.4.3 (2025-11-07)
 ------------------
 * (docs) Adds instructions for using the dynamic web UI
