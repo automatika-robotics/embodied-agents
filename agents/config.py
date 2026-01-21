@@ -222,7 +222,56 @@ VLMConfig = MLLMConfig
 @define(kw_only=True)
 class VLAConfig(ModelComponentConfig):
     """
-    Configuration for the Vision-Language-Agent (VLA) component.
+    Configuration for the Vision-Language-Action (VLA) component.
+
+    It defines settings that control how the VLA component maps sensor inputs to the model,
+    manages the frequency of observation and action loops, and enforces safety constraints
+    through URDF limits.
+
+    :param joint_names_map: A dictionary mapping the joint names expected by the model
+        (keys) to the actual joint names in the robot's URDF/ROS system (values).
+    :type joint_names_map: Dict[str, str]
+    :param camera_inputs_map: A mapping of camera names expected by the model (keys)
+        to the corresponding ROS topics (values).
+    :type camera_inputs_map: Mapping[str, Union[Topic, Dict]]
+    :param state_input_type: The type of state data to extract from the joint state inputs.
+        Supported values are "positions", "velocities", "accelerations", and "efforts".
+        Default is "positions".
+    :type state_input_type: Literal["positions", "velocities", "accelerations", "efforts"]
+    :param action_output_type: The type of action data to publish to the robot controller.
+        Supported values are "positions", "velocities", "accelerations", and "efforts".
+        Default is "positions".
+    :type action_output_type: Literal["positions", "velocities", "accelerations", "efforts"]
+    :param observation_sending_rate: The frequency (in Hz) at which observations are
+        captured and sent to the model for inference. Default is 10.0 Hz.
+    :type observation_sending_rate: float
+    :param action_sending_rate: The frequency (in Hz) at which action commands are
+        published to the robot's controllers. Default is 10.0 Hz.
+    :type action_sending_rate: float
+    :param input_timeout: The maximum time (in seconds) to wait for all required inputs
+        (joints, images) to become available before aborting an action after an action request.
+        Default is 30.0s.
+    :type input_timeout: float
+    :param robot_urdf_file: Path to the robot's URDF file. This is strongly recommended
+        for safety, as it allows the component to read joint limits and cap generated
+        actions within safe bounds.
+    :type robot_urdf_file: Optional[str]
+    :param joint_limits: A manual dictionary of joint limits to be used if a URDF file
+        is not provided. Format should match parsed URDF limits.
+    :type joint_limits: Optional[Dict]
+
+    Example of usage:
+    ```python
+    joints_map = {"shoulder_pan": "joint1", "elbow_flex": "joint2"}
+    camera_map = {"front_view": camera_topic}
+
+    config = VLAConfig(
+        joint_names_map=joints_map,
+        camera_inputs_map=camera_map,
+        observation_sending_rate=5.0,
+        robot_urdf_file="/path/to/robot.urdf"
+    )
+    ```
     """
 
     joint_names_map: Dict[str, str] = field()
