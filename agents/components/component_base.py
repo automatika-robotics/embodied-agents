@@ -42,7 +42,7 @@ class Component(BaseComponent):
 
         # setup inputs and outputs
         if inputs:
-            self.validate_topics(
+            self._validate_topics(
                 inputs,
                 allowed_topic_types=self.allowed_inputs,
                 topics_direction="Inputs",
@@ -50,7 +50,7 @@ class Component(BaseComponent):
 
         if outputs:
             if hasattr(self, "allowed_outputs"):
-                self.validate_topics(
+                self._validate_topics(
                     outputs,
                     allowed_topic_types=self.allowed_outputs,
                     topics_direction="Outputs",
@@ -67,7 +67,7 @@ class Component(BaseComponent):
         )
 
         # setup component run type and triggers
-        self.trigger(trigger)
+        self._trigger(trigger)
 
     def custom_on_activate(self):
         """
@@ -120,7 +120,7 @@ class Component(BaseComponent):
             if callback._subscriber:
                 self.destroy_subscription(callback._subscriber)
 
-    def trigger(self, trigger: Union[Topic, List[Topic], float, Event, None]) -> None:
+    def _trigger(self, trigger: Union[Topic, List[Topic], float, Event, None]) -> None:
         """
         Set component trigger
         """
@@ -144,6 +144,7 @@ class Component(BaseComponent):
             self.run_type = ComponentRunType.EVENT
             self.trig_callbacks = {trigger.name: self.callbacks[trigger.name]}
             del self.callbacks[trigger.name]
+
         elif isinstance(trigger, Event):
             self.run_type = ComponentRunType.EVENT
             self._add_event_action_pair(trigger, Action(self._execution_step))
@@ -164,7 +165,7 @@ class Component(BaseComponent):
 
         self.trig_topic: Union[Topic, List[Topic], float, Event, None] = trigger
 
-    def validate_topics(
+    def _validate_topics(
         self,
         topics: Sequence[Union[Topic, FixedInput]],
         allowed_topic_types: Optional[
