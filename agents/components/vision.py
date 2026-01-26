@@ -1,6 +1,8 @@
 from typing import Any, Union, Optional, List, Dict
+import time
 import queue
 import threading
+import os
 import numpy as np
 import cv2
 
@@ -17,6 +19,7 @@ from ..ros import (
     TrackingsMultiSource,
     ROSImage,
     ROSCompressedImage,
+    component_action,
 )
 from ..utils import (
     validate_func_args,
@@ -154,6 +157,65 @@ class Vision(ModelComponent):
                 self.visualization_thread.join()
         # deactivate component
         super().custom_on_deactivate()
+
+    @component_action
+    def take_picture(self, save_path: str = "~/emos/pictures") -> bool:
+        """
+        Take pictures from the current image inputs and save them to a specified location.
+
+        This method can be used as an Action in response to events (e.g., "person detected").
+        It captures the latest available image from the component's inputs.
+
+        :param save_path: The directory path where images will be saved.
+                            Defaults to "~/emos/pictures".
+        :type folder_path: str
+        :return: True if successful, False otherwise.
+        :rtype: bool
+        """
+        try:
+            # Expand user path
+            save_path = os.path.expanduser(save_path)
+            if not os.path.exists(save_path):
+                os.makedirs(save_path, exist_ok=True)
+                self.get_logger().info(f"Created directory: {save_path}")
+
+            current_images = []
+
+            # Try fetching from triggers if available
+            if hasattr(self, "trig_callbacks"):
+                for cb in self.trig_callbacks.values():
+                    img = cb.get_output(clear_last=True)
+                    if img is not None:
+                        current_images.append(img)
+
+            # Try fetching from regular inputs if triggers didn't yield
+            if not current_images:
+                for cb in self.callbacks.values():
+                    img = cb.get_output(clear_last=True)
+                    if img is not None:
+                        current_images.append(img)
+
+            if not current_images:
+                self.get_logger().warning(
+                    "No image inputs available to take a picture of."
+                )
+                return False
+
+            timestamp = int(time.time() * 1000)
+
+            for idx, img in enumerate(current_images):
+                filename = f"capture_{timestamp}_{idx}.jpg"
+                full_path = os.path.join(save_path, filename)
+                # Ensure BGR for OpenCV saving
+                save_img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+                cv2.imwrite(full_path, save_img)
+                self.get_logger().info(f"Saved picture to {full_path}")
+
+            return True
+
+        except Exception as e:
+            self.get_logger().error(f"Failed to take picture: {e}")
+            return False
 
     def _visualize(self):
         """CV2 based visualization of inference results"""
