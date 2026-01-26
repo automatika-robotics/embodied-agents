@@ -159,18 +159,22 @@ class Vision(ModelComponent):
         super().custom_on_deactivate()
 
     @component_action
-    def take_picture(self, save_path: str = "~/emos/pictures") -> bool:
+    def take_picture(self, topic_name: str, save_path: str = "~/emos/pictures") -> bool:
         """
-        Take pictures from the current image inputs and save them to a specified location.
+        Take a picture from a specific input topic and save it to the specified location.
 
-        This method can be used as an Action in response to events (e.g., "person detected").
-        It captures the latest available image from the component's inputs.
+        This method acts as an Action to capture a specific frame from a specific camera/topic.
+        It prioritizes triggers over standard inputs if a name conflict exists (though unique names are expected).
 
+        :param topic_name: The name of the topic to capture the image from.
+                           Must be one of the component's registered input topics.
+        :type topic_name: str
         :param save_path: The directory path where images will be saved.
-                            Defaults to "~/emos/pictures".
-        :type folder_path: str
+                          Defaults to "~/emos/pictures".
+        :type save_path: str
         :return: True if successful, False otherwise.
         :rtype: bool
+        :raises ValueError: If the provided topic_name is not found in inputs.
         """
         try:
             # Expand user path
@@ -179,43 +183,171 @@ class Vision(ModelComponent):
                 os.makedirs(save_path, exist_ok=True)
                 self.get_logger().info(f"Created directory: {save_path}")
 
-            current_images = []
+            target_callback = None
 
-            # Try fetching from triggers if available
-            if hasattr(self, "trig_callbacks"):
-                for cb in self.trig_callbacks.values():
-                    img = cb.get_output(clear_last=True)
-                    if img is not None:
-                        current_images.append(img)
+            # Check Triggers first
+            if hasattr(self, "trig_callbacks") and topic_name in self.trig_callbacks:
+                target_callback = self.trig_callbacks[topic_name]
+            # Check Regular inputs
+            elif topic_name in self.callbacks:
+                target_callback = self.callbacks[topic_name]
+            else:
+                raise ValueError(
+                    f"Topic '{topic_name}' is not a registered input or trigger for this component."
+                )
 
-            # Try fetching from regular inputs if triggers didn't yield
-            if not current_images:
-                for cb in self.callbacks.values():
-                    img = cb.get_output(clear_last=True)
-                    if img is not None:
-                        current_images.append(img)
+            # Fetch Image
+            img = target_callback.get_output(clear_last=False)
 
-            if not current_images:
+            if img is None:
                 self.get_logger().warning(
-                    "No image inputs available to take a picture of."
+                    f"No image data available on topic '{topic_name}' to capture."
                 )
                 return False
 
+            # Save Image
             timestamp = int(time.time() * 1000)
+            filename = f"capture_{topic_name}_{timestamp}.jpg"
+            full_path = os.path.join(save_path, filename)
 
-            for idx, img in enumerate(current_images):
-                filename = f"capture_{timestamp}_{idx}.jpg"
-                full_path = os.path.join(save_path, filename)
-                # Ensure BGR for OpenCV saving
-                save_img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-                cv2.imwrite(full_path, save_img)
-                self.get_logger().info(f"Saved picture to {full_path}")
+            # Ensure BGR for OpenCV saving
+            save_img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+            cv2.imwrite(full_path, save_img)
+            self.get_logger().info(f"Saved picture to {full_path}")
 
             return True
 
         except Exception as e:
             self.get_logger().error(f"Failed to take picture: {e}")
             return False
+
+    @component_action
+    def record_video(
+        self,
+        topic_name: str,
+        duration: float = 5.0,
+        save_path: str = "~/emos/videos",
+        fps: int = 20,
+    ) -> bool:
+        """
+        Record a video from a specific input topic for a set duration.
+
+        This action spawns a background thread to capture frames and save them to a video file.
+        It does not block the main execution loop.
+
+        :param topic_name: The name of the topic to record from.
+        :type topic_name: str
+        :param duration: The duration of the recording in seconds. Defaults to 5.0.
+        :type duration: float
+        :param save_path: The directory path where the video will be saved.
+                          Defaults to "~/emos/videos".
+        :type save_path: str
+        :param fps: The frames per second for the recording. Defaults to 20.
+        :type fps: int
+        :return: True if the recording thread started successfully, False otherwise.
+        :rtype: bool
+        :raises ValueError: If the topic_name is not registered.
+        """
+        try:
+            # Expand user path
+            save_path = os.path.expanduser(save_path)
+            if not os.path.exists(save_path):
+                os.makedirs(save_path, exist_ok=True)
+                self.get_logger().info(f"Created directory: {save_path}")
+
+            target_callback = None
+
+            # Prioritize triggers
+            if hasattr(self, "trig_callbacks") and topic_name in self.trig_callbacks:
+                target_callback = self.trig_callbacks[topic_name]
+            # Check regular inputs
+            elif topic_name in self.callbacks:
+                target_callback = self.callbacks[topic_name]
+            else:
+                raise ValueError(
+                    f"Topic '{topic_name}' is not a registered input or trigger for this component."
+                )
+
+            # Spawn the background thread
+            recording_thread = threading.Thread(
+                target=self._record_video_thread,
+                kwargs={
+                    "target_callback": target_callback,
+                    "topic_name": topic_name,
+                    "duration": duration,
+                    "save_path": save_path,
+                    "fps": fps,
+                },
+                daemon=True,
+            )
+            recording_thread.start()
+            self.get_logger().info(
+                f"Started recording video on topic '{topic_name}' for {duration} seconds."
+            )
+
+            return True
+
+        except Exception as e:
+            self.get_logger().error(f"Failed to start recording: {e}")
+            return False
+
+    def _record_video_thread(
+        self,
+        target_callback,
+        topic_name: str,
+        duration: float,
+        save_path: str,
+        fps: int,
+    ):
+        """
+        Internal worker thread to buffer frames and write video to disk.
+        """
+        try:
+            frames = []
+            start_time = time.time()
+            interval = 1.0 / fps
+
+            # Capture Loop: Buffer frames in memory to avoid I/O blocking
+            while (time.time() - start_time) < duration:
+                loop_start = time.time()
+
+                # Peek at the latest frame without clearing it to avoid starving the main inference loop
+                img = target_callback.get_output(clear_last=False)
+
+                if img is not None and isinstance(img, np.ndarray):
+                    # Create a copy to ensure thread safety if the buffer changes
+                    frames.append(img.copy())
+
+                # Maintain FPS
+                elapsed = time.time() - loop_start
+                sleep_time = max(0.0, interval - elapsed)
+                time.sleep(sleep_time)
+
+            if not frames:
+                self.get_logger().warning(
+                    f"No frames captured for video on topic '{topic_name}'."
+                )
+                return
+
+            # Encoding Phase: Write to disk
+            timestamp = int(time.time() * 1000)
+            filename = f"recording_{topic_name}_{timestamp}.mp4"
+            full_path = os.path.join(save_path, filename)
+
+            height, width, _ = frames[0].shape
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+            out = cv2.VideoWriter(full_path, fourcc, fps, (width, height))
+
+            for frame in frames:
+                # Convert RGB to BGR for OpenCV
+                bgr_frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                out.write(bgr_frame)
+
+            out.release()
+            self.get_logger().info(f"Video saved successfully: {full_path}")
+
+        except Exception as e:
+            self.get_logger().error(f"Error during video recording/saving: {e}")
 
     def _visualize(self):
         """CV2 based visualization of inference results"""
