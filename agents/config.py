@@ -3,7 +3,7 @@ from pathlib import Path
 
 from attrs import define, field, Factory, validators
 
-from .ros import base_validators, BaseComponentConfig, Topic, Route
+from .ros import base_validators, BaseComponentConfig, Topic
 from .utils import validate_kwargs_from_default, _LANGUAGE_CODES
 
 __all__ = [
@@ -27,14 +27,6 @@ def _get_optional_topic(topic: Union[Topic, Dict]) -> Optional[Topic]:
     if isinstance(topic, Topic):
         return topic
     return Topic(**topic)
-
-
-def _get_optional_route(route: Union[Route, Dict]) -> Optional[Route]:
-    if not route:
-        return
-    if isinstance(route, Route):
-        return route
-    return Route(**route)
 
 
 @define(kw_only=True)
@@ -125,9 +117,8 @@ class LLMConfig(ModelComponentConfig):
     _tool_response_flags: Dict[str, bool] = field(
         default=Factory(dict), alias="_tool_response_flags"
     )
-    _default_route: Optional[Union[Route, Dict]] = field(
-        default=None, converter=_get_optional_route, alias="_default_route"
-    )  # Only used when LLM is used as a router
+    # Only used when LLM is used as a router
+    _default_route: Optional[str] = field(default=None, alias="_default_route")
 
     @response_terminator.validator
     def _not_empty(self, _, value):
@@ -714,9 +705,7 @@ class SemanticRouterConfig(ModelComponentConfig):
     maximum_distance: float = field(
         default=0.4, validator=base_validators.in_range(min_value=0.1, max_value=1.0)
     )
-    _default_route: Optional[Union[Route, Dict]] = field(
-        default=None, converter=_get_optional_route, alias="_default_route"
-    )
+    _default_route: Optional[str] = field(default=None, alias="_default_route")
 
     def _get_inference_params(self):
         """Dummy method to avoid check if semantic router is used in vector mode"""

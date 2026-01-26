@@ -31,13 +31,14 @@ from ros_sugar.config import (
 )
 from ros_sugar.core import BaseComponent
 from ros_sugar.core.component import MutuallyExclusiveCallbackGroup
-from ros_sugar.core.component_actions import ComponentActions
-from ros_sugar import Launcher, UI_EXTENSIONS
+from ros_sugar import UI_EXTENSIONS
 from ros_sugar.utils import component_action, component_fallback
 from ros_sugar.io.utils import run_external_processor
-from ros_sugar.actions import Action
-from ros_sugar.events import Event
-from ros_sugar import events
+from ros_sugar.core import Event
+from ros_sugar.core import Action
+from ros_sugar import actions
+
+from ros_sugar import Launcher
 
 # AGENTS TYPES
 from automatika_embodied_agents.msg import (
@@ -97,15 +98,18 @@ __all__ = [
     "MapLayer",
     "Route",
     "MutuallyExclusiveCallbackGroup",
-    "Action",
-    "ComponentActions",
-    "events",
     "Event",
+    "actions",
+    "Action",
     "component_fallback",
     "component_action",
     "VisionLanguageAction",
     "run_external_processor",
 ]
+
+# =========================================================================
+# Additional Datatypes (Augment Sugarcoat datatypes)
+# =========================================================================
 
 
 class StreamingString(SupportedType):
@@ -628,6 +632,10 @@ agent_types = [
 
 add_additional_datatypes(agent_types)
 
+# =========================================================================
+# Additional UI Elements (Augment Sugarcoat UI elements)
+# =========================================================================
+
 
 def augment_ui():
     from .ui_elements import INPUT_ELEMENTS, OUTPUT_ELEMENTS
@@ -636,6 +644,10 @@ def augment_ui():
 
 
 UI_EXTENSIONS["agents"] = augment_ui
+
+# =========================================================================
+# Additional Primitives (Augment Sugarcoat primitives)
+# =========================================================================
 
 
 @define(kw_only=True)
@@ -685,6 +697,7 @@ class FixedInput(Topic):
 
 
 def _get_topic(topic: Union[Topic, Dict]) -> Topic:
+    """Converter to get back a topic or an empty dictionary"""
     if isinstance(topic, Topic):
         return topic
     return Topic(**topic)
@@ -744,5 +757,7 @@ class Route(BaseAttrs):
     ```
     """
 
-    routes_to: Union[Topic, Dict] = field(converter=_get_topic)
+    routes_to: Union[Topic, Action, Dict] = field(
+        converter=_get_topic
+    )  # Only topics would get deserialized here
     samples: List[str] = field()
