@@ -174,7 +174,6 @@ from agents.config import VLAConfig
 from agents.clients import LeRobotClient
 from agents.models import LeRobotPolicy
 from agents.ros import Topic, Launcher
-from agents.events import OnEqual
 
 # --- Define Topics ---
 state = Topic(name="/isaac_joint_states", msg_type="JointState")
