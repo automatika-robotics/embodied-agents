@@ -4,7 +4,7 @@ In the previous [recipe](vla.md), we saw how VLAs can be used in _EmbodiedAgents
 
 Most VLA policies are "open-loop" regarding task completion, they run for a fixed number of steps and then stop, regardless of whether they succeeded or failed.
 
-In this tutorial, we will build a **Closed-Loop Agent**. We will combine:
+In this tutorial, we will build a **Closed-Loop Agent** while using an open-loop policy. Even if the model correctly outputs its termination condition (i.e. an absorbing state policy), our design can act as a safety valve. We will combine:
 
 - **The Player (VLA):** Attempts to pick up an object.
 - **The Referee (VLM):** Watches the camera stream and judges if the task is complete.
