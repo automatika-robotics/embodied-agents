@@ -2,7 +2,7 @@ from agents.components import Vision, VLM
 from agents.config import VisionConfig
 from agents.clients import OllamaClient
 from agents.models import OllamaModel
-from agents.ros import Launcher, Topic, FixedInput, events
+from agents.ros import Launcher, Topic, FixedInput, Event
 
 # Define Topics
 camera_image = Topic(name="/image_raw", msg_type="Image")
@@ -25,11 +25,9 @@ vision_detector = Vision(
 # This event listens to the 'detections' topic.
 # It triggers ONLY if the "labels" list inside the message contains "person"
 # after not containing a person (within a 5 second interval).
-event_person_detected = events.OnChangeContainsAny(
-    event_name="person_spotted",
-    event_source=detections,
-    trigger_value=["person"],  # The value to look for
-    nested_attributes="labels",  # The attribute in the message to check
+event_person_detected = Event(
+    detections.msg.labels.contains_any(["person"]),
+    on_change=True,  # Trigger only when a change has occurred to stop repeat triggering
     keep_event_delay=5,  # A delay in seconds
 )
 

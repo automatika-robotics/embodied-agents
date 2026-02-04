@@ -14,6 +14,7 @@ except ImportError:
 from ..config import VLAConfig
 import time
 from ..ros import (
+    Event,
     Action,
     RGBD,
     Image,
@@ -35,7 +36,6 @@ from ..utils.actions import (
     create_observation_spec,
     validate_mapping_completeness,
 )
-from ..events import Event
 from ..clients.lerobot import LeRobotClient
 from .model_component import ModelComponent
 
@@ -74,8 +74,6 @@ class VLA(ModelComponent):
 
         # queue aggregation function
         self._aggregator_function: Callable = lambda _, y: y
-
-        # Add event/action if required in config
 
         # Set the component to run as an action server and set the main action type
         self.run_type = ComponentRunType.ACTION_SERVER

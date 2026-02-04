@@ -165,6 +165,8 @@ class ModelComponent(Component):
         """
         Create model client if provided and initialize model.
         """
+        super().custom_on_configure()
+
         self.get_logger().debug(f"Current Status: {self.health_status.value}")
 
         # validate output topics if handled_outputs exist

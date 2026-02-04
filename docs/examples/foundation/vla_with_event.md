@@ -100,7 +100,7 @@ To prevent the VLM from consuming too much compute, we have configured a `float`
 ```
 
 ```{tip}
-In order to make sure that the VLM output is formatted as per our requirement (YES or NO), checkout how to use pre-processors in [this](semantic_map.md) tutorial.
+In order to make sure that the VLM output is formatted as per our requirement (YES or NO), checkout how to use pre-processors in [this](semantic_map.md) tutorial. For now we will assume that if YES is part of the output string, the event should fire.
 ```
 
 ## The Bridge: Semantic Event Trigger
@@ -108,14 +108,11 @@ In order to make sure that the VLM output is formatted as per our requirement (Y
 Now comes the "Self-Referential" magic. We simply define an **Event** that fires when the `/referee/verdict` topic contains the word "YES".
 
 ```python
-from agents.events import OnEqual
+from agents.ros import Event
 
 # Define the Success Event
-event_task_success = OnEqual(
-    event_name="success_verified",
-    event_source=referee_verdict,
-    nested_attributes='data',  # Check this attribute in the message
-    trigger_value="YES", # The VLM output we are looking for
+event_task_success = Event(
+    referee_verdict.msg.data.contains("YES")  # the topic, attribute and value to check in it
 )
 ```
 
@@ -164,7 +161,7 @@ from agents.config import VLAConfig
 from agents.clients import LeRobotClient, OllamaClient
 from agents.models import LeRobotPolicy, OllamaModel
 from agents.ros import Topic, Launcher, FixedInput
-from agents.events import OnContains
+from agents.ros import Event
 
 # --- Define Topics ---
 state = Topic(name="/isaac_joint_states", msg_type="JointState")
@@ -223,10 +220,8 @@ referee = VLM(
 
 # --- Define the Logic (Event) ---
 # Create an event that looks for "YES" in the VLM's output
-event_success = OnContains(
-    event_name="task_success",
-    event_source=referee_verdict,
-    trigger_value="YES"
+event_task_success = Event(
+    referee_verdict.msg.data.contains("YES")  # the topic, attribute and value to check in it
 )
 
 # Link the event to the VLA's stop mechanism
