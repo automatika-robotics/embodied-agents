@@ -367,10 +367,10 @@ def main():
             db_client=db_client,
             model_client=model_client,
             config=config,
-            default_route=config._default_route,
             component_name=component_name,
             config_file=config_file,
-        )
+        )  # we dont pass default route here as its already part of the config
+    # and will be set from there
     # Map Encoding Component
     elif component_type == all_components.MapEncoding.__name__:
         db_client_json = json.loads(args.db_client)

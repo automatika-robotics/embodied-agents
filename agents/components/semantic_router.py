@@ -108,11 +108,11 @@ class SemanticRouter(LLM):
 
         # Prepare output topics
         self.routes_dict: Dict[str, Route] = {}
-        route_topics: List[Topic] = self._config_routes(
-            routes, component_name=component_name
-        )
+        self._action_routes: Dict[Event, Action] = {}
+        topic_routes: List[Topic] = self._config_routes(inputs, routes, component_name)
 
-        self._validate_topics(route_topics, self.allowed_outputs, "Outputs")
+        # validate outputs, inputs will be validated in parent
+        self._validate_topics(topic_routes, self.allowed_outputs, "Outputs")
 
         # Determine operation mode
         if model_client:
@@ -153,7 +153,7 @@ class SemanticRouter(LLM):
         # Create the parent, db client would be created in the parent
         super().__init__(
             inputs=inputs,
-            outputs=route_topics,
+            outputs=topic_routes,
             config=component_config
             if isinstance(component_config, LLMConfig)
             else None,
@@ -164,6 +164,10 @@ class SemanticRouter(LLM):
             **kwargs,
         )
 
+        # After super init we add any event/action pairs to component
+        for e, a in self._action_routes.items():
+            self._add_event_action_pair(e, a)
+
         # We keep an internal config as self.config is being used in LLM
         self._internal_config = (
             self.config if isinstance(component_config, LLMConfig) else component_config
@@ -172,44 +176,24 @@ class SemanticRouter(LLM):
         # Setup default route
         if default_route:
             if isinstance(default_route.routes_to, Topic):
-                default_name = default_route.routes_to.name
+                self._internal_config._default_route = default_route.routes_to.name
             elif isinstance(default_route.routes_to, Action):
-                default_name = default_route.routes_to.action_name
+                self._internal_config._default_route = f"internal_router_event/{component_name}/{default_route.routes_to.action_name}"
             else:
                 raise ValueError("default_route must route to a topic or an action")
 
-            if default_name not in self.routes_dict:
+            if self._internal_config._default_route not in self.routes_dict:
                 raise ValueError("default_route must be one of the specified routes")
-        else:
-            default_name = None
 
-        self.default_route = self._internal_config._default_route = default_name
+        self.default_route = self._internal_config._default_route
 
         # Initialize internal state
         self._current_payload: Optional[str] = None
         self._route_funcs: Dict[str, Callable] = {}
 
-    def custom_on_configure(self):
-        self.get_logger().debug(f"Current Status: {self.health_status.value}")
-
-        # configure the rest
-        super().custom_on_configure()
-
-        # initialize routes
-        if self.routing_mode is RouterMode.LLM:
-            self.get_logger().info("SemanticRouter starting in LLM (Agentic) Mode.")
-            self._setup_llm_routes(self.routes_dict)
-        else:
-            self.get_logger().info(
-                "SemanticRouter starting in VECTOR (Embedding) Mode."
-            )
-            self._initialize_vector_routes()
-
-    def custom_on_deactivate(self):
-        """Deactivate component."""
-        super().custom_on_deactivate()
-
-    def _config_routes(self, routes: List[Route], component_name: str) -> List[Topic]:
+    def _config_routes(
+        self, inputs: List[Topic], routes: List[Route], component_name: str
+    ) -> List[Topic]:
         """Configure routes"""
         route_topics = []
 
@@ -240,30 +224,49 @@ class SemanticRouter(LLM):
                 # Create topics for action routes and add to list
                 # augment action name to make it clear it's an internal topic
                 event_topic = Topic(
-                    name=f"/internal_router_event/{component_name}/{name}",
+                    name=f"internal_router_event/{component_name}/{name}",
                     msg_type="String",
                 )
                 route_topics.append(event_topic)
 
                 # Create a new route based on the new topic
                 new_route = Route(routes_to=event_topic, samples=route.samples)
-                self.routes_dict[name] = new_route  # use the action name
+                self.routes_dict[event_topic.name] = (
+                    new_route  # use the event topic name
+                )
 
                 # Create an OnAny event
-                event = Event(
-                    event_name=event_topic.name,
-                    event_source=event_topic,
-                )
+                event = Event(event_topic)
 
-                # Pass the event topic info to the action
-                route.routes_to.add_automatic_parser_from_msg_type(
-                    input_topic_msg_type=event_topic.ros_msg_type
-                )
+                # Replace any query topic inputs with event topic inputs
+                # This is necessary to reduce the delay for event triggering
+                for input in inputs:
+                    route.routes_to.replace_input_topic(input, event_topic)
 
-                # Set the event action pair in the component
-                self._add_event_action_pair(event, route.routes_to)
+                # Keep event action pair to be added to component later
+                self._action_routes[event] = route.routes_to
 
         return route_topics
+
+    def custom_on_configure(self):
+        self.get_logger().debug(f"Current Status: {self.health_status.value}")
+
+        # configure the rest
+        super().custom_on_configure()
+
+        # initialize routes
+        if self.routing_mode is RouterMode.LLM:
+            self.get_logger().info("SemanticRouter starting in LLM (Agentic) Mode.")
+            self._setup_llm_routes(self.routes_dict)
+        else:
+            self.get_logger().info(
+                "SemanticRouter starting in VECTOR (Embedding) Mode."
+            )
+            self._initialize_vector_routes()
+
+    def custom_on_deactivate(self):
+        """Deactivate component."""
+        super().custom_on_deactivate()
 
     # =========================================================================
     # LOCKED METHODS (Public API Restrictions)

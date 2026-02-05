@@ -703,6 +703,15 @@ def _get_topic(topic: Union[Topic, Dict]) -> Topic:
     return Topic(**topic)
 
 
+def _get_topic_or_action(entity: Union[Topic, Dict, Action]) -> Union[Topic, Action]:
+    """Converter to get back a topic or an empty dictionary"""
+    if isinstance(entity, Topic):
+        return entity
+    elif isinstance(entity, Action):
+        return entity
+    return Topic(**entity)
+
+
 def _get_np_coordinates(
     pre_defined: List[Union[List, Tuple[np.ndarray, str]]],
 ) -> List[Union[List, Tuple[np.ndarray, str]]]:
@@ -758,6 +767,6 @@ class Route(BaseAttrs):
     """
 
     routes_to: Union[Topic, Action, Dict] = field(
-        converter=_get_topic
+        converter=_get_topic_or_action
     )  # Only topics would get deserialized here
     samples: List[str] = field()
