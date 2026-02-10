@@ -283,13 +283,13 @@ In this small code block above, we have setup a fairly sophisticated embodied ag
 
 We can visualize the complete graph in the following diagram:
 ```{figure} ../../_static/complete_dark.png
-:class: only-dark
+:class: dark-only
 :alt: Complete embodied agent
 :align: center
-Complete embodied agent graph
+
 ```
 ```{figure} ../../_static/complete_light.png
-:class: only-light
+:class: light-only
 :alt: Complete embodied agent
 :align: center
 Complete embodied agent graph
