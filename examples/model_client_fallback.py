@@ -7,8 +7,8 @@ from agents.ros import Launcher, Topic, Action
 # Define the Models and Clients
 # Primary: A powerful model hosted remotely (e.g., via RoboML)
 # NOTE: This is illustrative for the sake of executing on the local machine
-# For a more realistic scenario, replace this with a GenericHTTPClient and use a paid cloud
-# model subscription
+# For a more realistic scenario, replace this with a GenericHTTPClient and use a
+# paid cloud model subscription
 primary_model = TransformersLLM(
     name="qwen_heavy", checkpoint="Qwen/Qwen2.5-1.5B-Instruct"
 )

@@ -4,6 +4,8 @@ This section unlocks the true potential of **EmbodiedAgents**: creating systems 
 
 While the Foundation recipes taught you how to build a static graph of components, the real world is dynamic. A truly intelligent physical agent must be able to **adapt** its behavior based on its environment and its own internal state. This is where the framework's **Event-Driven Architecture** shines.
 
+At its core, _EmbodiedAgents_ inherits a powerful event-handling mechanism from its underlying base framework, Sugarcoat. To deeply understand the mechanics of this architecture, we highly recommend reading the core concepts of [Events](https://automatika-robotics.github.io/sugarcoat/design/events.html) and [Actions](https://automatika-robotics.github.io/sugarcoat/design/actions.html) in the Sugarcoat documentation.
+
 ## Building "Gödel Machines"
 
 _EmbodiedAgents_ allows you to create agents that are self-aware and self-modifying, thus providing a framework for **Adaptive Intelligence** utilizing various AI models as building blocks of a larger system. The recipes in this section demonstrate how to break free from linear execution loops and embrace adaptive behaviors:
