@@ -7,7 +7,7 @@
 
 🇨🇳 [简体中文](docs/README.zh.md) | 🇯🇵 [日本語](docs/README.ja.md)
 
-_EmbodiedAgents_ is a production-grade framework, built on top of **ROS2**, designed to deploy Physical AI on real world robots. It enables you to create interactive, **physical agents** that do not just chat, but **understand**, **move**, **manipulate**, and **adapt** to their environment.
+_EmbodiedAgents_ is a production-grade framework to deploy Physical AI on real world robots. It enables you to create interactive, **physical agents** that do not just chat, but **understand**, **move**, **manipulate**, and **adapt** to their environment.
 
 - **Production Ready**: Designed for autonomous systems in dynamic environments. Provides an orchestration layer for **Adaptive Intelligence**, making Physical AI simple to deploy.
 - **Self-Referential**: Create agents that can start, stop, or reconfigure their components based on internal or external events. Trivially switch from cloud to local ML or switch planners based on location or vision input. Make agents self-referential [Gödel machines](https://en.wikipedia.org/wiki/G%C3%B6del_machine).
