@@ -123,8 +123,8 @@ llm_route = Route(routes_to=llm_in,
         "How many tablespoons in a cup?", "How are you today?", "Whats up?"])
 ```
 
-```note
-The `routes_to` parameter of a `Route` can be a `Topic` or an `Action`. `Actions` can be system level functions (e.g. to restart a component), functions exposed by components (e.g. to start the VLA component for manipulation, or the 'say' method in TextToSpeech component) or arbitrary functions written in the recipe. `Actions` are a powerful concept because their arguments can come from any topic in the system. To learn more, check out [Events & Actions](../events/index.md)
+```{note}
+The `routes_to` parameter of a `Route` can be a `Topic` or an `Action`. `Actions` can be system level functions (e.g. to restart a component), functions exposed by components (e.g. to start the VLA component for manipulation, or the 'say' method in TextToSpeech component) or arbitrary functions written in the recipe. `Actions` are a powerful concept in EmbodiedAgents, because their arguments can come from any topic in the system. To learn more, check out [Events & Actions](../events/index.md)
 ```
 
 ## Option 1: Vector Mode (Similarity)
