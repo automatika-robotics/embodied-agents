@@ -10,7 +10,7 @@
 _EmbodiedAgents_ is a production-grade framework, built on top of **ROS2**, designed to deploy Physical AI on real world robots. It enables you to create interactive, **physical agents** that do not just chat, but **understand**, **move**, **manipulate**, and **adapt** to their environment.
 
 - **Production Ready**: Designed for autonomous systems in dynamic environments. Provides an orchestration layer for **Adaptive Intelligence**, making Physical AI simple to deploy.
-- **Self-referential**: Create agents that can start, stop, or reconfigure their components based on internal or external events. Trivially switch from cloud to local ML or switch planners based on location or vision input. Make agents self-referential [Gödel machines](https://en.wikipedia.org/wiki/G%C3%B6del_machine).
+- **Self-Referential**: Create agents that can start, stop, or reconfigure their components based on internal or external events. Trivially switch from cloud to local ML or switch planners based on location or vision input. Make agents self-referential [Gödel machines](https://en.wikipedia.org/wiki/G%C3%B6del_machine).
 - **Spatio-Temporal Memory**: Provides embodiment primitives like a heirarchical spatio-temporal memory and semantic routing to build arbitrarily complex graphs for agentic information flow. No need to utilize bloated "GenAI" frameworks on your robot.
 - **Pure Python, Native ROS2**: Define complex asynchronous graphs in standard Python without touching XML launch files. Yet, underneath, it is pure ROS2; compatible with the entire ecosystem of hardware drivers, simulation tools, and visualization suites.
 
