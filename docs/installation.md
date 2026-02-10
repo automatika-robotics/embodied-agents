@@ -11,7 +11,7 @@ _EmbodiedAgents_ is built to be used with ROS2. All ROS distributions starting f
 The core of _EmbodiedAgents_ is agnostic to model serving platforms. It currently supports [Ollama](https://ollama.com), [RoboML](https://github.com/automatika-robotics/robo-ml) and any platform or cloud provider with an OpenAI compatible API (e.g. [vLLM](https://github.com/vllm-project/vllm), [lmdeploy](https://github.com/InternLM/lmdeploy) etc.). Please install either of these by following the instructions provided by respective projects. Support for new platforms is being continuously added. If you would like to support a particular platform, please open an issue/PR.
 
 ```{tip}
-For utilizing larger models, it is recommended that model serving platforms are not installed directly on the robot (or the edge device) but on a GPU powered machine on the local network (or one of the cloud providers).
+For utilizing larger models, it is recommended that model serving platforms are not installed directly on the robot (or the edge device) but on a GPU powered machine on the local network (or use one of the cloud providers).
 ```
 
 ## Install _EmbodiedAgents_ (Ubuntu)

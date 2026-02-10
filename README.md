@@ -7,12 +7,12 @@
 
 🇨🇳 [简体中文](docs/README.zh.md) | 🇯🇵 [日本語](docs/README.ja.md)
 
-_EmbodiedAgents_ is a production-grade framework, built on top of **ROS2**, designed to deploy Physical AI on real world robots. It enables you to create interactive, physical agents that do not just chat, but **understand**, **move**, **manipulate**, and **adapt** to their environment.
+_EmbodiedAgents_ is a production-grade framework, built on top of **ROS2**, designed to deploy Physical AI on real world robots. It enables you to create interactive, **physical agents** that do not just chat, but **understand**, **move**, **manipulate**, and **adapt** to their environment.
 
-- **Production Ready Physical Agents:** Designed to be used with autonomous robot systems that operate in real world dynamic environments. _EmbodiedAgents_ makes it simple to create systems that make use of Physical AI. It provides an orchestration layer for **Adaptive Intelligence**.
-- **Self-referential and Event Driven**: An agent created with _EmbodiedAgents_ can start, stop or reconfigure its own components based on internal and external events. For example, an agent can change the ML model for planning based on its location on the map or input from the vision model. _EmbodiedAgents_ makes it simple to create agents that are self-referential [Gödel machines](https://en.wikipedia.org/wiki/G%C3%B6del_machine).
-- **Semantic Memory**: Integrates vector databases, semantic routing and other supporting components to quickly build arbitrarily complex graphs for agentic information flow. No need to utilize bloated "GenAI" frameworks on your robot.
-- **Pure Python, Native ROS2**: Define complex asynchronous graphs in standard Python without touching XML launch files. Yet, underneath, it is pure ROS2 compatible with the entire ecosystem of hardware drivers, simulation tools, and visualization suites.
+- **Production Ready**: Designed for autonomous systems in dynamic environments. Provides an orchestration layer for **Adaptive Intelligence**, making Physical AI simple to deploy.
+- **Self-referential**: Create agents that can start, stop, or reconfigure their components based on internal or external events. Trivially switch from cloud to local ML or switch planners based on location or vision input. Make agents self-referential [Gödel machines](https://en.wikipedia.org/wiki/G%C3%B6del_machine).
+- **Spatio-Temporal Memory**: Provides embodiment primitives like a heirarchical spatio-temporal memory and semantic routing to build arbitrarily complex graphs for agentic information flow. No need to utilize bloated "GenAI" frameworks on your robot.
+- **Pure Python, Native ROS2**: Define complex asynchronous graphs in standard Python without touching XML launch files. Yet, underneath, it is pure ROS2; compatible with the entire ecosystem of hardware drivers, simulation tools, and visualization suites.
 
 Join our [Discord](https://discord.gg/B9ZU6qjzND) 👾
 

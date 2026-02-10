@@ -3,7 +3,6 @@ import os
 import sys
 from datetime import date
 import xml.etree.ElementTree as ET
-import shutil
 from pathlib import Path
 
 sys.path.insert(0, os.path.abspath(".."))

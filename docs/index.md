@@ -3,14 +3,12 @@ title: EmbodiedAgents Documentation
 ---
 
 ```{include} intro.md
-
 ```
-
-## Table of Contents
 
 ```{toctree}
 :maxdepth: 1
 :caption: Get Started
+:hidden:
 
 installation
 quickstart
@@ -19,6 +17,7 @@ quickstart
 ```{toctree}
 :maxdepth: 1
 :caption: Basic Concepts
+:hidden:
 
 basics/components
 basics/clients
@@ -28,6 +27,7 @@ basics/models
 ```{toctree}
 :maxdepth: 1
 :caption: Foundation Recipes
+:hidden:
 
 examples/foundation/index
 examples/foundation/conversational
@@ -42,12 +42,14 @@ examples/foundation/complete
 ```{toctree}
 :maxdepth: 1
 :caption: Multimodal Planning with VLMs
+:hidden:
 examples/foundation/planning_model
 ```
 
 ```{toctree}
 :maxdepth: 1
 :caption: Manipulation with VLAs
+:hidden:
 examples/foundation/vla
 examples/foundation/vla_with_event
 ```
@@ -55,7 +57,7 @@ examples/foundation/vla_with_event
 ```{toctree}
 :maxdepth: 1
 :caption: Events & Actions
-
+:hidden:
 examples/events/index
 examples/events/multiprocessing
 examples/events/fallback
@@ -65,6 +67,7 @@ examples/events/event_driven_description
 ```{toctree}
 :maxdepth: 1
 :caption: Complete Reference
+:hidden:
 
 apidocs/index
 ```
