@@ -88,12 +88,12 @@ html_favicon = "_static/favicon.png"
 html_theme_options = {
     "light_logo": "_static/EMBODIED_AGENTS_LIGHT.png",
     "dark_logo": "_static/EMBODIED_AGENTS_DARK.png",
-    "accent_color": "indigo",
-    "twitter_url": "https://x.com/__automatika__",
+    "accent_color": "indigo", "twitter_url": "https://x.com/__automatika__",
     "github_url": "https://github.com/automatika-robotics/embodied-agents",
     "discord_url": "https://discord.gg/B9ZU6qjzND",
     "globaltoc_expand_depth": 1,
-    "open_in_perplexity": True,
+    "open_in_chatgpt": True,
+    "open_in_claude": True,
     # Navigation Links (Top bar)
     "nav_links": [
         {"title": "Automatika Robotics", "url": "https://automatikarobotics.com/"},
@@ -111,6 +111,7 @@ LLMS_TXT_SELECTION = [
     "basics/clients.md",
     "basics/models.md",
     # Examples - Increasing complexity
+    "examples/foundation/index.md",
     "examples/foundation/conversational.md",
     "examples/foundation/prompt_engineering.md",
     "examples/foundation/semantic_router.md",
@@ -121,6 +122,7 @@ LLMS_TXT_SELECTION = [
     "examples/foundation/planning_model.md",
     "examples/foundation/vla.md",
     "examples/foundation/vla_with_event.md",
+    "examples/events/index.md",
     "examples/events/multiprocessing.md",
     "examples/events/fallback.md",
     "examples/events/event_driven_description.md",
@@ -175,27 +177,6 @@ def generate_llms_txt(app, exception):
         print(f"[llms.txt] Error writing file: {e}")
 
 
-def copy_markdown_files(app, exception):
-    """Copy source markdown files"""
-    if exception is None:  # Only run if build succeeded
-        # Source dir is where your .md files are
-        src_dir = app.srcdir  # This points to your `source/` folder
-        dst_dir = app.outdir  # This is typically `build/html`
-
-        for root, _, files in os.walk(src_dir):
-            for file in files:
-                if file.endswith(".md"):
-                    src_path = os.path.join(root, file)
-                    # Compute path relative to the source dir
-                    rel_path = os.path.relpath(src_path, src_dir)
-                    # Destination path inside the build output
-                    dst_path = os.path.join(dst_dir, rel_path)
-
-                    # Make sure the target directory exists
-                    os.makedirs(os.path.dirname(dst_path), exist_ok=True)
-                    shutil.copy2(src_path, dst_path)
-
-
 def create_robots_txt(app, exception):
     """Create robots.txt file to take advantage of sitemap crawl"""
     if exception is None:
@@ -211,6 +192,5 @@ Sitemap: {html_baseurl}/sitemap.xml
 
 def setup(app):
     """Plugin to post build and copy markdowns as well"""
-    app.connect("build-finished", copy_markdown_files)
     app.connect("build-finished", create_robots_txt)
     app.connect("build-finished", generate_llms_txt)
