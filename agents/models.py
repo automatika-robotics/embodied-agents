@@ -278,6 +278,7 @@ class OllamaModel(LLM):
         - main_gpu: int
         - use_mmap: bool
         - num_thread: int
+        - think: bool
     :type options: dict, optional
 
      Example usage:
@@ -320,6 +321,7 @@ class OllamaModel(LLM):
             "main_gpu": int,
             "use_mmap": bool,
             "num_thread": int,
+            "think": bool,
         }
 
         for key, val in value.items():
