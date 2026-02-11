@@ -70,8 +70,8 @@ object_detection_model = VisionModel(
     name="dino_4scale", checkpoint="dino-4scale_r50_8xb2-12e_coco"
 )
 detection_client = RoboMLRESPClient(object_detection_model)
-llava = OllamaModel(name="llava", checkpoint="llava:latest")
-llava_client = OllamaClient(llava)
+qwen_vl = OllamaModel(name="qwen_vl", checkpoint="qwen2.5vl:latest")
+qwen_client = OllamaClient(qwen_vl)
 llama = OllamaModel(name="llama", checkpoint="llama3.2:3b")
 llama_client = OllamaClient(llama)
 chroma = ChromaDB()
@@ -123,7 +123,7 @@ mllm_query = Topic(name="mllm_query", msg_type="String")
 mllm = MLLM(
     inputs=[mllm_query, image0, detections_topic],
     outputs=[query_answer],
-    model_client=llava_client,
+    model_client=qwen_client,
     trigger=mllm_query,
     component_name="visual_q_and_a",
 )
@@ -145,7 +145,7 @@ introspection_answer = Topic(name="introspection_answer", msg_type="String")
 introspector = MLLM(
     inputs=[introspection_query, image0],
     outputs=[introspection_answer],
-    model_client=llava_client,
+    model_client=qwen_client,
     trigger=15.0,
     component_name="introspector",
 )

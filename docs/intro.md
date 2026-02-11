@@ -1,7 +1,3 @@
----
-html_theme.sidebar_secondary.remove: true
----
-
 # EmbodiedAgents
 
 **Production-grade framework to deploy Physical AI on real world robots.**

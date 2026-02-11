@@ -75,7 +75,7 @@ The trigger parameter lets the component know that it has to perform its functio
 
 ## VLM Component
 
-The VLM component takes as input a text topic (the output of the SpeechToText component) and an image topic, assuming we have a camera device onboard the robot publishing this topic. And just like before we need to provide a model client, this time with an VLM model. This time we will use the OllamaClient along with _llava:latest_ model, a popular opensource multimodal LLM available on Ollama. Furthermore, we will configure our VLM component using `VLMConfig`. We will set `stream=True` to make the VLM output text, be published as a stream for downstream components that consume this output. In _EmbodiedAgents_, streaming can output can be chunked using a `break_character` in the config (Default: '.').This way the downstream TextToSpeech component can start generating audio as soon as the first sentence is produced by the LLM.
+The VLM component takes as input a text topic (the output of the SpeechToText component) and an image topic, assuming we have a camera device onboard the robot publishing this topic. And just like before we need to provide a model client, this time with an VLM model. This time we will use the OllamaClient along with _qwen2.5vl:latest_ model, an opensource multimodal LLM from the Qwen family, available on Ollama. Furthermore, we will configure our VLM component using `VLMConfig`. We will set `stream=True` to make the VLM output text, be published as a stream for downstream components that consume this output. In _EmbodiedAgents_, streaming can output can be chunked using a `break_character` in the config (Default: '.').This way the downstream TextToSpeech component can start generating audio as soon as the first sentence is produced by the LLM.
 
 ```{note}
 Ollama is one of the most popular local LLM serving projects. Learn about setting up Ollama [here](https://ollama.com).
@@ -94,8 +94,8 @@ text_answer = Topic(name="text1", msg_type="String")
 
 # Define a model client (working with Ollama in this case)
 # OllamaModel is a generic wrapper for all ollama models
-llava = OllamaModel(name="llava", checkpoint="llava:latest")
-llava_client = OllamaClient(llava)
+qwen_vl = OllamaModel(name="qwen_vl", checkpoint="qwen2.5vl:latest")
+qwen_client = OllamaClient(qwen_vl)
 
 mllm_config = VLMConfig(stream=True)  # Other inference specific paramters can be provided here
 
@@ -103,7 +103,7 @@ mllm_config = VLMConfig(stream=True)  # Other inference specific paramters can b
 mllm = VLM(
     inputs=[text_query, image0],  # Notice the text input is the same as the output of the previous component
     outputs=[text_answer],
-    model_client=llava_client,
+    model_client=qwen_client,
     trigger=text_query,
     component_name="vqa" # We have also given our component an optional name
 )
@@ -198,14 +198,14 @@ speech_to_text = SpeechToText(
 image0 = Topic(name="image_raw", msg_type="Image")
 text_answer = Topic(name="text1", msg_type="String")
 
-llava = OllamaModel(name="llava", checkpoint="llava:latest")
-llava_client = OllamaClient(llava)
+qwen_vl = OllamaModel(name="qwen_vl", checkpoint="qwen2.5vl:latest")
+qwen_client = OllamaClient(qwen_vl)
 mllm_config = VLMConfig(stream=True)  # Other inference specific paramters can be provided here
 
 mllm = VLM(
     inputs=[text_query, image0],
     outputs=[text_answer],
-    model_client=llava_client,
+    model_client=qwen_client,
     trigger=text_query,
     config=mllm_config,
     component_name="vqa",
