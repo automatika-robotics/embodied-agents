@@ -173,6 +173,9 @@ class ModelComponent(Component):
         self.get_logger().info("Validating Model Component Output Topics")
         self._validate_output_topics()
 
+        # get inference params
+        self.inference_params = self.config.get_inference_params()
+
         # Initialize model
         if self.model_client:
             self.model_client.check_connection()
@@ -210,14 +213,14 @@ class ModelComponent(Component):
                         "Warmup cannot not be called with websocket client."
                     )
             else:
+                self.get_logger().debug(f"Warming up: {self.config.warmup}")
                 if self.config.warmup:
                     try:
+                        # call warpup twice
+                        self._warmup()
                         self._warmup()
                     except Exception as e:
                         self.get_logger().error(f"Error encountered in warmup: {e}")
-
-        # get inference params
-        self.inference_params = self.config.get_inference_params()
 
     def custom_on_deactivate(self):
         """
