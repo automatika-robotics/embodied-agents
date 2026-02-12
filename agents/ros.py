@@ -703,12 +703,29 @@ def _get_topic(topic: Union[Topic, Dict]) -> Topic:
     return Topic(**topic)
 
 
-def _get_topic_or_action(entity: Union[Topic, Dict, Action]) -> Union[Topic, Action]:
-    """Converter to get back a topic or an empty dictionary"""
-    if isinstance(entity, Topic):
+def _get_topic_or_action(
+    entity: Union[Topic, Action, Dict, List[Union[Topic, Action, Dict]]],
+) -> Union[Topic, Action, List[Union[Topic, Action]]]:
+    """Converter to get back a topic, action, or a list of them."""
+
+    # Handle List Input
+    if isinstance(entity, list):
+        converted_list = []
+        for item in entity:
+            if isinstance(item, (Topic, Action)):
+                converted_list.append(item)
+            elif isinstance(item, dict):
+                # Convert Dict -> Topic
+                converted_list.append(Topic(**item))
+            else:
+                raise TypeError(f"Invalid route item: {item}")
+        return converted_list
+
+    # Handle Single Item Input
+    if isinstance(entity, (Topic, Action)):
         return entity
-    elif isinstance(entity, Action):
-        return entity
+
+    # Handle Dict Input -> Topic
     return Topic(**entity)
 
 
@@ -740,7 +757,7 @@ class MapLayer(BaseAttrs):
     ```
     """
 
-    subscribes_to: Union[Topic, Dict] = field(converter=_get_topic)
+    subscribes_to: Topic = field(converter=_get_topic)
     temporal_change: bool = field(default=False)
     resolution_multiple: int = field(
         default=1, validator=base_validators.in_range(min_value=0.1, max_value=10)
@@ -766,7 +783,7 @@ class Route(BaseAttrs):
     ```
     """
 
-    routes_to: Union[Topic, Action, Dict] = field(
+    routes_to: Union[Topic, Action, List[Union[Topic, Action]]] = field(
         converter=_get_topic_or_action
     )  # Only topics would get deserialized here
     samples: List[str] = field()

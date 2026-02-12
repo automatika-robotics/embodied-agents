@@ -673,10 +673,10 @@ class MapConfig(BaseComponentConfig):
 
     map_name: str = field()
     distance_func: Literal["l2", "ip", "cosine"] = field(default="l2")
-    _position: Optional[Union[Topic, Dict]] = field(
+    _position: Optional[Topic] = field(
         default=None, converter=_get_optional_topic, alias="_position"
     )
-    _map_topic: Optional[Union[Topic, Dict]] = field(
+    _map_topic: Optional[Topic] = field(
         default=None, converter=_get_optional_topic, alias="_map_topic"
     )
 

@@ -15,7 +15,7 @@
 [![简体中文](https://img.shields.io/badge/简体中文-gray.svg)](docs/README.zh.md)
 [![日本語](https://img.shields.io/badge/日本語-gray.svg)](docs/README.ja.md)
 
-**The production-grade framework for deploying Physical AI.**
+**The production-grade framework for deploying Physical AI**
 
 [**Installation**](#installation) | [**Quick Start**](#quick-start) | [**Documentation**](https://automatika-robotics.github.io/embodied-agents/) | [**Discord**](https://discord.gg/B9ZU6qjzND)
 
@@ -93,7 +93,7 @@ launcher.bringup()
 
 ## Complex Component Graphs
 
-The quickstart example above is just an amuse-bouche of what is possible with _EmbodiedAgents_. In _EmbodiedAgents_ we can create arbitrarily sophisticated component graphs. And furthermore our system can be configured to even change or reconfigure itself based on events internal or external to the system. Check out the code for the following agent [here](https://automatika-robotics.github.io/embodied-agents/examples/foundation/complete.html).
+The quickstart example above is just an amuse-bouche of what is possible with _EmbodiedAgents_. We can create arbitrarily sophisticated component graphs and configure the system to change or reconfigure itself based on events, both internal or external to the system. Check out the code for the following agent [here](https://automatika-robotics.github.io/embodied-agents/examples/foundation/complete.html).
 
 <div align="center">
 <picture>
