@@ -705,7 +705,7 @@ def _get_topic(topic: Union[Topic, Dict]) -> Topic:
 
 def _get_topic_or_action(
     entity: Union[Topic, Action, Dict, List[Union[Topic, Action, Dict]]],
-) -> Union[Topic, Action, List[Union[Topic, Action]]]:
+) -> Union[Topic, Action, List[Topic], List[Action]]:
     """Converter to get back a topic, action, or a list of them."""
 
     # Handle List Input
@@ -783,7 +783,7 @@ class Route(BaseAttrs):
     ```
     """
 
-    routes_to: Union[Topic, Action, List[Union[Topic, Action]]] = field(
+    routes_to: Union[Topic, Action, List[Topic], List[Action]] = field(
         converter=_get_topic_or_action
     )  # Only topics would get deserialized here
     samples: List[str] = field()
