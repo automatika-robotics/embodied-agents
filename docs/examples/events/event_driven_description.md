@@ -119,6 +119,27 @@ launcher.add_pkg(
 launcher.bringup()
 ```
 
+## See the results in the UI
+
+We can see this recipe in action if we enable the UI. We can do so by simply adding the following line in the launcher.
+
+```python
+launcher.enable_ui(outputs=[camera_image, detections, description_output])
+```
+
+````{note}
+In order to run the client you will need to install [FastHTML](https://www.fastht.ml/) and [MonsterUI](https://github.com/AnswerDotAI/MonsterUI) with
+```shell
+pip install python-fasthtml monsterui
+````
+
+The client displays a web UI on **http://localhost:5001** if you have run it on your machine. Or you can access it at **http://<IP_ADDRESS_OF_THE_ROBOT>:5001** if you have run it on the robot.
+
+In the screencast below, we have replaced the event triggering label from `person` with `cup` for demonstration purposes.
+
+
+![Demo screencast](https://automatikarobotics.com/docs/ui_agents_event_see_cup.gif)
+
 ### Complete Code
 
 Here is the complete recipe for the Event-Driven Visual Description agent:
@@ -184,6 +205,7 @@ visual_describer = VLM(
 
 # Launch
 launcher = Launcher()
+launcher.enable_ui(outputs=[camera_image, detections, description_output])
 launcher.add_pkg(
     components=[vision_detector, visual_describer],
     multiprocessing=True,

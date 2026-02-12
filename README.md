@@ -91,11 +91,9 @@ launcher.bringup()
 
 ---
 
-## Capabilities Showcase
+## Complex Component Graphs
 
-### Complex Component Graphs
-
-The system can be configured to reconfigure itself based on events. Below is an example of an arbitrarily sophisticated component graph for a complex agent.
+The quickstart example above is just an amuse-bouche of what is possible with _EmbodiedAgents_. In _EmbodiedAgents_ we can create arbitrarily sophisticated component graphs. And furthermore our system can be configured to even change or reconfigure itself based on events internal or external to the system. Check out the code for the following agent [here](https://automatika-robotics.github.io/embodied-agents/examples/foundation/complete.html).
 
 <div align="center">
 <picture>
@@ -105,13 +103,13 @@ The system can be configured to reconfigure itself based on events. Below is an 
 </picture>
 </div>
 
-### Dynamic Web UI
+## Dynamic Web UI
 
-Leveraging **Sugarcoat**, every agent recipe generates a **fully dynamic Web UI** automatically. Built with FastHTML, it provides instant control and visualization without writing a single line of frontend code.
+Every agent recipe generates a **fully dynamic Web UI** automatically. Built with FastHTML, it provides instant control and visualization without writing a single line of frontend code.
 
 <div align="center">
 <picture>
-<img alt="EmbodiedAgents UI Example GIF" src="docs/_static/agents_ui.gif" width="70%">
+<img alt="EmbodiedAgents UI Example GIF" src="https://automatikarobotics.com/docs/ui_agents_router.gif" width="70%">
 </picture>
 </div>
 
@@ -196,4 +194,3 @@ source install/setup.bash
 
 The code is available under the **MIT License**. See [LICENSE](https://www.google.com/search?q=LICENSE) for details.
 Copyright (c) 2024 Automatika Robotics unless explicitly indicated otherwise.
-```
