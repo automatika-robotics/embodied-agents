@@ -9,17 +9,15 @@
 <br/>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![ROS2](https://img.shields.io/badge/ROS2-Humble%2B-green)](https://docs.ros.org/en/humble/index.html)
 [![Discord](https://img.shields.io/badge/Discord-%235865F2.svg?logo=discord&logoColor=white)](https://discord.gg/B9ZU6qjzND)
+[![简体中文](https://img.shields.io/badge/简体中文-gray.svg)](docs/README.zh.md)
+[![日本語](https://img.shields.io/badge/日本語-gray.svg)](docs/README.ja.md)
 
 **The production-grade framework for deploying Physical AI.**
 
 [**Installation**](#installation) | [**Quick Start**](#quick-start) | [**Documentation**](https://automatika-robotics.github.io/embodied-agents/) | [**Discord**](https://discord.gg/B9ZU6qjzND)
-
-<br/>
-
-[简体中文](docs/README.zh.md) | [日本語](docs/README.ja.md)
 
 </div>
 
