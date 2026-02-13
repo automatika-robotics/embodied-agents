@@ -159,7 +159,12 @@ class Vision(ModelComponent):
         super().custom_on_deactivate()
 
     @component_action
-    def take_picture(self, topic_name: str, save_path: str = "~/emos/pictures") -> bool:
+    def take_picture(
+        self,
+        topic_name: str,
+        save_path: str = "~/emos/pictures",
+        timeout: float = 0.5,
+    ) -> bool:
         """
         Take a picture from a specific input topic and save it to the specified location.
 
@@ -172,6 +177,9 @@ class Vision(ModelComponent):
         :param save_path: The directory path where images will be saved.
                           Defaults to "~/emos/pictures".
         :type save_path: str
+        :param timeout: Timeout if an image is not available on the topic.
+                          Defaults to 0.5 seconds.
+        :type timeout: float
         :return: True if successful, False otherwise.
         :rtype: bool
         :raises ValueError: If the provided topic_name is not found in inputs.
@@ -179,29 +187,64 @@ class Vision(ModelComponent):
         try:
             # Expand user path
             save_path = os.path.expanduser(save_path)
-            if not os.path.exists(save_path):
-                os.makedirs(save_path, exist_ok=True)
-                self.get_logger().info(f"Created directory: {save_path}")
+            os.makedirs(save_path, exist_ok=True)
 
-            target_callback = None
-
-            # Check Triggers first
-            if hasattr(self, "trig_callbacks") and topic_name in self.trig_callbacks:
+            # Identify callback type
+            is_trigger = (
+                hasattr(self, "trig_callbacks") and topic_name in self.trig_callbacks
+            )
+            if is_trigger:
                 target_callback = self.trig_callbacks[topic_name]
-            # Check Regular inputs
             elif topic_name in self.callbacks:
                 target_callback = self.callbacks[topic_name]
             else:
                 raise ValueError(
-                    f"Topic '{topic_name}' is not a registered input or trigger for this component."
+                    f"Topic '{topic_name}' is not one of the component inputs. You can only take pictures on topics that are provided as inputs to this component."
                 )
 
-            # Fetch Image
-            img = target_callback.get_output(clear_last=False)
+            # save callback state
+            original_callback = target_callback._extra_callback
+            original_get_processed = target_callback._get_processed
 
-            if img is None:
+            # Define a single frame interceptor function
+            frames = []
+
+            # extra callback for capturing image
+            def single_frame_interceptor(msg, topic, output=None):
+                if output is not None and not frames:
+                    frames.append(output.copy())
+
+            # Swap extracallback, wait and restore
+            try:
+                if is_trigger:
+                    self.get_logger().warning(
+                        f"Capturing image from trigger '{topic_name}'. Inference paused momentarily."
+                    )
+
+                target_callback.on_callback_execute(
+                    single_frame_interceptor, get_processed=True
+                )
+
+                start_time = time.time()
+                while (time.time() - start_time) < timeout and not frames:
+                    time.sleep(0.01)  # Check frequently
+
+            finally:
+                # Always restore the original callback state
+                if is_trigger:
+                    target_callback.on_callback_execute(
+                        self._execution_step, get_processed=False
+                    )
+                elif original_callback is not None:
+                    target_callback.on_callback_execute(
+                        original_callback, get_processed=original_get_processed
+                    )
+                else:
+                    target_callback._extra_callback = None
+
+            if not frames:
                 self.get_logger().warning(
-                    f"No image data available on topic '{topic_name}' to capture."
+                    f"Timeout: No image received on '{topic_name}'."
                 )
                 return False
 
@@ -211,7 +254,7 @@ class Vision(ModelComponent):
             full_path = os.path.join(save_path, filename)
 
             # Ensure BGR for OpenCV saving
-            save_img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+            save_img = cv2.cvtColor(frames[0], cv2.COLOR_RGB2BGR)
             cv2.imwrite(full_path, save_img)
             self.get_logger().info(f"Saved picture to {full_path}")
 
@@ -227,7 +270,7 @@ class Vision(ModelComponent):
         topic_name: str,
         duration: float = 5.0,
         save_path: str = "~/emos/videos",
-        fps: int = 20,
+        fps: int = 30,
     ) -> bool:
         """
         Record a video from a specific input topic for a set duration.
@@ -251,21 +294,19 @@ class Vision(ModelComponent):
         try:
             # Expand user path
             save_path = os.path.expanduser(save_path)
-            if not os.path.exists(save_path):
-                os.makedirs(save_path, exist_ok=True)
-                self.get_logger().info(f"Created directory: {save_path}")
+            os.makedirs(save_path, exist_ok=True)
 
-            target_callback = None
-
-            # Prioritize triggers
-            if hasattr(self, "trig_callbacks") and topic_name in self.trig_callbacks:
+            # Identify callback type
+            is_trigger = (
+                hasattr(self, "trig_callbacks") and topic_name in self.trig_callbacks
+            )
+            if is_trigger:
                 target_callback = self.trig_callbacks[topic_name]
-            # Check regular inputs
             elif topic_name in self.callbacks:
                 target_callback = self.callbacks[topic_name]
             else:
                 raise ValueError(
-                    f"Topic '{topic_name}' is not a registered input or trigger for this component."
+                    f"Topic '{topic_name}' is not one of the component inputs. You can only record videos on topics that are provided as inputs to this component."
                 )
 
             # Spawn the background thread
@@ -277,6 +318,7 @@ class Vision(ModelComponent):
                     "duration": duration,
                     "save_path": save_path,
                     "fps": fps,
+                    "is_trigger": is_trigger,
                 },
                 daemon=True,
             )
@@ -298,56 +340,76 @@ class Vision(ModelComponent):
         duration: float,
         save_path: str,
         fps: int,
+        is_trigger: bool,
     ):
         """
         Internal worker thread to buffer frames and write video to disk.
         """
+        frames = []
+
+        # Save current callback state
+        original_callback = target_callback._extra_callback
+        original_get_processed = target_callback._get_processed
+
+        if is_trigger:
+            self.get_logger().warning(
+                f"Recording video on trigger topic '{topic_name}'. "
+                f"Detection or tracking will be PAUSED for {duration} seconds!"
+            )
+
+        # extra callback for capturing images
+        def frame_interceptor(msg, topic, output=None):
+            if output is not None:
+                frames.append(output.copy())
+
         try:
-            frames = []
-            start_time = time.time()
-            interval = 1.0 / fps
-
-            # Capture Loop: Buffer frames in memory to avoid I/O blocking
-            while (time.time() - start_time) < duration:
-                loop_start = time.time()
-
-                # Peek at the latest frame without clearing it to avoid starving the main inference loop
-                img = target_callback.get_output(clear_last=False)
-
-                if img is not None and isinstance(img, np.ndarray):
-                    # Create a copy to ensure thread safety if the buffer changes
-                    frames.append(img.copy())
-
-                # Maintain FPS
-                elapsed = time.time() - loop_start
-                sleep_time = max(0.0, interval - elapsed)
-                time.sleep(sleep_time)
-
-            if not frames:
-                self.get_logger().warning(
-                    f"No frames captured for video on topic '{topic_name}'."
+            target_callback.on_callback_execute(frame_interceptor, get_processed=True)
+            time.sleep(duration)
+        finally:
+            # Safely restore execution step or original state
+            if is_trigger:
+                target_callback.on_callback_execute(
+                    self._execution_step, get_processed=False
                 )
-                return
+                self.get_logger().info(
+                    f"Video recording finished. Vision inference RESUMED on '{topic_name}'."
+                )
+            elif original_callback is not None:
+                target_callback.on_callback_execute(
+                    original_callback, get_processed=original_get_processed
+                )
+            else:
+                target_callback._extra_callback = None
 
-            # Encoding Phase: Write to disk
-            timestamp = int(time.time() * 1000)
-            filename = f"recording_{topic_name}_{timestamp}.mp4"
-            full_path = os.path.join(save_path, filename)
+        if not frames:
+            self.get_logger().warning(
+                f"No frames captured for video on topic '{topic_name}'."
+            )
+            return
 
-            height, width, _ = frames[0].shape
-            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-            out = cv2.VideoWriter(full_path, fourcc, fps, (width, height))
+        # Encode video
+        timestamp = int(time.time() * 1000)
+        filename = f"recording_{topic_name}_{timestamp}.mp4"
+        full_path = os.path.join(save_path, filename)
 
-            for frame in frames:
-                # Convert RGB to BGR for OpenCV
-                bgr_frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                out.write(bgr_frame)
+        height, width, _ = frames[0].shape
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        out = cv2.VideoWriter(full_path, fourcc, fps, (width, height))
 
-            out.release()
-            self.get_logger().info(f"Video saved successfully: {full_path}")
+        # Subsample frames to match requested FPS
+        actual_frames = len(frames)
+        target_frames = int(duration * fps)
 
-        except Exception as e:
-            self.get_logger().error(f"Error during video recording/saving: {e}")
+        if actual_frames > 0:
+            step = max(1, actual_frames / target_frames)
+            for i in range(target_frames):
+                idx = int(i * step)
+                if idx < actual_frames:
+                    bgr_frame = cv2.cvtColor(frames[idx], cv2.COLOR_RGB2BGR)
+                    out.write(bgr_frame)
+
+        out.release()
+        self.get_logger().info(f"Video saved successfully: {full_path}")
 
     def _visualize(self):
         """CV2 based visualization of inference results"""

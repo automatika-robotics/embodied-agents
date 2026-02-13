@@ -31,17 +31,17 @@ Unlike standard chatbots, this framework provides an orchestration layer for **A
 
 ### Core Features
 
-* **Production Ready**
-    Designed for real-world deployment. Provides a robust orchestration layer that makes deploying Physical AI simple, scalable, and reliable.
+- **Production Ready**
+  Designed for real-world deployment. Provides a robust orchestration layer that makes deploying Physical AI simple, scalable, and reliable.
 
-* **Self-Referential Logic**
-    Create agents that are self-aware. Agents can start, stop, or reconfigure their components based on internal or external events. Trivially switch planners based on location, or toggle between cloud and local ML (See: [Gödel machines](https://en.wikipedia.org/wiki/G%C3%B6del_machine)).
+- **Self-Referential Logic**
+  Create agents that are self-aware. Agents can start, stop, or reconfigure their components based on internal or external events. Trivially switch planners based on location, or toggle between cloud and local ML (See: [Gödel machines](https://en.wikipedia.org/wiki/G%C3%B6del_machine)).
 
-* **Spatio-Temporal Memory**
-    Utilize embodiment primitives like hierarchical spatio-temporal memory and semantic routing. Build arbitrarily complex graphs for agentic information flow without the overhead of standard Generative AI web frameworks.
+- **Spatio-Temporal Memory**
+  Utilize embodiment primitives like hierarchical spatio-temporal memory and semantic routing. Build arbitrarily complex graphs for agentic information flow without the overhead of standard Generative AI web frameworks.
 
-* **Pure Python, Native ROS2**
-    Define complex asynchronous graphs in standard Python without touching XML launch files. Under the hood, it is pure ROS2—fully compatible with the entire ecosystem of hardware drivers, simulation tools, and visualization suites.
+- **Pure Python, Native ROS2**
+  Define complex asynchronous graphs in standard Python without touching XML launch files. Under the hood, it is pure ROS2—fully compatible with the entire ecosystem of hardware drivers, simulation tools, and visualization suites.
 
 ---
 
@@ -120,12 +120,14 @@ Every agent recipe generates a **fully dynamic Web UI** automatically. Built wit
 <details>
 <summary><strong>Step 1: Install a Model Serving Platform</strong></summary>
 
-*EmbodiedAgents* is agnostic to model serving platforms. Install one of the following based on your preference:
+_EmbodiedAgents_ is agnostic to model serving platforms. Install one of the following based on your preference:
 
-* **[Ollama](https://ollama.com)** (Recommended for local inference)
-* **[RoboML](https://github.com/automatika-robotics/robo-ml)**
-* **OpenAI Compatible APIs** (e.g., [llama.cpp](https://github.com/ggml-org/llama.cpp), [vLLM](https://github.com/vllm-project/vllm), [lmdeploy](https://github.com/InternLM/lmdeploy))
-* **[LeRobot](https://github.com/huggingface/lerobot)** (For VLA models)
+- **[Ollama](https://ollama.com)** (Recommended for local inference)
+- **[RoboML](https://github.com/automatika-robotics/robo-ml)**
+- **OpenAI Compatible APIs** (e.g., [llama.cpp](https://github.com/ggml-org/llama.cpp), [vLLM](https://github.com/vllm-project/vllm), [lmdeploy](https://github.com/InternLM/lmdeploy))
+- **[LeRobot](https://github.com/huggingface/lerobot)** (For VLA models)
+
+> **Note:** You can skip this if using any OpenAI API compatible cloud service e.g HuggingFace inference endpoints.
 
 </details>
 
@@ -138,7 +140,6 @@ For ROS versions >= `humble`:
 
 ```bash
 sudo apt install ros-$ROS_DISTRO-automatika-embodied-agents
-
 ```
 
 **Using `.deb` package:**
@@ -146,7 +147,6 @@ Download from the [Release Page](https://github.com/automatika-robotics/embodied
 
 ```bash
 sudo dpkg -i ros-$ROS_DISTRO-automatica-embodied-agents_$version$DISTRO_$ARCHITECTURE.deb
-
 ```
 
 > **Requirement:** If your `attrs` version is < 23.2, please update it:
@@ -184,10 +184,11 @@ source install/setup.bash
 
 ## Resources
 
-* [Installation Instructions](https://automatika-robotics.github.io/embodied-agents/installation.html)
-* [Quickstart Guide](https://automatika-robotics.github.io/embodied-agents/quickstart.html)
-* [Basic Concepts](https://automatika-robotics.github.io/embodied-agents/basics/components.html)
-* [Example Recipes](https://automatika-robotics.github.io/embodied-agents/examples/foundation/index.html)
+- [Installation Instructions](https://automatika-robotics.github.io/embodied-agents/installation.html)
+- [Quickstart Guide](https://automatika-robotics.github.io/embodied-agents/quickstart.html)
+- [Basic Concepts](https://automatika-robotics.github.io/embodied-agents/basics/components.html)
+- [Example Recipes](https://automatika-robotics.github.io/embodied-agents/examples/foundation/index.html)
+
 ## Copyright & Contributions
 
 **EmbodiedAgents** is a collaboration between [Automatika Robotics](https://automatikarobotics.com/) and [Inria](https://inria.fr/).
