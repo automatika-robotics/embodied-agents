@@ -109,7 +109,7 @@ Every agent recipe generates a **fully dynamic Web UI** automatically. Built wit
 
 <div align="center">
 <picture>
-<img alt="EmbodiedAgents UI Example GIF" src="https://automatikarobotics.com/docs/ui_agents_router.gif" width="70%">
+<img alt="EmbodiedAgents UI Example GIF" src="docs/_static/ui_agents.gif" width="70%">
 </picture>
 </div>
 

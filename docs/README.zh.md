@@ -136,7 +136,7 @@ launcher.bringup()
 
 <p align="center">
 <picture align="center">
-  <img alt="EmbodiedAgents UI Example GIF" src="https://automatikarobotics.com/docs/ui_agents_router.gif" width="60%">
+  <img alt="EmbodiedAgents UI Example GIF" src="docs/_static/ui_agents.gif" width="60%">
 </picture>
 </p>
 
