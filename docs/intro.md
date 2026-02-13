@@ -18,35 +18,44 @@
 
 ## Get Started
 
-::::{grid} 1 2 2 4
+## Get Started
+
+::::{grid} 1 2 2 3
 :gutter: 2
 
 :::{grid-item-card} {material-regular}`download;1.2em;sd-text-primary` Installation
 :link: installation
 :link-type: doc
 
-Setup instructions for your system.
+Setup EmbodiedAgents on your system
 :::
 
 :::{grid-item-card} {material-regular}`rocket_launch;1.2em;sd-text-primary` Quickstart
 :link: quickstart
 :link-type: doc
 
-Launch your first agent in minutes.
+Launch your first embodied agent in minutes
 :::
 
 :::{grid-item-card} {material-regular}`menu_book;1.2em;sd-text-primary` Basic Concepts
 :link: basics/components
 :link-type: doc
 
-Learn the core building blocks.
+Learn the core building blocks of the framework
 :::
 
 :::{grid-item-card} {material-regular}`auto_awesome;1.2em;sd-text-primary` Examples
 :link: examples/foundation/index
 :link-type: doc
 
-Explore foundation recipes and demos.
+Explore foundation recipes and get introduced to system components
+:::
+
+:::{grid-item-card} {material-regular}`smart_toy;1.2em;sd-text-primary` AI-Assisted Coding
+:link: llms.txt
+:link-type: url
+
+Get the `llms.txt` for your coding-agent and let it write the recipes
 :::
 ::::
 
