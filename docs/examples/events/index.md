@@ -18,11 +18,27 @@ These tutorials will guide you through building agents that don't just follow in
 
 ## Recipes
 
-- **[Complete Agent, But Better](multiprocessing.md)**
-  Transition your agent from a prototype to a production-ready system by running components in separate processes. This recipe demonstrates how to isolate failures so one crash doesn't stop the robot, and how to configure global fallback rules to automatically restart unhealthy components.
+::::{grid} 1 2 2 2
+:gutter: 3
 
-- **[Runtime Fallbacks](fallback.md)**
-  Build a self-healing agent that can handle API outages or connection drops. This tutorial teaches you to implement a "Plan B" strategy where the agent automatically swaps its primary cloud-based brain for a smaller, local backup model if the primary connection fails.
+:::{grid-item-card} {material-regular}`smart_toy;1.2em;sd-text-primary` Complete Agent, But Better
+:link: multiprocessing
+:link-type: doc
 
-- **[Event Driven Triggering](event_driven_description.md)**
-  Optimize your agent's compute resources by creating a "Reflex-Cognition" loop. Learn to use a lightweight vision detector to monitor the scene continuously (Reflex), and only trigger a heavy VLM (Cognition) to describe the scene when a specific event is detected.
+Transition your agent from a prototype to a production-ready system by running components in separate processes. This recipe demonstrates how to isolate failures so one crash doesn't stop the robot, and how to configure global fallback rules to automatically restart unhealthy components.
+:::
+
+:::{grid-item-card} {material-regular}`backup;1.2em;sd-text-primary` Runtime Fallbacks
+:link: fallback
+:link-type: doc
+
+Build a self-healing agent that can handle API outages or connection drops. This tutorial teaches you to implement a "Plan B" strategy where the agent automatically swaps its primary cloud-based brain for a smaller, local backup model if the primary connection fails.
+:::
+
+:::{grid-item-card} {material-regular}`bolt;1.2em;sd-text-primary` Event Driven Triggering
+:link: event_driven_description
+:link-type: doc
+
+Optimize your agent's compute resources by creating a "Reflex-Cognition" loop. Learn to use a lightweight vision detector to monitor the scene continuously (Reflex), and only trigger a heavy VLM (Cognition) to describe the scene when a specific event is detected.
+:::
+::::

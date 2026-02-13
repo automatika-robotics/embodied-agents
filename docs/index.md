@@ -3,6 +3,7 @@ title: EmbodiedAgents Documentation
 ---
 
 ```{include} intro.md
+
 ```
 
 ```{toctree}
@@ -41,17 +42,12 @@ examples/foundation/complete
 
 ```{toctree}
 :maxdepth: 1
-:caption: Multimodal Planning with VLMs
+:caption: Embodied Planning and Control
 :hidden:
-examples/foundation/planning_model
-```
-
-```{toctree}
-:maxdepth: 1
-:caption: Manipulation with VLAs
-:hidden:
-examples/foundation/vla
-examples/foundation/vla_with_event
+examples/planning_control/index
+examples/planning_control/planning_model
+examples/planning_control/vla
+examples/planning_control/vla_with_event
 ```
 
 ```{toctree}

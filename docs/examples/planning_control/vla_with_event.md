@@ -100,7 +100,7 @@ To prevent the VLM from consuming too much compute, we have configured a `float`
 ```
 
 ```{tip}
-In order to make sure that the VLM output is formatted as per our requirement (YES or NO), checkout how to use pre-processors in [this](semantic_map.md) tutorial. For now we will assume that if YES is part of the output string, the event should fire.
+In order to make sure that the VLM output is formatted as per our requirement (YES or NO), checkout how to use pre-processors in [this](../foundation/semantic_map.md) recipe. For now we will assume that if YES is part of the output string, the event should fire.
 ```
 
 ## The Bridge: Semantic Event Trigger

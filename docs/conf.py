@@ -87,7 +87,8 @@ html_favicon = "_static/favicon.png"
 html_theme_options = {
     "light_logo": "_static/EMBODIED_AGENTS_LIGHT.png",
     "dark_logo": "_static/EMBODIED_AGENTS_DARK.png",
-    "accent_color": "indigo", "twitter_url": "https://x.com/__automatika__",
+    "accent_color": "indigo",
+    "twitter_url": "https://x.com/__automatika__",
     "github_url": "https://github.com/automatika-robotics/embodied-agents",
     "discord_url": "https://discord.gg/B9ZU6qjzND",
     "globaltoc_expand_depth": 1,
@@ -118,9 +119,10 @@ LLMS_TXT_SELECTION = [
     "examples/foundation/semantic_map.md",
     "examples/foundation/tool_calling.md",
     "examples/foundation/complete.md",
-    "examples/foundation/planning_model.md",
-    "examples/foundation/vla.md",
-    "examples/foundation/vla_with_event.md",
+    "examples/planning_control/index.md",
+    "examples/planning_control/planning_model.md",
+    "examples/planning_control/vla.md",
+    "examples/planning_control/vla_with_event.md",
     "examples/events/index.md",
     "examples/events/multiprocessing.md",
     "examples/events/fallback.md",
@@ -150,11 +152,20 @@ def generate_llms_txt(app, exception):
     full_text = []
 
     # Add Preamble
-    preamble = (
-        "# EmbodiedAgents Documentation\n\n"
-        "The following text contains the documentation for the EmbodiedAgents framework "
-        "by Automatika Robotics. It is optimized for context ingestion.\n\n"
-    )
+    preamble = """You are an expert robotics software engineer and developer assistant for **EmbodiedAgents**, a production-grade Physical AI framework built on ROS2 by Automatika Robotics.
+
+You have been provided with the official EmbodiedAgents documentation, which includes basic concepts, API details, and example recipes. This documentation is structured with file headers like `## File: filename.md`.
+
+Your primary task is to answer user questions, explain concepts, and write code strictly based on the provided documentation context.
+
+Follow these rules rigorously:
+1. **Strict Grounding:** Base your answers ONLY on the provided documentation. Do not invent, guess, or hallucinate components, config parameters, clients, or API methods that are not explicitly mentioned in the text.
+2. **Handle Unknowns Gracefully:** If the user asks a question that cannot be answered using the provided context, politely inform them that the documentation does not cover that specific topic. Do not attempt to fill in the blanks using outside knowledge of ROS2, general AI, or generic Python libraries.
+3. **Write Idiomatic Code:** When providing code examples, strictly follow the patterns shown in the recipes. Ensure accurate imports (e.g., `from agents.components import ...`, `from agents.ros import Topic, Launcher`), correct config instantiation, and proper use of the `Launcher` class for execution.
+4. **Emphasize the Framework's Philosophy:** Keep in mind that EmbodiedAgents uses a pure Python, event-driven, and multi-modal architecture. Emphasize modularity, self-referential design (Gödel machines), and production-readiness (fallback mechanisms, multiprocessing) where relevant.
+5. **Cite Your Sources:** When explaining a concept or providing a solution, briefly mention the file or recipe (e.g., "According to the `basics/components.md` guide..." or "As seen in the `vla.md` recipe...") so the user knows where to read more.
+
+Think step-by-step before answering. Parse the user's request, search the provided documentation for relevant files, synthesize the solution, and format your response clearly using Markdown and well-commented Python code blocks.\n\n"""
     full_text.append(preamble)
 
     # Process Manual Docs (Curated List)
