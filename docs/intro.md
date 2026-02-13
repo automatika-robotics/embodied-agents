@@ -16,7 +16,6 @@
 
 <span class="sd-text-primary" style="font-weight: bold; font-size: 1.1em;">{material-regular}`code;1.5em;sd-text-primary` Pure Python, Native ROS2 - </span> Define complex asynchronous graphs in standard Python without touching XML launch files. Yet, underneath, it is pure ROS2; compatible with the entire ecosystem of hardware drivers, simulation tools, and visualization suites.
 
-## Get Started
 
 ## Get Started
 
