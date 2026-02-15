@@ -5,6 +5,10 @@ from datetime import date
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+# Flag to signal that we are building documentation.
+# This prevents __init__.py from running runtime dependency checks.
+os.environ["AGENTS_DOCS_BUILD"] = "1"
+
 sys.path.insert(0, os.path.abspath(".."))
 version = ET.parse("../package.xml").getroot()[1].text
 print("Found version:", version)

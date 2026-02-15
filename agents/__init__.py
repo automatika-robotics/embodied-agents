@@ -1,4 +1,5 @@
 import sys
+import os
 from importlib.metadata import version, PackageNotFoundError
 from packaging import version as pkg_version
 
@@ -68,5 +69,8 @@ def check_sugarcoat_version():
         _print_sugarcoat_error(current_version=None)
 
 
-# Run the check immediately on import
-check_sugarcoat_version()
+# Check if we are running inside a documentation build
+_IS_DOCS_BUILD = os.environ.get("AGENTS_DOCS_BUILD") == "1"
+
+if not _IS_DOCS_BUILD:
+    check_sugarcoat_version()
