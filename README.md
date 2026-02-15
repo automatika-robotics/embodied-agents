@@ -115,12 +115,6 @@ Every agent recipe generates a **fully dynamic Web UI** automatically. Built wit
 
 ---
 
-I agree with you. While `<details>` tags keep a page looking clean, they can be frustrating for users who just want to skim the requirements and get moving. Hiding core installation steps creates unnecessary friction.
-
-Showing them "openly" makes the instructions more accessible, searchable (via `Cmd+F`), and professional. Here is a reorganized version that balances clarity with visibility.
-
----
-
 ## Installation
 
 To get **EmbodiedAgents** up and running, follow these steps in order.
@@ -167,7 +161,7 @@ pip install 'attrs>=23.2.0'
 
 ### 3. Advanced Installation (From Source)
 
-Use this method if you plan to modify the code or contribute to the project.
+Use this method if you want to get the nightly version or plan to contribute to the project.
 
 **Step 1: Install Dependencies**
 
