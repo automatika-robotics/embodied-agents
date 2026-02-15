@@ -3,7 +3,7 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/_static/EMBODIED_AGENTS_DARK.png">
   <source media="(prefers-color-scheme: light)" srcset="docs/_static/EMBODIED_AGENTS_LIGHT.png">
-  <img alt="EmbodiedAgents Logo" src="docs/_static/EMBODIED_AGENTS_DARK.png" width="400">
+  <img alt="EmbodiedAgents Logo" src="docs/_static/EMBODIED_AGENTS_DARK.png" width="600">
 </picture>
 
 <br/>
@@ -115,70 +115,80 @@ Every agent recipe generates a **fully dynamic Web UI** automatically. Built wit
 
 ---
 
+I agree with you. While `<details>` tags keep a page looking clean, they can be frustrating for users who just want to skim the requirements and get moving. Hiding core installation steps creates unnecessary friction.
+
+Showing them "openly" makes the instructions more accessible, searchable (via `Cmd+F`), and professional. Here is a reorganized version that balances clarity with visibility.
+
+---
+
 ## Installation
 
-<details>
-<summary><strong>Step 1: Install a Model Serving Platform</strong></summary>
+To get **EmbodiedAgents** up and running, follow these steps in order.
 
-_EmbodiedAgents_ is agnostic to model serving platforms. Install one of the following based on your preference:
+### 1. Pre-Requisite: Model Serving Platform
 
-- **[Ollama](https://ollama.com)** (Recommended for local inference)
-- **[RoboML](https://github.com/automatika-robotics/robo-ml)**
-- **OpenAI Compatible APIs** (e.g., [llama.cpp](https://github.com/ggml-org/llama.cpp), [vLLM](https://github.com/vllm-project/vllm), [lmdeploy](https://github.com/InternLM/lmdeploy))
-- **[LeRobot](https://github.com/huggingface/lerobot)** (For VLA models)
+*EmbodiedAgents* is agnostic to model serving platforms. You must have one of the following installed:
 
-> **Note:** You can skip this if using any OpenAI API compatible cloud service e.g HuggingFace inference endpoints.
+* **[Ollama](https://ollama.com)** (Recommended for local inference)
+* **[RoboML](https://github.com/automatika-robotics/robo-ml)**
+* **OpenAI Compatible APIs** (e.g., [llama.cpp](https://github.com/ggml-org/llama.cpp), [vLLM](https://github.com/vllm-project/vllm), [SGLang](https://github.com/sgl-project/sglang))
+* **[LeRobot](https://github.com/huggingface/lerobot)** (For VLA models)
 
-</details>
+> **Note:** You can skip this if using a cloud service like HuggingFace inference endpoints.
 
-<details>
-<summary><strong>Step 2: Install EmbodiedAgents (Ubuntu/Debian)</strong></summary>
+---
 
-For ROS versions >= `humble`:
+### 2. Standard Installation (Ubuntu/Debian)
 
-**Using `apt`:**
+For ROS versions **Humble** or newer.
+
+**Option A: Using `apt` (Recommended)**
 
 ```bash
 sudo apt install ros-$ROS_DISTRO-automatika-embodied-agents
 ```
 
-**Using `.deb` package:**
-Download from the [Release Page](https://github.com/automatika-robotics/embodied-agents/releases).
+**Option B: Using `.deb` package**
+
+1. Download from the [Release Page](https://github.com/automatika-robotics/embodied-agents/releases).
+2. Install the package:
 
 ```bash
 sudo dpkg -i ros-$ROS_DISTRO-automatica-embodied-agents_$version$DISTRO_$ARCHITECTURE.deb
 ```
 
-> **Requirement:** If your `attrs` version is < 23.2, please update it:
-> `pip install 'attrs>=23.2.0'`
-
-</details>
-
-<details>
-<summary><strong>Step 3: Install from Source (Developers)</strong></summary>
-
-**Get Dependencies:**
+**Requirement:** Ensure your `attrs` version is up to date:
 
 ```bash
-pip install numpy opencv-python-headless 'attrs>=23.2.0' jinja2 httpx setproctitle msgpack msgpack-numpy platformdirs tqdm websockets
+pip install 'attrs>=23.2.0'
 ```
 
-**Download Sugarcoat:**
+---
+
+### 3. Advanced Installation (From Source)
+
+Use this method if you plan to modify the code or contribute to the project.
+
+**Step 1: Install Dependencies**
 
 ```bash
-git clone [https://github.com/automatika-robotics/sugarcoat](https://github.com/automatika-robotics/sugarcoat)
+pip install numpy opencv-python-headless 'attrs>=23.2.0' jinja2 \
+            httpx setproctitle msgpack msgpack-numpy \
+            platformdirs tqdm websockets
 ```
 
-**Build EmbodiedAgents:**
+**Step 2: Clone and Build**
 
 ```bash
-git clone [https://github.com/automatika-robotics/embodied-agents.git](https://github.com/automatika-robotics/embodied-agents.git)
+# Clone Sugarcoat dependency
+git clone https://github.com/automatika-robotics/sugarcoat
+
+# Clone and build EmbodiedAgents
+git clone https://github.com/automatika-robotics/embodied-agents.git
 cd ..
 colcon build
 source install/setup.bash
 ```
-
-</details>
 
 ---
 
