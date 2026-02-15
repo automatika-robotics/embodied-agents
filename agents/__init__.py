@@ -3,7 +3,7 @@ from importlib.metadata import version, PackageNotFoundError
 from packaging import version as pkg_version
 
 # Define the minimum required version of sugarcoat
-MIN_SUGARCOAT_VERSION = "0.4.3"
+MIN_SUGARCOAT_VERSION = "0.5.0"
 
 
 def _print_sugarcoat_error(current_version=None):
