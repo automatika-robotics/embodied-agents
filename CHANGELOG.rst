@@ -2,8 +2,8 @@
 Changelog for package automatika_embodied_agents
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+0.5.1 (2026-02-16)
+------------------
 * (feature) Adds a record_video action to the Vision component
 * Takes specific input topic name and duration to record video
 * (feature) Adds a take_picture action to the vision component
