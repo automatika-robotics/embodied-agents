@@ -38,7 +38,7 @@ Unlike standard chatbots, this framework provides an orchestration layer for **A
   Create agents that are self-aware. Agents can start, stop, or reconfigure their components based on internal or external events. Trivially switch planners based on location, or toggle between cloud and local ML (See: [Gödel machines](https://en.wikipedia.org/wiki/G%C3%B6del_machine)).
 
 - **Spatio-Temporal Memory**
-  Utilize embodiment primitives like hierarchical spatio-temporal memory and semantic routing. Build arbitrarily complex graphs for agentic information flow without the overhead of standard Generative AI web frameworks.
+  Utilize embodiment primitives like hierarchical spatio-temporal memory and semantic routing. Build arbitrarily complex graphs for agentic information flow. No need to use bloated “GenAI” frameworks on your robot.
 
 - **Pure Python, Native ROS2**
   Define complex asynchronous graphs in standard Python without touching XML launch files. Under the hood, it is pure ROS2—fully compatible with the entire ecosystem of hardware drivers, simulation tools, and visualization suites.
