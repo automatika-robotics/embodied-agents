@@ -2,7 +2,7 @@
 
 Previously in the [Go-to-X Recipe](../foundation/goto.md) we created an agent capable of understanding and responding to go-to commands. This agent relied on a semantic map that was stored in a vector database that could be accessed by an LLM component for doing retreival augmented generation. Through the magic of tool use (or manual post-processing), we were able to extract position coordinates from our vectorized information and send it to a `Pose` topic for goal-point navigation by an autonomous navigation system. In this example, we would see how we can generate a similar navigation goal, but from the visual input coming in from the robot's sensors, i.e. we should be able to ask our physical agent to navigate to an object that is in its sight.
 
-We will acheive this by utilizing two components in our agent. An LLM component and an MLLM component. The LLM component will act as a sentence parser, isolating the object description from the user's command. The MLLM component will use a planning Vision Language Model (VLM), which can perform visual grounding and pointing.
+We will acheive this by utilizing two components in our agent. An LLM component and an VLM component. The LLM component will act as a sentence parser, isolating the object description from the user's command. The VLM component will use a planning Vision Language Model (VLM), which can perform visual grounding and pointing.
 
 ## Initialize the LLM component
 
@@ -38,9 +38,9 @@ Simply return the object description in the following command. {{ goto_in }}"""
 )
 ```
 
-## Initialize the MLLM component
+## Initialize the VLM component
 
-In this step, we will set up the MLLM component, which will enable the agent to visually ground natural language object descriptions (from our command, given to the LLM component above) using live sensor data. We use **[RoboBrain 2.0](https://github.com/FlagOpen/RoboBrain2.0)** by BAAI, a state-of-the-art Vision-Language model (VLM) trained specifically for embodied agents reasoning.
+In this step, we will set up the VLM component, which will enable the agent to visually ground natural language object descriptions (from our command, given to the LLM component above) using live sensor data. We use **[RoboBrain 2.0](https://github.com/FlagOpen/RoboBrain2.0)** by BAAI, a state-of-the-art Vision-Language model (VLM) trained specifically for embodied agents reasoning.
 
 RoboBrain 2.0 supports a wide range of embodied perception and planning capabilities, including interactive reasoning and spatial perception.
 
@@ -54,10 +54,19 @@ In our scenario, we use RoboBrain2.0 to perform **grounding**—that is, mapping
 RoboML is an aggregator library that provides a model serving aparatus for locally serving opensource ML models useful in robotics. Learn about setting up RoboML [here](https://www.github.com/automatika-robotics/roboml).
 ```
 
-To configure this grounding behavious, we initialize an `MLLMConfig` object and set the `task` parameter to `"grounding"`:
+```{important}
+**HuggingFace License Agreement & Authentication**
+
+The RoboBrain models are gated repositories on HuggingFace. To avoid "model not authorized" or `401 Client Error` messages:
+
+1. **Agree to Terms:** You must sign in to your HuggingFace account and accept the license terms on the [model's repository page](https://huggingface.co/BAAI/RoboBrain2.0-7B).
+2. **Authenticate Locally:** Ensure your environment is authenticated by running `huggingface-cli login` in your terminal and entering your access token.
+```
+
+To configure this grounding behavious, we initialize an `VLMConfig` object and set the `task` parameter to `"grounding"`:
 
 ```python
-config = MLLMConfig(task="grounding")
+config = VLMConfig(task="grounding")
 ```
 
 ```{note}
@@ -72,27 +81,27 @@ Supported values are:
 This parameter ensures the model behaves in a task-specific way, especially when using models like RoboBrain 2.0 that have been trained on multiple multimodal instruction types.
 ```
 
-With this setup, the MLLM component receives parsed object descriptions from the LLM and produces structured `Detections` messages identifying the object’s location in space—enabling the agent to navigate towards a visually grounded goal. Furthermore, we will use an _RGBD_ type message and the image input to the MLLM component. This message is an aligned RGB and depth image message that is usually available in the ROS2 packages provided by stereo camera vendors (e.g. Realsense). The utility of this choice, would become apparent later in this tutorial.
+With this setup, the VLM component receives parsed object descriptions from the LLM and produces structured `Detections` messages identifying the object’s location in space—enabling the agent to navigate towards a visually grounded goal. Furthermore, we will use an _RGBD_ type message and the image input to the VLM component. This message is an aligned RGB and depth image message that is usually available in the ROS2 packages provided by stereo camera vendors (e.g. Realsense). The utility of this choice, would become apparent later in this tutorial.
 
 ```python
-from agents.components import MLLM
+from agents.components import VLM
 from agents.models import RoboBrain2
 from agents.clients import RoboMLHTTPClient
-from agents.config import MLLMConfig
+from agents.config import VLMConfig
 
 # Start a RoboBrain2 based mllm component using RoboML client
 robobrain = RoboBrain2(name="robobrain")
 robobrain_client = RoboMLHTTPClient(robobrain)
 
-# Define MLLM input/output topics
+# Define VLM input/output topics
 rgbd0 = Topic(name="rgbd0", msg_type="RGBD")
 grounding_output = Topic(name="grounding_output", msg_type="Detections")
 
-# Set the task in MLLMConfig
-config = MLLMConfig(task="grounding")
+# Set the task in VLMConfig
+config = VLMConfig(task="grounding")
 
 # initialize the component
-go_to_x = MLLM(
+go_to_x = VLM(
     inputs=[llm_output, rgbd],
     outputs=[grounding_output],
     model_client=robobrain_client,
@@ -103,12 +112,12 @@ go_to_x = MLLM(
 ```
 
 ```{Warning}
-When a task is specified in MLLMConfig, the MLLM component automatically produces structured output depending on the task. The downstream consumers of this input should have appropriate callbacks configured for handling these output messages.
+When a task is specified in VLMConfig, the VLM component automatically produces structured output depending on the task. The downstream consumers of this input should have appropriate callbacks configured for handling these output messages.
 ```
 
 ## **BONUS** - Configure Autonomous Navigation with **_Kompass_**
 
-[Kompass](https://automatika-robotics.github.io/kompass) is the most advanced, GPU powered and featue complete open-source navigation stack out there. Its built with the same underlying principles as _EmbodiedAgents_, thus it is event-driven and can be customized with a simple python script. In this section we will, show how to start _Kompass_ in the same recipe that we have been developing for a vision guided, goto agent.
+[Kompass](https://automatika-robotics.github.io/kompass) is the most advanced, GPU powered and feature complete open-source navigation stack out there. Its built with the same underlying principles as _EmbodiedAgents_, thus it is event-driven and can be customized with a simple python script. In this section we will, show how to start _Kompass_ in the same recipe that we have been developing for a vision guided, goto agent.
 
 ```{note}
 Learn about installing Kompass [here](https://automatika-robotics.github.io/kompass/install.html)
@@ -138,7 +147,7 @@ my_robot = RobotConfig(
 )
 ```
 
-Now we can add our default components. Our component of interest is the _planning_ component, that plots a path to the goal point. We will give the output topic from our MLLM component as the goal point topic to the planning component.
+Now we can add our default components. Our component of interest is the _planning_ component, that plots a path to the goal point. We will give the output topic from our VLM component as the goal point topic to the planning component.
 
 ```{important}
 While planning components typically require goal points as `Pose` or `PoseStamped` messages in world space, Kompass also accepts `Detection` and `PointOfInterest` messages from EmbodiedAgents. These contain pixel-space coordinates identified by ML models. When generated from RGBD inputs, the associated depth images are included, enabling Kompass to automatically convert pixel-space points to averaged world-space coordinates using camera intrinsics.
@@ -207,10 +216,10 @@ from agents.components import LLM
 from agents.models import OllamaModel
 from agents.clients import OllamaClient
 from agents.ros import Topic
-from agents.components import MLLM
+from agents.components import VLM
 from agents.models import RoboBrain2
 from agents.clients import RoboMLHTTPClient
-from agents.config import MLLMConfig
+from agents.config import VLMConfig
 from kompass.robot import (
     AngularCtrlLimits,
     LinearCtrlLimits,
@@ -248,15 +257,15 @@ sentence_parser = LLM(
 robobrain = RoboBrain2(name="robobrain")
 robobrain_client = RoboMLHTTPClient(robobrain)
 
-# Define MLLM input/output topics
+# Define VLM input/output topics
 rgbd0 = Topic(name="rgbd0", msg_type="RGBD")
 grounding_output = Topic(name="grounding_output", msg_type="Detections")
 
-# Set the task in MLLMConfig
-config = MLLMConfig(task="grounding")
+# Set the task in VLMConfig
+config = VLMConfig(task="grounding")
 
 # initialize the component
-go_to_x = MLLM(
+go_to_x = VLM(
     inputs=[llm_output, rgbd0],
     outputs=[grounding_output],
     model_client=robobrain_client,

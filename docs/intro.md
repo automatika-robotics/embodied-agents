@@ -16,7 +16,6 @@
 
 <span class="sd-text-primary" style="font-weight: bold; font-size: 1.1em;">{material-regular}`code;1.5em;sd-text-primary` Pure Python, Native ROS2 - </span> Define complex asynchronous graphs in standard Python without touching XML launch files. Yet, underneath, it is pure ROS2; compatible with the entire ecosystem of hardware drivers, simulation tools, and visualization suites.
 
-
 ## Get Started
 
 ::::{grid} 1 2 2 3
@@ -43,18 +42,25 @@ Launch your first embodied agent in minutes
 Learn the core building blocks of the framework
 :::
 
-:::{grid-item-card} {material-regular}`auto_awesome;1.2em;sd-text-primary` Examples
+:::{grid-item-card} {material-regular}`auto_awesome;1.2em;sd-text-primary` Foundation Recipes
 :link: examples/foundation/index
 :link-type: doc
 
-Explore foundation recipes and get introduced to system components
+Explore basic agent recipes and get introduced to system components
+:::
+
+:::{grid-item-card} {material-regular}`precision_manufacturing;1.2em;sd-text-primary` Planning and Control
+:link: examples/planning_control/index
+:link-type: doc
+
+Learn to use task specific VLMs for planning and VLAs for manipulation control
 :::
 
 :::{grid-item-card} {material-regular}`smart_toy;1.2em;sd-text-primary` AI-Assisted Coding
 :link: llms.txt
 :link-type: url
 
-Get the `llms.txt` for your coding-agent and let it write the recipes
+Get the `llms.txt` for your coding-agent and let it write the recipes for you
 :::
 ::::
 
