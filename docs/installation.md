@@ -14,7 +14,7 @@ Please ensure you have a working [ROS2 installation](https://docs.ros.org/) befo
 
 * **[Ollama](https://ollama.com)** (Recommended for local inference)
 * **[RoboML](https://github.com/automatika-robotics/robo-ml)**
-* **OpenAI Compatible APIs** (e.g., [llama.cpp](https://github.com/ggml-org/llama.cpp), [vLLM](https://github.com/vllm-project/vllm), [SGLang](https://github.com/sgl-project/sglang))
+* **OpenAI API Compatible Inference Servers** (e.g., [llama.cpp](https://github.com/ggml-org/llama.cpp), [vLLM](https://github.com/vllm-project/vllm), [SGLang](https://github.com/sgl-project/sglang))
 * **[LeRobot](https://github.com/huggingface/lerobot)** (For VLA models)
 
 > **Note:** You can skip this if using a cloud service like HuggingFace inference endpoints.

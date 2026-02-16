@@ -1,82 +1,43 @@
+<div align="center">
+
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="_static/EMBODIED_AGENTS_DARK.png">
-  <source media="(prefers-color-scheme: light)" srcset="_static/EMBODIED_AGENTS_LIGHT.png">
-  <img alt="_EmbodiedAgents_ ロゴ" src="_static/EMBODIED_AGENTS_DARK.png">
+<source media="(prefers-color-scheme: dark)" srcset="_static/EMBODIED_AGENTS_DARK.png">
+<source media="(prefers-color-scheme: light)" srcset="_static/EMBODIED_AGENTS_LIGHT.png">
+<img alt="EmbodiedAgents Logo" src="_static/EMBODIED_AGENTS_DARK.png" width="600">
 </picture>
-<br/>
 
-> 🌐 [English Version](../README.md) | 🇨🇳 [简体中文](README.zh.md)
+**フィジカルAI (Physical AI) 導入のための実運用向けフレームワーク**
 
-_EmbodiedAgents_ は、生成 AI (Generative AI) と物理ロボット工学のギャップを埋めるために設計された、**ROS2** 上に構築された実用レベルのフレームワークです。単にチャットするだけでなく、環境を**理解**し、**移動**し、**操作**し、そして**適応**できるインタラクティブな身体性を持つエージェント（Physical Agents）を作成することができます。
+**[インストール]()** | **[クイックスタート]()** | **[ドキュメント](https://automatika-robotics.github.io/embodied-agents/)** | **[Discord](https://discord.gg/B9ZU6qjzND)**
 
-- **実運用可能な身体性エージェント (Production Ready Physical Agents):** 実世界の動的な環境で動作する自律型ロボットシステムで使用するために設計されています。_EmbodiedAgents_ は、物理 AI (Physical AI) を活用したシステムの構築を簡素化し、**適応的知能 (Adaptive Intelligence)** のためのオーケストレーション層を提供します。
-- **自己参照およびイベント駆動 (Self-referential and Event Driven):** _EmbodiedAgents_ で作成されたエージェントは、内部および外部のイベントに基づいて、自身のコンポーネントを開始、停止、または再構成できます。例えば、エージェントは地図上の現在位置や視覚モデルからの入力に基づいて、計画（プランニング）に使用する機械学習モデルを切り替えることが可能です。_EmbodiedAgents_ は、自己参照的な [ゲーデルマシン (Gödel machines)](https://en.wikipedia.org/wiki/G%C3%B6del_machine) のようなエージェントの作成を容易にします。
-- **意味記憶 (Semantic Memory):** ベクトルデータベース、セマンティックルーティング、その他のサポートコンポーネントを統合しており、エージェント的な情報の流れを実現するための任意に複雑なグラフを迅速に構築できます。ロボット上で肥大化した「GenAI」フレームワークを使用する必要はありません。
-- **Pure Python, ネイティブ ROS2:** XML の launch ファイルに触れることなく、標準的な Python で複雑な非同期グラフを定義できます。その裏側では純粋な ROS2 が動作しており、ハードウェアドライバ、シミュレーションツール、可視化スイートなどの全エコシステムと互換性があります。
+</div>
 
-[Discord](https://discord.gg/B9ZU6qjzND) に参加する 👾
+---
 
-[インストール手順](https://automatika-robotics.github.io/embodied-agents/installation.html) を確認する 🛠️
+## 概要
 
-[クイックスタートガイド](https://automatika-robotics.github.io/embodied-agents/quickstart.html) で始める 🚀
+**EmbodiedAgents** は、単にチャットをするだけでなく、環境を**理解**し、**移動**し、**操作**し、そして**適応**するインタラクティブな**物理エージェント (Physical Agents)** の作成を可能にします。
 
-[基本概念](https://automatika-robotics.github.io/embodied-agents/basics/components.html) に慣れ親しむ 📚
+標準的なチャットボットとは異なり、本フレームワークは動的な環境における自律システムのために特別に設計された、**適応型インテリジェンス (Adaptive Intelligence)** のためのオーケストレーション層を提供します。
 
-[サンプルレシピ](https://automatika-robotics.github.io/embodied-agents/examples/foundation/index.html) で実践する ✨
+### 主な特徴
 
-## インストール 🛠️
+- **実運用に対応 (Production Ready)**
+  実世界での展開を想定して設計されています。フィジカルAIの展開をシンプルかつスケーラブルで信頼性の高いものにする、堅牢なオーケストレーション層を提供します。
+- **自己参照ロジック (Self-Referential Logic)**
+  自己認識を持つエージェントを作成できます。エージェントは内部または外部のイベントに基づいて、自身のコンポーネントを開始、停止、または再構成できます。場所に基づいてプランナーを簡単に切り替えたり、クラウドとローカルのMLモデルを切り替えたりすることが可能です（参照：[ゲーデルマシン](https://en.wikipedia.org/wiki/G%C3%B6del_machine)）。
+- **時空間メモリ (Spatio-Temporal Memory)**
+  階層的な時空間メモリやセマンティックルーティングなどの身体性プリミティブ (embodiment primitives) を活用します。エージェントの情報フローのために、任意に複雑なグラフを構築できます。ロボット上で肥大化した汎用的な「生成AI」フレームワークを使用する必要はありません。
+- **純粋なPython、ネイティブROS2**
+  XMLのローンチファイルに触れることなく、標準的なPythonで複雑な非同期グラフを定義できます。内部的には純粋なROS2であり、ハードウェアドライバ、シミュレーションツール、可視化スイートなどのエコシステム全体と完全に互換性があります。
 
-### モデルサービングプラットフォームのインストール
+---
 
-_EmbodiedAgents_ の中核は、モデルサービングプラットフォームに依存しません。[Ollama](https://ollama.com)、[RoboML](https://github.com/automatika-robotics/robo-ml) に加え、OpenAI 互換 API を持つすべてのプラットフォームやクラウドプロバイダー（例：[vLLM](https://github.com/vllm-project/vllm)、[lmdeploy](https://github.com/InternLM/lmdeploy) 等）をサポートしています。VLA モデルについては、_EmbodiedAgents_ は [LeRobot](https://github.com/huggingface/lerobot) の非同期推論サーバー (Async Inference server) 上で提供されるポリシー (policies) に対応しています。各プロジェクトが提供する手順に従って、いずれかをインストールしてください。新たなプラットフォームへのサポートは順次追加されています。特定のプラットフォームへの対応をご希望の場合は、Issue または PR を作成してください。
+## クイックスタート
 
-### _EmbodiedAgents_ のインストール（Ubuntu）
+_EmbodiedAgents_ は、[Sugarcoat](https://www.github.com/automatika-robotics/sugarcoat) を使用してノードグラフを記述するための Pythonic な方法を提供します。
 
-ROS のバージョンが _humble_ 以上であれば、パッケージマネージャーを使って _EmbodiedAgents_ をインストールできます。たとえば Ubuntu では次のように実行します：
-
-```bash
-sudo apt install ros-$ROS_DISTRO-automatika-embodied-agents
-```
-
-または、[リリースページ](https://github.com/automatika-robotics/embodied-agents/releases) からお好みの `.deb` パッケージをダウンロードして、次のようにインストールすることもできます：
-
-```bash
-sudo dpkg -i ros-$ROS_DISTRO-automatica-embodied-agents_$version$DISTRO_$ARCHITECTURE.deb
-```
-
-パッケージマネージャーからインストールされる `attrs` のバージョンが 23.2 未満の場合は、次のコマンドで pip を使ってインストールしてください：
-
-```bash
-pip install 'attrs>=23.2.0'
-```
-
-### ソースからのインストール
-
-#### 依存関係の取得
-
-```bash
-pip install numpy opencv-python-headless 'attrs>=23.2.0' jinja2 httpx setproctitle msgpack msgpack-numpy platformdirs tqdm websockets
-```
-
-Sugarcoat🍬 をクローン：
-
-```bash
-git clone https://github.com/automatika-robotics/sugarcoat
-```
-
-#### _EmbodiedAgents_ のクローンとビルド
-
-```bash
-git clone https://github.com/automatika-robotics/embodied-agents.git
-cd ..
-colcon build
-source install/setup.bash
-python your_script.py
-```
-
-## クイックスタート 🚀
-
-_EmbodiedAgents_ は、他の ROS パッケージと異なり、[Sugarcoat🍬](https://www.github.com/automatika-robotics/sugarcoat) を用いてノードグラフを純粋な Python コードで記述できます。以下のスクリプトをコピーして実行してください：
+以下のレシピをPythonスクリプト（例：`agent.py`）にコピーして、「何が見えますか？」のような質問に答えることができるVLM（視覚言語モデル）搭載エージェントを作成してみましょう。
 
 ```python
 from agents.clients.ollama import OllamaClient
@@ -84,17 +45,17 @@ from agents.components import VLM
 from agents.models import OllamaModel
 from agents.ros import Topic, Launcher
 
-# Define input and output topics (pay attention to msg_type)
+# 1. 入出力トピックの定義
 text0 = Topic(name="text0", msg_type="String")
 image0 = Topic(name="image_raw", msg_type="Image")
 text1 = Topic(name="text1", msg_type="String")
 
-# Define a model client (working with Ollama in this case)
-# OllamaModel is a generic wrapper for all Ollama models
+# 2. モデルクライアントの定義 (例: Ollama経由のQwen)
 qwen_vl = OllamaModel(name="qwen_vl", checkpoint="qwen2.5vl:latest")
 qwen_client = OllamaClient(qwen_vl)
 
-# Define a VLM component (A component represents a node with a particular functionality)
+# 3. VLMコンポーネントの定義
+# コンポーネントは特定の機能を持つノードを表します
 vlm = VLM(
     inputs=[text0, image0],
     outputs=[text1],
@@ -102,57 +63,127 @@ vlm = VLM(
     trigger=text0,
     component_name="vqa"
 )
-# Additional prompt settings
-vlm.set_topic_prompt(text0, template="""You are an amazing and funny robot.
-    Answer the following about this image: {{ text0 }}"""
+
+# 4. プロンプトテンプレートの設定
+vlm.set_topic_prompt(text0, template="""あなたは素晴らしくて面白いロボットです。
+    この画像について次の質問に答えてください: {{ text0 }}"""
 )
 
-# Launch the component
+# 5. エージェントの起動
 launcher = Launcher()
 launcher.add_pkg(components=[vlm])
 launcher.bringup()
 ```
 
-このコードを実行することで、**「何が見える？」** といった質問に答えるエージェントが完成します。_EmbodiedAgents_ には軽量なウェブクライアントも付属しています。[クイックスタートガイド](https://automatika-robotics.github.io/embodied-agents/quickstart.html) で、コンポーネントとモデルの連携方法を学びましょう。
+> **注意:** 詳細は [クイックスタートガイド](https://automatika-robotics.github.io/embodied-agents/quickstart.html) を確認するか、[サンプルレシピ](https://automatika-robotics.github.io/embodied-agents/examples/foundation/index.html) をご覧ください。
 
-## 複雑な物理エージェント
+---
 
-上記のクイックスタートは、_EmbodiedAgents_ の機能のごく一部にすぎません。EmbodiedAgents では、任意に複雑なコンポーネントグラフを構築できます。さらに、システム内部または外部のイベントに応じて、構成を動的に変更・再構築することも可能です。以下のエージェントのコード例を確認してみてください：[こちらをクリック](https://automatika-robotics.github.io/embodied-agents/examples/foundation/complete.html)
+## 複雑なコンポーネントグラフ
 
+上記のクイックスタートの例は、_EmbodiedAgents_ で可能なことのほんの一部に過ぎません。任意に洗練されたコンポーネントグラフを作成し、システム内部または外部のイベントに基づいて、システム自体を変更または再構成するように設定できます。以下のエージェントのコードは [こちら](https://automatika-robotics.github.io/embodied-agents/examples/foundation/complete.html) で確認できます。
+
+<div align="center">
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="_static/complete_dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="_static/complete_light.png">
-  <img alt="高度なエージェント" src="_static/complete_dark.png">
+<source media="(prefers-color-scheme: dark)" srcset="_static/complete_dark.png">
+<source media="(prefers-color-scheme: light)" srcset="_static/complete_light.png">
+<img alt="Elaborate Agent" src="_static/complete_dark.png" width="80%">
 </picture>
+</div>
 
-## EmbodiedAgentレシピの動的Web UI
+## ダイナミック Web UI
 
-基盤となる[**Sugarcoat**](https://github.com/automatika-robotics/sugarcoat)フレームワークの強力な機能を活用し、***EmbodiedAgents***は各レシピに対して**完全に動的で自動生成されるWeb UI**を提供します。
-この機能は**FastHTML**によって構築されており、手動でのGUI開発を不要にし、制御や可視化のためのレスポンシブなインターフェースを即座に提供します。
+すべてのエージェントレシピは、**完全に動的な Web UI** を自動的に生成します。FastHTML で構築されており、フロントエンドのコードを一行も書くことなく、即座に制御と可視化が可能です。
 
-このUIは自動的に以下を生成します：
-
-- レシピ内で使用されるすべてのコンポーネントに対する設定インターフェース
-- コンポーネントの入出力に対するリアルタイムデータの可視化と制御
-- すべての対応メッセージ型に対するWebSocketベースのデータストリーミング
-
-### 例：VLMエージェントUI
-
-VLM Q&Aエージェント（クイックスタート例と類似）のための完全なインターフェースが自動生成され、設定用のシンプルなコントロールやリアルタイムのテキスト入出力表示を提供します。
-
-<p align="center">
-<picture align="center">
-  <img alt="EmbodiedAgents UI Example GIF" src="docs/_static/ui_agents.gif" width="60%">
+<div align="center">
+<picture>
+<img alt="EmbodiedAgents UI Example GIF" src="_static/ui_agents.gif" width="70%">
 </picture>
-</p>
+</div>
 
-## 著作権情報
+---
 
-本配布物に含まれるコードは、特に明記されていない限り、すべて © 2024 [Automatika Robotics](https://automatikarobotics.com/) に著作権があります。
+## インストール
 
-_EmbodiedAgents_ は MIT ライセンスのもとで公開されています。詳細は [LICENSE](LICENSE) ファイルをご確認ください。
+**EmbodiedAgents** を稼働させるには、以下の手順を順番に実行してください。
 
-## コントリビューション（貢献）
+### 1. 前提条件: モデルサービングプラットフォーム
 
-_EmbodiedAgents_ は、[Automatika Robotics](https://automatikarobotics.com/) と [Inria](https://inria.fr/) の協力により開発されました。
-コミュニティからの貢献も大歓迎です。
+_EmbodiedAgents_ はモデルサービングプラットフォームに依存しません。以下のいずれかがインストールされている必要があります：
+
+- **[Ollama](https://ollama.com)** (ローカル推論に推奨)
+- **[RoboML](https://github.com/automatika-robotics/robo-ml)**
+- **OpenAI API 互換の推論サーバー** (例: [llama.cpp](https://github.com/ggml-org/llama.cpp), [vLLM](https://github.com/vllm-project/vllm), [SGLang](https://github.com/sgl-project/sglang))
+- **[LeRobot](https://github.com/huggingface/lerobot)** (VLAモデル用)
+
+> **注意:** HuggingFace Inference Endpoints などのクラウドサービスを使用する場合は、この手順をスキップできます。
+
+---
+
+### 2. 標準インストール (Ubuntu/Debian)
+
+ROS バージョン **Humble** 以降向けです。
+
+**オプション A: `apt` を使用 (推奨)**
+
+```bash
+sudo apt install ros-$ROS_DISTRO-automatika-embodied-agents
+```
+
+**オプション B: `.deb` パッケージを使用**
+
+1. [リリースページ](https://github.com/automatika-robotics/embodied-agents/releases) からダウンロードします。
+2. パッケージをインストールします：
+
+```bash
+sudo dpkg -i ros-$ROS_DISTRO-automatica-embodied-agents_$version$DISTRO_$ARCHITECTURE.deb
+```
+
+**要件:** `attrs` のバージョンが最新であることを確認してください：
+
+```bash
+pip install 'attrs>=23.2.0'
+```
+
+---
+
+### 3. 高度なインストール (ソースから)
+
+ナイトリービルドを使用したい場合や、プロジェクトへの貢献を計画している場合は、この方法を使用してください。
+
+**ステップ 1: 依存関係のインストール**
+
+```bash
+pip install numpy opencv-python-headless 'attrs>=23.2.0' jinja2 \
+            httpx setproctitle msgpack msgpack-numpy \
+            platformdirs tqdm websockets
+```
+
+**ステップ 2: クローンとビルド**
+
+```bash
+# Sugarcoat (依存関係) のクローン
+git clone https://github.com/automatika-robotics/sugarcoat
+
+# EmbodiedAgents のクローンとビルド
+git clone https://github.com/automatika-robotics/embodied-agents.git
+cd ..
+colcon build
+source install/setup.bash
+```
+
+---
+
+## リソース
+
+- [インストール手順](https://automatika-robotics.github.io/embodied-agents/installation.html)
+- [クイックスタートガイド](https://automatika-robotics.github.io/embodied-agents/quickstart.html)
+- [基本コンセプト](https://automatika-robotics.github.io/embodied-agents/basics/components.html)
+- [サンプルレシピ](https://automatika-robotics.github.io/embodied-agents/examples/foundation/index.html)
+
+## 著作権と貢献
+
+**EmbodiedAgents** は [Automatika Robotics](https://automatikarobotics.com/) と [Inria](https://inria.fr/) による共同プロジェクトです。
+
+コードは **MIT ライセンス** の下で提供されています。詳細は [LICENSE](../LICENSE) を参照してください。
+特に明記されていない限り、Copyright (c) 2024 Automatika Robotics に帰属します。

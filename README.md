@@ -125,7 +125,7 @@ To get **EmbodiedAgents** up and running, follow these steps in order.
 
 * **[Ollama](https://ollama.com)** (Recommended for local inference)
 * **[RoboML](https://github.com/automatika-robotics/robo-ml)**
-* **OpenAI Compatible APIs** (e.g., [llama.cpp](https://github.com/ggml-org/llama.cpp), [vLLM](https://github.com/vllm-project/vllm), [SGLang](https://github.com/sgl-project/sglang))
+* **OpenAI API Compatible Inference Servers** (e.g., [llama.cpp](https://github.com/ggml-org/llama.cpp), [vLLM](https://github.com/vllm-project/vllm), [SGLang](https://github.com/sgl-project/sglang))
 * **[LeRobot](https://github.com/huggingface/lerobot)** (For VLA models)
 
 > **Note:** You can skip this if using a cloud service like HuggingFace inference endpoints.
@@ -197,5 +197,5 @@ source install/setup.bash
 
 **EmbodiedAgents** is a collaboration between [Automatika Robotics](https://automatikarobotics.com/) and [Inria](https://inria.fr/).
 
-The code is available under the **MIT License**. See [LICENSE](https://www.google.com/search?q=LICENSE) for details.
+The code is available under the **MIT License**. See [LICENSE](LICENSE) for details.
 Copyright (c) 2024 Automatika Robotics unless explicitly indicated otherwise.
