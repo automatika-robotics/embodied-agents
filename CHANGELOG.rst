@@ -2,6 +2,26 @@
 Changelog for package automatika_embodied_agents
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+* (feature) Adds a record_video action to the Vision component
+* Takes specific input topic name and duration to record video
+* (feature) Adds a take_picture action to the vision component
+* (feature) Adds arbitrary action execution to router
+* (feature) Adds handling of topic and action lists in semantic router
+* (refactor) Makes action methods in Vision component use extra_callback to avoid starvation
+* (refactor) Increases default max new tokens param for llm/vlm configs
+* (refactor) Makes changes for new api of events/actions in sugar
+* (fix) Fixes semantic router handling of action routes based on new api
+* (fix) Fixes warmup for model components
+* (chore) Adds think option for ollama models
+* (chore) Adds proper docstrings to exposed methods and classes
+* (docs) Updates model definitions in examples
+* (docs) Adds new prompt for llms.txt and new tutorial intros
+* (docs) Fix incorrect import in docs
+* (docs) Updates installation instructions
+* Contributors: ahr, mkabtoul
+
 0.5.0 (2026-01-19)
 ------------------
 * (docs) Adds supported types table and component runtype in basics
