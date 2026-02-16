@@ -1,15 +1,23 @@
 # Installation
 
-## Pre-Requisits
+## Prerequisites
 
-**1. Install ROS2**
+:::{admonition} *ROS2* Required
+:class: note
+EmbodiedAgents supports all *ROS2* distributions from **Humble** up to **Rolling**.
+Please ensure you have a working [ROS2 installation](https://docs.ros.org/) before proceeding.
+:::
 
-_EmbodiedAgents_ is built to be used with ROS2. All ROS2 distributions starting from _Iron_ are supported. Install ROS2 by following the instructions on the [official site](https://docs.ros.org/en/iron/Installation.html).
+<span class="sd-text-primary" style="font-weight: bold; font-size: 1.1em;">Install a Model Inference Platform</span>
 
+*EmbodiedAgents* is agnostic to model serving platforms. You must have one of the following installed:
 
-**2. Install a model serving platform**
+* **[Ollama](https://ollama.com)** (Recommended for local inference)
+* **[RoboML](https://github.com/automatika-robotics/robo-ml)**
+* **OpenAI Compatible APIs** (e.g., [llama.cpp](https://github.com/ggml-org/llama.cpp), [vLLM](https://github.com/vllm-project/vllm), [SGLang](https://github.com/sgl-project/sglang))
+* **[LeRobot](https://github.com/huggingface/lerobot)** (For VLA models)
 
-The core of _EmbodiedAgents_ is agnostic to model serving platforms. It currently supports [Ollama](https://ollama.com), [RoboML](https://github.com/automatika-robotics/robo-ml) and any platform or cloud provider with an OpenAI compatible API (e.g. [vLLM](https://github.com/vllm-project/vllm), [lmdeploy](https://github.com/InternLM/lmdeploy) etc.). Please install either of these by following the instructions provided by respective projects. Support for new platforms is being continuously added. If you would like to support a particular platform, please open an issue/PR.
+> **Note:** You can skip this if using a cloud service like HuggingFace inference endpoints.
 
 ```{tip}
 For utilizing larger models, it is recommended that model serving platforms are not installed directly on the robot (or the edge device) but on a GPU powered machine on the local network (or use one of the cloud providers).
@@ -98,7 +106,7 @@ Alternatively, grab your favorite deb package from the [release page](https://gi
 
 `sudo dpkg -i ros-$ROS_DISTRO-automatica-embodied-agents_$version$DISTRO_$ARCHITECTURE.deb`
 
-If the attrs version from your package manager is < 23.2, install it using pip as follows:
+**Requirement:** If the attrs version from your package manager is < 23.2, install it using pip as follows:
 
 `pip install 'attrs>=23.2.0'`
 
