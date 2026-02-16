@@ -1,78 +1,55 @@
+<div align="center">
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/_static/EMBODIED_AGENTS_DARK.png">
   <source media="(prefers-color-scheme: light)" srcset="docs/_static/EMBODIED_AGENTS_LIGHT.png">
-  <img alt="EmbodiedAgents Logo." src="docs/_static/EMBODIED_AGENTS_DARK.png">
+  <img alt="EmbodiedAgents Logo" src="docs/_static/EMBODIED_AGENTS_DARK.png" width="600">
 </picture>
+
 <br/>
 
-🇨🇳 [简体中文](docs/README.zh.md) | 🇯🇵 [日本語](docs/README.ja.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![ROS2](https://img.shields.io/badge/ROS2-Humble%2B-green)](https://docs.ros.org/en/humble/index.html)
+[![Discord](https://img.shields.io/badge/Discord-%235865F2.svg?logo=discord&logoColor=white)](https://discord.gg/B9ZU6qjzND)
+[![简体中文](https://img.shields.io/badge/简体中文-gray.svg)](docs/README.zh.md)
+[![日本語](https://img.shields.io/badge/日本語-gray.svg)](docs/README.ja.md)
 
-_EmbodiedAgents_ is a production-grade framework, built on top of **ROS2**, designed to deploy Physical AI on real world robots. It enables you to create interactive, physical agents that do not just chat, but **understand**, **move**, **manipulate**, and **adapt** to their environment.
+**The production-grade framework for deploying Physical AI**
 
-- **Production Ready Physical Agents:** Designed to be used with autonomous robot systems that operate in real world dynamic environments. _EmbodiedAgents_ makes it simple to create systems that make use of Physical AI. It provides an orchestration layer for **Adaptive Intelligence**.
-- **Self-referential and Event Driven**: An agent created with _EmbodiedAgents_ can start, stop or reconfigure its own components based on internal and external events. For example, an agent can change the ML model for planning based on its location on the map or input from the vision model. _EmbodiedAgents_ makes it simple to create agents that are self-referential [Gödel machines](https://en.wikipedia.org/wiki/G%C3%B6del_machine).
-- **Semantic Memory**: Integrates vector databases, semantic routing and other supporting components to quickly build arbitrarily complex graphs for agentic information flow. No need to utilize bloated "GenAI" frameworks on your robot.
-- **Pure Python, Native ROS2**: Define complex asynchronous graphs in standard Python without touching XML launch files. Yet, underneath, it is pure ROS2 compatible with the entire ecosystem of hardware drivers, simulation tools, and visualization suites.
+[**Installation**](#installation) | [**Quick Start**](#quick-start) | [**Documentation**](https://automatika-robotics.github.io/embodied-agents/) | [**Discord**](https://discord.gg/B9ZU6qjzND)
 
-Join our [Discord](https://discord.gg/B9ZU6qjzND) 👾
+</div>
 
-Checkout [Installation Instructions](https://automatika-robotics.github.io/embodied-agents/installation.html) 🛠️
+---
 
-Get started with the [Quickstart Guide](https://automatika-robotics.github.io/embodied-agents/quickstart.html) 🚀
+## Overview
 
-Get familiar with [Basic Concepts](https://automatika-robotics.github.io/embodied-agents/basics/components.html) 📚
+**EmbodiedAgents** enables you to create interactive, **physical agents** that do not just chat, but **understand**, **move**, **manipulate**, and **adapt** to their environment.
 
-Dive right in with [Example Recipes](https://automatika-robotics.github.io/embodied-agents/examples/foundation/index.html) ✨
+Unlike standard chatbots, this framework provides an orchestration layer for **Adaptive Intelligence** designed specifically for autonomous systems in dynamic environments.
 
-## Installation 🛠️
+### Core Features
 
-### Install a model serving platform
+- **Production Ready**
+  Designed for real-world deployment. Provides a robust orchestration layer that makes deploying Physical AI simple, scalable, and reliable.
 
-The core of _EmbodiedAgents_ is agnostic to model serving platforms. It supports [Ollama](https://ollama.com), [RoboML](https://github.com/automatika-robotics/robo-ml) and all platforms or cloud provider with an OpenAI compatible API (e.g. [vLLM](https://github.com/vllm-project/vllm), [lmdeploy](https://github.com/InternLM/lmdeploy) etc.). For VLA models _EmbodiedAgents_ supports policies severed on the Async Inference server from [LeRobot](https://github.com/huggingface/lerobot). Please install either of these by following the instructions provided by respective projects. Support for new platforms is being continuously added. If you would like to support a particular platform, please open an issue/PR.
+- **Self-Referential Logic**
+  Create agents that are self-aware. Agents can start, stop, or reconfigure their components based on internal or external events. Trivially switch planners based on location, or toggle between cloud and local ML (See: [Gödel machines](https://en.wikipedia.org/wiki/G%C3%B6del_machine)).
 
-### Install _EmbodiedAgents_ (Ubuntu)
+- **Spatio-Temporal Memory**
+  Utilize embodiment primitives like hierarchical spatio-temporal memory and semantic routing. Build arbitrarily complex graphs for agentic information flow without the overhead of standard Generative AI web frameworks.
 
-For ROS versions >= _humble_, you can install _EmbodiedAgents_ with your package manager. For example on Ubuntu:
+- **Pure Python, Native ROS2**
+  Define complex asynchronous graphs in standard Python without touching XML launch files. Under the hood, it is pure ROS2—fully compatible with the entire ecosystem of hardware drivers, simulation tools, and visualization suites.
 
-`sudo apt install ros-$ROS_DISTRO-automatika-embodied-agents`
+---
 
-Alternatively, grab your favorite deb package from the [release page](https://github.com/automatika-robotics/embodied-agents/releases) and install it as follows:
+## Quick Start
 
-`sudo dpkg -i ros-$ROS_DISTRO-automatica-embodied-agents_$version$DISTRO_$ARCHITECTURE.deb`
+_EmbodiedAgents_ provides a pythonic way to describe node graphs using [Sugarcoat](https://www.github.com/automatika-robotics/sugarcoat).
 
-If the attrs version from your package manager is < 23.2, install it using pip as follows:
-
-`pip install 'attrs>=23.2.0'`
-
-### Install _EmbodiedAgents_ from source
-
-#### Get Dependencies
-
-Install python dependencies
-
-```shell
-pip install numpy opencv-python-headless 'attrs>=23.2.0' jinja2 httpx setproctitle msgpack msgpack-numpy platformdirs tqdm websockets
-```
-
-Download Sugarcoat🍬
-
-```shell
-git clone https://github.com/automatika-robotics/sugarcoat
-```
-
-#### Install _EmbodiedAgents_
-
-```shell
-git clone https://github.com/automatika-robotics/embodied-agents.git
-cd ..
-colcon build
-source install/setup.bash
-python your_script.py
-```
-
-## Quick Start 🚀
-
-Unlike other ROS package, _EmbodiedAgents_ provides a pure pythonic way of describing the node graph using [Sugarcoat🍬](https://www.github.com/automatika-robotics/sugarcoat). Copy the following recipe in a python script and run it.
+Copy the following recipe into a python script (e.g., `agent.py`) to create a VLM-powered agent that can answer questions like "What do you see?".
 
 ```python
 from agents.clients.ollama import OllamaClient
@@ -80,72 +57,145 @@ from agents.components import VLM
 from agents.models import OllamaModel
 from agents.ros import Topic, Launcher
 
-# Define input and output topics (pay attention to msg_type)
+# 1. Define input and output topics
 text0 = Topic(name="text0", msg_type="String")
 image0 = Topic(name="image_raw", msg_type="Image")
 text1 = Topic(name="text1", msg_type="String")
 
-# Define a model client (working with Ollama in this case)
-# OllamaModel is a generic wrapper for all Ollama models
-llava = OllamaModel(name="llava", checkpoint="llava:latest")
-llava_client = OllamaClient(llava)
+# 2. Define a model client (e.g., Qwen via Ollama)
+qwen_vl = OllamaModel(name="qwen_vl", checkpoint="qwen2.5vl:latest")
+qwen_client = OllamaClient(qwen_vl)
 
-# Define a VLM component (A component represents a node with a particular functionality)
-mllm = VLM(
+# 3. Define a VLM component
+# A component represents a node with specific functionality
+vlm = VLM(
     inputs=[text0, image0],
     outputs=[text1],
-    model_client=llava_client,
+    model_client=qwen_client,
     trigger=text0,
     component_name="vqa"
 )
-# Additional prompt settings
-mllm.set_topic_prompt(text0, template="""You are an amazing and funny robot.
+
+# 4. Set the prompt template
+vlm.set_topic_prompt(text0, template="""You are an amazing and funny robot.
     Answer the following about this image: {{ text0 }}"""
 )
-# Launch the component
+
+# 5. Launch the agent
 launcher = Launcher()
-launcher.add_pkg(components=[mllm])
+launcher.add_pkg(components=[vlm])
 launcher.bringup()
 ```
 
-And just like that we have an agent that can answer questions like **'What do you see?'**. Checkout the [Quick Start Guide](https://automatika-robotics.github.io/embodied-agents/quickstart.html) to learn more about how components and models work together.
+> **Note:** Check out the [Quick Start Guide](https://automatika-robotics.github.io/embodied-agents/quickstart.html) or dive into [Example Recipes](https://automatika-robotics.github.io/embodied-agents/examples/foundation/index.html) for more details.
 
-## Complex Physical Agents
+---
 
-The quickstart example above is just an amuse-bouche of what is possible with _EmbodiedAgents_. In _EmbodiedAgents_ we can create arbitrarily sophisticated component graphs. And furthermore our system can be configured to even change or reconfigure itself based on events internal or external to the system. Check out the code for the following agent [here](https://automatika-robotics.github.io/embodied-agents/examples/foundation/complete.html).
+## Complex Component Graphs
 
+The quickstart example above is just an amuse-bouche of what is possible with _EmbodiedAgents_. We can create arbitrarily sophisticated component graphs and configure the system to change or reconfigure itself based on events, both internal or external to the system. Check out the code for the following agent [here](https://automatika-robotics.github.io/embodied-agents/examples/foundation/complete.html).
+
+<div align="center">
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/_static/complete_dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="docs/_static/complete_light.png">
-  <img alt="Elaborate Agent" src="docs/_static/complete_dark.png">
+<source media="(prefers-color-scheme: dark)" srcset="docs/_static/complete_dark.png">
+<source media="(prefers-color-scheme: light)" srcset="docs/_static/complete_light.png">
+<img alt="Elaborate Agent" src="docs/_static/complete_dark.png" width="80%">
 </picture>
+</div>
 
-## Dynamic Web UI for EmbodiedAgent Recipes
+## Dynamic Web UI
 
-Leveraging the power of the underlying [**Sugarcoat**](https://github.com/automatika-robotics/sugarcoat) framework, **_EmbodiedAgents_** offers a **fully dynamic, auto-generated Web UI** for every recipe. This feature is built with **FastHTML** and eliminates manual GUI development, instantly providing a responsive interface for control and visualization.
+Every agent recipe generates a **fully dynamic Web UI** automatically. Built with FastHTML, it provides instant control and visualization without writing a single line of frontend code.
 
-The UI automatically creates:
-
-- Settings interfaces for all the components used in the recipe.
-- Real-time data visualizations and controls for component inputs/outputs.
-- WebSocket-based data streaming for all supported message types.
-
-### Example: VLM Agent UI
-
-A full interface is automatically generated for a VLM Q\&A agent (similat to the Quick Start example), providing simple controls for settings and displaying real-time text input/output.
-
-<p align="center">
-<picture align="center">
-  <img alt="EmbodiedAgents UI Example GIF" src="docs/_static/agents_ui.gif" width="60%">
+<div align="center">
+<picture>
+<img alt="EmbodiedAgents UI Example GIF" src="docs/_static/ui_agents.gif" width="70%">
 </picture>
-</p>
+</div>
 
-## Copyright
+---
 
-The code in this distribution is Copyright (c) 2024 [Automatika Robotics](https://automatikarobotics.com/) unless explicitly indicated otherwise.
+## Installation
 
-_EmbodiedAgents_ is made available under the MIT license. Details can be found in the [LICENSE](LICENSE) file.
+To get **EmbodiedAgents** up and running, follow these steps in order.
 
-## Contributions
+### 1. Pre-Requisite: Model Serving Platform
 
-_EmbodiedAgents_ has been developed in collaboration between [Automatika Robotics](https://automatikarobotics.com/) and [Inria](https://inria.fr/). Contributions from the community are most welcome.
+*EmbodiedAgents* is agnostic to model serving platforms. You must have one of the following installed:
+
+* **[Ollama](https://ollama.com)** (Recommended for local inference)
+* **[RoboML](https://github.com/automatika-robotics/robo-ml)**
+* **OpenAI Compatible APIs** (e.g., [llama.cpp](https://github.com/ggml-org/llama.cpp), [vLLM](https://github.com/vllm-project/vllm), [SGLang](https://github.com/sgl-project/sglang))
+* **[LeRobot](https://github.com/huggingface/lerobot)** (For VLA models)
+
+> **Note:** You can skip this if using a cloud service like HuggingFace inference endpoints.
+
+---
+
+### 2. Standard Installation (Ubuntu/Debian)
+
+For ROS versions **Humble** or newer.
+
+**Option A: Using `apt` (Recommended)**
+
+```bash
+sudo apt install ros-$ROS_DISTRO-automatika-embodied-agents
+```
+
+**Option B: Using `.deb` package**
+
+1. Download from the [Release Page](https://github.com/automatika-robotics/embodied-agents/releases).
+2. Install the package:
+
+```bash
+sudo dpkg -i ros-$ROS_DISTRO-automatica-embodied-agents_$version$DISTRO_$ARCHITECTURE.deb
+```
+
+**Requirement:** Ensure your `attrs` version is up to date:
+
+```bash
+pip install 'attrs>=23.2.0'
+```
+
+---
+
+### 3. Advanced Installation (From Source)
+
+Use this method if you want to get the nightly version or plan to contribute to the project.
+
+**Step 1: Install Dependencies**
+
+```bash
+pip install numpy opencv-python-headless 'attrs>=23.2.0' jinja2 \
+            httpx setproctitle msgpack msgpack-numpy \
+            platformdirs tqdm websockets
+```
+
+**Step 2: Clone and Build**
+
+```bash
+# Clone Sugarcoat dependency
+git clone https://github.com/automatika-robotics/sugarcoat
+
+# Clone and build EmbodiedAgents
+git clone https://github.com/automatika-robotics/embodied-agents.git
+cd ..
+colcon build
+source install/setup.bash
+```
+
+---
+
+## Resources
+
+- [Installation Instructions](https://automatika-robotics.github.io/embodied-agents/installation.html)
+- [Quickstart Guide](https://automatika-robotics.github.io/embodied-agents/quickstart.html)
+- [Basic Concepts](https://automatika-robotics.github.io/embodied-agents/basics/components.html)
+- [Example Recipes](https://automatika-robotics.github.io/embodied-agents/examples/foundation/index.html)
+
+## Copyright & Contributions
+
+**EmbodiedAgents** is a collaboration between [Automatika Robotics](https://automatikarobotics.com/) and [Inria](https://inria.fr/).
+
+The code is available under the **MIT License**. See [LICENSE](https://www.google.com/search?q=LICENSE) for details.
+Copyright (c) 2024 Automatika Robotics unless explicitly indicated otherwise.

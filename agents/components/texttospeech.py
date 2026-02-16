@@ -470,7 +470,6 @@ class TextToSpeech(ModelComponent):
             self.get_logger().debug("Thread terminated.")
 
     @component_action
-    @validate_func_args
     def say(self, text: str):
         """
             Say the input text.

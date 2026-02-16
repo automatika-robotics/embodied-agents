@@ -26,8 +26,8 @@ speech_to_text = SpeechToText(
 image0 = Topic(name="image_raw", msg_type="Image")
 text_answer = Topic(name="text1", msg_type="String")
 
-llava = OllamaModel(name="llava", checkpoint="llava:latest")
-llava_client = OllamaClient(llava)
+qwen_vl = OllamaModel(name="qwen_vl", checkpoint="qwen2.5vl:latest")
+qwen_client = OllamaClient(qwen_vl)
 mllm_config = MLLMConfig(
     stream=True
 )  # Other inference specific paramters can be provided here
@@ -35,7 +35,7 @@ mllm_config = MLLMConfig(
 mllm = MLLM(
     inputs=[text_query, image0],
     outputs=[text_answer],
-    model_client=llava_client,
+    model_client=qwen_client,
     trigger=text_query,
     config=mllm_config,
     component_name="vqa",

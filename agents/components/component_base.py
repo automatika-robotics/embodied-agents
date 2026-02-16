@@ -42,7 +42,7 @@ class Component(BaseComponent):
 
         # setup inputs and outputs
         if inputs:
-            self.validate_topics(
+            self._validate_topics(
                 inputs,
                 allowed_topic_types=self.allowed_inputs,
                 topics_direction="Inputs",
@@ -50,7 +50,7 @@ class Component(BaseComponent):
 
         if outputs:
             if hasattr(self, "allowed_outputs"):
-                self.validate_topics(
+                self._validate_topics(
                     outputs,
                     allowed_topic_types=self.allowed_outputs,
                     topics_direction="Outputs",
@@ -67,7 +67,13 @@ class Component(BaseComponent):
         )
 
         # setup component run type and triggers
-        self.trigger(trigger)
+        self._trigger(trigger)
+
+    def custom_on_configure(self):
+        """Custom configurateion in case trigger is an event"""
+        if isinstance(self.trig_source, Event):
+            self.get_logger().info("ADDING TRIGGER EVENT/ACTION PAIR")
+            self._add_event_action_pair(self.trig_source, Action(self._execution_step))
 
     def custom_on_activate(self):
         """
@@ -100,8 +106,9 @@ class Component(BaseComponent):
         """
         Activates component triggers by attaching execution step to callbacks
         """
-        self.get_logger().info("ACTIVATING TRIGGER TOPICS")
+        # For topic triggers
         if hasattr(self, "trig_callbacks"):
+            self.get_logger().info("ACTIVATING TRIGGER TOPICS")
             for callback in self.trig_callbacks.values():
                 # Add execution step of the node as a post callback function
                 callback.on_callback_execute(self._execution_step, get_processed=False)
@@ -120,7 +127,7 @@ class Component(BaseComponent):
             if callback._subscriber:
                 self.destroy_subscription(callback._subscriber)
 
-    def trigger(self, trigger: Union[Topic, List[Topic], float, Event, None]) -> None:
+    def _trigger(self, trigger: Union[Topic, List[Topic], float, Event, None]) -> None:
         """
         Set component trigger
         """
@@ -144,9 +151,9 @@ class Component(BaseComponent):
             self.run_type = ComponentRunType.EVENT
             self.trig_callbacks = {trigger.name: self.callbacks[trigger.name]}
             del self.callbacks[trigger.name]
+
         elif isinstance(trigger, Event):
             self.run_type = ComponentRunType.EVENT
-            self._add_event_action_pair(trigger, Action(self._execution_step))
 
         elif trigger is None:
             if self.run_type not in [
@@ -162,9 +169,9 @@ class Component(BaseComponent):
             # Set component loop_rate (Hz)
             self.config.loop_rate = 1 / trigger
 
-        self.trig_topic: Union[Topic, List[Topic], float, Event, None] = trigger
+        self.trig_source: Union[Topic, List[Topic], float, Event, None] = trigger
 
-    def validate_topics(
+    def _validate_topics(
         self,
         topics: Sequence[Union[Topic, FixedInput]],
         allowed_topic_types: Optional[
@@ -256,19 +263,19 @@ class Component(BaseComponent):
         :rtype:  str | bytes | bytearray
         """
         serialized_trigger = {}
-        if isinstance(self.trig_topic, Topic):
+        if isinstance(self.trig_source, Topic):
             serialized_trigger["trigger_type"] = "Topic"
-            serialized_trigger["trigger"] = self.trig_topic.to_json()
-        elif isinstance(self.trig_topic, List):
+            serialized_trigger["trigger"] = self.trig_source.to_json()
+        elif isinstance(self.trig_source, List):
             serialized_trigger["trigger_type"] = "List"
             serialized_trigger["trigger"] = json.dumps([
-                t.to_json() for t in self.trig_topic
+                t.to_json() for t in self.trig_source
             ])
-        elif isinstance(self.trig_topic, Event):
+        elif isinstance(self.trig_source, Event):
             serialized_trigger["trigger_type"] = "Event"
-            serialized_trigger["trigger"] = self.trig_topic.json
+            serialized_trigger["trigger"] = self.trig_source.to_json()
         else:
-            serialized_trigger = self.trig_topic
+            serialized_trigger = self.trig_source
         return json.dumps(serialized_trigger)
 
     def _replace_input_topic(

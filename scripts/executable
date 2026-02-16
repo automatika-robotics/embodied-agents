@@ -22,7 +22,6 @@ from agents.ros import (
     QoSConfig,
     SupportedType,
     Event,
-    events,
 )
 
 
@@ -162,7 +161,6 @@ def _parse_trigger(
 
     # Deserialize main dict or float value
     trigger_deserialized = json.loads(trigger_str)
-    print(trigger_deserialized)
     if isinstance(trigger_deserialized, Dict):
         # Deserialize internal trigger content
         if trigger_deserialized["trigger_type"] == "List":
@@ -174,7 +172,7 @@ def _parse_trigger(
         elif trigger_deserialized["trigger_type"] == "Topic":
             return Topic(**json.loads(trigger_deserialized["trigger"]))
         elif trigger_deserialized["trigger_type"] == "Event":
-            return events.event_from_json(trigger_deserialized["trigger"])
+            return Event.from_json(trigger_deserialized["trigger"])
     else:
         # return float or None
         return trigger_deserialized
@@ -369,10 +367,10 @@ def main():
             db_client=db_client,
             model_client=model_client,
             config=config,
-            default_route=config._default_route,
             component_name=component_name,
             config_file=config_file,
-        )
+        )  # we dont pass default route here as its already part of the config
+    # and will be set from there
     # Map Encoding Component
     elif component_type == all_components.MapEncoding.__name__:
         db_client_json = json.loads(args.db_client)

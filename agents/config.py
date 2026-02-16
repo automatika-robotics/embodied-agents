@@ -3,7 +3,7 @@ from pathlib import Path
 
 from attrs import define, field, Factory, validators
 
-from .ros import base_validators, BaseComponentConfig, Topic, Route
+from .ros import base_validators, BaseComponentConfig, Topic
 from .utils import validate_kwargs_from_default, _LANGUAGE_CODES
 
 __all__ = [
@@ -27,14 +27,6 @@ def _get_optional_topic(topic: Union[Topic, Dict]) -> Optional[Topic]:
     if isinstance(topic, Topic):
         return topic
     return Topic(**topic)
-
-
-def _get_optional_route(route: Union[Route, Dict]) -> Optional[Route]:
-    if not route:
-        return
-    if isinstance(route, Route):
-        return route
-    return Route(**route)
 
 
 @define(kw_only=True)
@@ -108,7 +100,7 @@ class LLMConfig(ModelComponentConfig):
         default=10, validator=base_validators.gt(4)
     )  # number of user messages
     temperature: float = field(default=0.8, validator=base_validators.gt(0.0))
-    max_new_tokens: int = field(default=100, validator=base_validators.gt(0))
+    max_new_tokens: int = field(default=500, validator=base_validators.gt(0))
     stream: bool = field(default=False)
     break_character: str = field(default=".")
     response_terminator: str = field(default="<<Response Ended>>")
@@ -125,9 +117,8 @@ class LLMConfig(ModelComponentConfig):
     _tool_response_flags: Dict[str, bool] = field(
         default=Factory(dict), alias="_tool_response_flags"
     )
-    _default_route: Optional[Union[Route, Dict]] = field(
-        default=None, converter=_get_optional_route, alias="_default_route"
-    )  # Only used when LLM is used as a router
+    # Only used when LLM is used as a router
+    _default_route: Optional[str] = field(default=None, alias="_default_route")
 
     @response_terminator.validator
     def _not_empty(self, _, value):
@@ -222,7 +213,56 @@ VLMConfig = MLLMConfig
 @define(kw_only=True)
 class VLAConfig(ModelComponentConfig):
     """
-    Configuration for the Vision-Language-Agent (VLA) component.
+    Configuration for the Vision-Language-Action (VLA) component.
+
+    It defines settings that control how the VLA component maps sensor inputs to the model,
+    manages the frequency of observation and action loops, and enforces safety constraints
+    through URDF limits.
+
+    :param joint_names_map: A dictionary mapping the joint names expected by the model
+        (keys) to the actual joint names in the robot's URDF/ROS system (values).
+    :type joint_names_map: Dict[str, str]
+    :param camera_inputs_map: A mapping of camera names expected by the model (keys)
+        to the corresponding ROS topics (values).
+    :type camera_inputs_map: Mapping[str, Union[Topic, Dict]]
+    :param state_input_type: The type of state data to extract from the joint state inputs.
+        Supported values are "positions", "velocities", "accelerations", and "efforts".
+        Default is "positions".
+    :type state_input_type: Literal["positions", "velocities", "accelerations", "efforts"]
+    :param action_output_type: The type of action data to publish to the robot controller.
+        Supported values are "positions", "velocities", "accelerations", and "efforts".
+        Default is "positions".
+    :type action_output_type: Literal["positions", "velocities", "accelerations", "efforts"]
+    :param observation_sending_rate: The frequency (in Hz) at which observations are
+        captured and sent to the model for inference. Default is 10.0 Hz.
+    :type observation_sending_rate: float
+    :param action_sending_rate: The frequency (in Hz) at which action commands are
+        published to the robot's controllers. Default is 10.0 Hz.
+    :type action_sending_rate: float
+    :param input_timeout: The maximum time (in seconds) to wait for all required inputs
+        (joints, images) to become available before aborting an action after an action request.
+        Default is 30.0s.
+    :type input_timeout: float
+    :param robot_urdf_file: Path to the robot's URDF file. This is strongly recommended
+        for safety, as it allows the component to read joint limits and cap generated
+        actions within safe bounds.
+    :type robot_urdf_file: Optional[str]
+    :param joint_limits: A manual dictionary of joint limits to be used if a URDF file
+        is not provided. Format should match parsed URDF limits.
+    :type joint_limits: Optional[Dict]
+
+    Example of usage:
+    ```python
+    joints_map = {"shoulder_pan": "joint1", "elbow_flex": "joint2"}
+    camera_map = {"front_view": camera_topic}
+
+    config = VLAConfig(
+        joint_names_map=joints_map,
+        camera_inputs_map=camera_map,
+        observation_sending_rate=5.0,
+        robot_urdf_file="/path/to/robot.urdf"
+    )
+    ```
     """
 
     joint_names_map: Dict[str, str] = field()
@@ -633,10 +673,10 @@ class MapConfig(BaseComponentConfig):
 
     map_name: str = field()
     distance_func: Literal["l2", "ip", "cosine"] = field(default="l2")
-    _position: Optional[Union[Topic, Dict]] = field(
+    _position: Optional[Topic] = field(
         default=None, converter=_get_optional_topic, alias="_position"
     )
-    _map_topic: Optional[Union[Topic, Dict]] = field(
+    _map_topic: Optional[Topic] = field(
         default=None, converter=_get_optional_topic, alias="_map_topic"
     )
 
@@ -665,9 +705,7 @@ class SemanticRouterConfig(ModelComponentConfig):
     maximum_distance: float = field(
         default=0.4, validator=base_validators.in_range(min_value=0.1, max_value=1.0)
     )
-    _default_route: Optional[Union[Route, Dict]] = field(
-        default=None, converter=_get_optional_route, alias="_default_route"
-    )
+    _default_route: Optional[str] = field(default=None, alias="_default_route")
 
     def _get_inference_params(self):
         """Dummy method to avoid check if semantic router is used in vector mode"""

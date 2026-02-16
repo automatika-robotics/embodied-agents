@@ -30,12 +30,8 @@ whisper = Whisper(name="whisper")
 whisper_client = RoboMLHTTPClient(whisper)
 speecht5 = SpeechT5(name="speecht5")
 speecht5_client = RoboMLHTTPClient(speecht5)
-object_detection_model = VisionModel(
-    name="dino_4scale", checkpoint="dino-4scale_r50_8xb2-12e_coco"
-)
-detection_client = RoboMLRESPClient(object_detection_model)
-llava = OllamaModel(name="llava", checkpoint="llava:latest")
-llava_client = OllamaClient(llava)
+qwen_vl = OllamaModel(name="qwen_vl", checkpoint="qwen2.5vl:latest")
+qwen_client = OllamaClient(qwen_vl)
 llama = OllamaModel(name="llama", checkpoint="llama3.2:3b")
 llama_client = OllamaClient(llama)
 chroma = ChromaDB()
@@ -71,13 +67,12 @@ text_to_speech = TextToSpeech(
 image0 = Topic(name="image_raw", msg_type="Image")
 detections_topic = Topic(name="detections", msg_type="Detections")
 
-detection_config = VisionConfig(threshold=0.5)
+detection_config = VisionConfig(threshold=0.5, enable_local_classifier=True)
 vision = Vision(
     inputs=[image0],
     outputs=[detections_topic],
     trigger=image0,
     config=detection_config,
-    model_client=detection_client,
     component_name="object_detection",
 )
 
@@ -87,7 +82,7 @@ mllm_query = Topic(name="mllm_query", msg_type="String")
 mllm = MLLM(
     inputs=[mllm_query, image0, detections_topic],
     outputs=[query_answer],
-    model_client=llava_client,
+    model_client=qwen_client,
     trigger=mllm_query,
     component_name="visual_q_and_a",
 )
@@ -109,7 +104,7 @@ introspection_answer = Topic(name="introspection_answer", msg_type="String")
 introspector = MLLM(
     inputs=[introspection_query, image0],
     outputs=[introspection_answer],
-    model_client=llava_client,
+    model_client=qwen_client,
     trigger=15.0,
     component_name="introspector",
 )
@@ -283,13 +278,13 @@ In this small code block above, we have setup a fairly sophisticated embodied ag
 
 We can visualize the complete graph in the following diagram:
 ```{figure} ../../_static/complete_dark.png
-:class: only-dark
+:class: dark-only
 :alt: Complete embodied agent
 :align: center
-Complete embodied agent graph
+
 ```
 ```{figure} ../../_static/complete_light.png
-:class: only-light
+:class: light-only
 :alt: Complete embodied agent
 :align: center
 Complete embodied agent graph

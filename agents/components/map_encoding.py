@@ -304,7 +304,7 @@ class MapEncoding(Component):
         self.layers_dict = {layer.subscribes_to.name: layer for layer in layers}
         layer_topics = [layer.subscribes_to for layer in layers]
         all_inputs = [*layer_topics, self.config._position, self.config._map_topic]
-        self.validate_topics(all_inputs, self.allowed_inputs, "Inputs")
+        self._validate_topics(all_inputs, self.allowed_inputs, "Inputs")
         self.callbacks = {
             input.name: input.msg_type.callback(input) for input in all_inputs
         }

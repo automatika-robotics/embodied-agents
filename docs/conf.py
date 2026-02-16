@@ -3,8 +3,11 @@ import os
 import sys
 from datetime import date
 import xml.etree.ElementTree as ET
-import shutil
 from pathlib import Path
+
+# Flag to signal that we are building documentation.
+# This prevents __init__.py from running runtime dependency checks.
+os.environ["AGENTS_DOCS_BUILD"] = "1"
 
 sys.path.insert(0, os.path.abspath(".."))
 version = ET.parse("../package.xml").getroot()[1].text
@@ -22,6 +25,7 @@ extensions = [
     "autodoc2",  # install with `pip install sphinx-autodoc2`
     "myst_parser",  # install with `pip install myst-parser`
     "sphinx_sitemap",  # install with `pip install sphinx-sitemap`
+    "sphinx_design",  # install with `pip install sphinx-design`
 ]
 
 autodoc2_packages = [
@@ -79,39 +83,25 @@ myst_heading_anchors = 7  # to remove cross reference errors with md
 
 html_baseurl = "https://automatika-robotics.github.io/embodied-agents/"
 language = "en"
-html_theme = "sphinx_book_theme"  # install with `pip install sphinx-book-theme`
+html_theme = "shibuya"  # install with `pip install shibuya`
 html_static_path = ["_static"]
 html_css_files = ["custom.css"]
 html_favicon = "_static/favicon.png"
+
 html_theme_options = {
-    "logo": {
-        "image_light": "_static/EMBODIED_AGENTS_LIGHT.png",
-        "image_dark": "_static/EMBODIED_AGENTS_DARK.png",
-    },
-    "icon_links": [
-        {
-            "name": "Automatika",
-            "url": "https://automatikarobotics.com/",
-            "icon": "_static/automatika-logo.png",
-            "type": "local",
-        },
-        {
-            "name": "GitHub",
-            "url": "https://github.com/automatika-robotics/embodied-agents",
-            "icon": "fa-brands fa-github",
-        },
-        {
-            "name": "Discord",
-            "url": "https://discord.gg/B9ZU6qjzND",
-            "icon": "fa-brands fa-discord",
-        },
+    "light_logo": "_static/EMBODIED_AGENTS_LIGHT.png",
+    "dark_logo": "_static/EMBODIED_AGENTS_DARK.png",
+    "accent_color": "indigo",
+    "twitter_url": "https://x.com/__automatika__",
+    "github_url": "https://github.com/automatika-robotics/embodied-agents",
+    "discord_url": "https://discord.gg/B9ZU6qjzND",
+    "globaltoc_expand_depth": 1,
+    "open_in_chatgpt": True,
+    "open_in_claude": True,
+    # Navigation Links (Top bar)
+    "nav_links": [
+        {"title": "Automatika Robotics", "url": "https://automatikarobotics.com/"},
     ],
-    "path_to_docs": "docs",
-    "repository_url": "https://github.com/automatika-robotics/embodied-agents",
-    "repository_branch": "main",
-    "use_source_button": True,
-    "use_issues_button": True,
-    "use_edit_page_button": True,
 }
 
 # --- LLMS.TXT CONFIGURATION ---
@@ -125,6 +115,7 @@ LLMS_TXT_SELECTION = [
     "basics/clients.md",
     "basics/models.md",
     # Examples - Increasing complexity
+    "examples/foundation/index.md",
     "examples/foundation/conversational.md",
     "examples/foundation/prompt_engineering.md",
     "examples/foundation/semantic_router.md",
@@ -132,9 +123,11 @@ LLMS_TXT_SELECTION = [
     "examples/foundation/semantic_map.md",
     "examples/foundation/tool_calling.md",
     "examples/foundation/complete.md",
-    "examples/foundation/planning_model.md",
-    "examples/foundation/vla.md",
-    "examples/foundation/vla_with_event.md",
+    "examples/planning_control/index.md",
+    "examples/planning_control/planning_model.md",
+    "examples/planning_control/vla.md",
+    "examples/planning_control/vla_with_event.md",
+    "examples/events/index.md",
     "examples/events/multiprocessing.md",
     "examples/events/fallback.md",
     "examples/events/event_driven_description.md",
@@ -163,11 +156,20 @@ def generate_llms_txt(app, exception):
     full_text = []
 
     # Add Preamble
-    preamble = (
-        "# EmbodiedAgents Documentation\n\n"
-        "The following text contains the documentation for the EmbodiedAgents framework "
-        "by Automatika Robotics. It is optimized for context ingestion.\n\n"
-    )
+    preamble = """You are an expert robotics software engineer and developer assistant for **EmbodiedAgents**, a production-grade Physical AI framework built on ROS2 by Automatika Robotics.
+
+You have been provided with the official EmbodiedAgents documentation, which includes basic concepts, API details, and example recipes. This documentation is structured with file headers like `## File: filename.md`.
+
+Your primary task is to answer user questions, explain concepts, and write code strictly based on the provided documentation context.
+
+Follow these rules rigorously:
+1. **Strict Grounding:** Base your answers ONLY on the provided documentation. Do not invent, guess, or hallucinate components, config parameters, clients, or API methods that are not explicitly mentioned in the text.
+2. **Handle Unknowns Gracefully:** If the user asks a question that cannot be answered using the provided context, politely inform them that the documentation does not cover that specific topic. Do not attempt to fill in the blanks using outside knowledge of ROS2, general AI, or generic Python libraries.
+3. **Write Idiomatic Code:** When providing code examples, strictly follow the patterns shown in the recipes. Ensure accurate imports (e.g., `from agents.components import ...`, `from agents.ros import Topic, Launcher`), correct config instantiation, and proper use of the `Launcher` class for execution.
+4. **Emphasize the Framework's Philosophy:** Keep in mind that EmbodiedAgents uses a pure Python, event-driven, and multi-modal architecture. Emphasize modularity, self-referential design (Gödel machines), and production-readiness (fallback mechanisms, multiprocessing) where relevant.
+5. **Cite Your Sources:** When explaining a concept or providing a solution, briefly mention the file or recipe (e.g., "According to the `basics/components.md` guide..." or "As seen in the `vla.md` recipe...") so the user knows where to read more.
+
+Think step-by-step before answering. Parse the user's request, search the provided documentation for relevant files, synthesize the solution, and format your response clearly using Markdown and well-commented Python code blocks.\n\n"""
     full_text.append(preamble)
 
     # Process Manual Docs (Curated List)
@@ -189,27 +191,6 @@ def generate_llms_txt(app, exception):
         print(f"[llms.txt] Error writing file: {e}")
 
 
-def copy_markdown_files(app, exception):
-    """Copy source markdown files"""
-    if exception is None:  # Only run if build succeeded
-        # Source dir is where your .md files are
-        src_dir = app.srcdir  # This points to your `source/` folder
-        dst_dir = app.outdir  # This is typically `build/html`
-
-        for root, _, files in os.walk(src_dir):
-            for file in files:
-                if file.endswith(".md"):
-                    src_path = os.path.join(root, file)
-                    # Compute path relative to the source dir
-                    rel_path = os.path.relpath(src_path, src_dir)
-                    # Destination path inside the build output
-                    dst_path = os.path.join(dst_dir, rel_path)
-
-                    # Make sure the target directory exists
-                    os.makedirs(os.path.dirname(dst_path), exist_ok=True)
-                    shutil.copy2(src_path, dst_path)
-
-
 def create_robots_txt(app, exception):
     """Create robots.txt file to take advantage of sitemap crawl"""
     if exception is None:
@@ -225,6 +206,5 @@ Sitemap: {html_baseurl}/sitemap.xml
 
 def setup(app):
     """Plugin to post build and copy markdowns as well"""
-    app.connect("build-finished", copy_markdown_files)
     app.connect("build-finished", create_robots_txt)
     app.connect("build-finished", generate_llms_txt)

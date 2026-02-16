@@ -91,24 +91,25 @@ text1 = Topic(name="text1", msg_type="String")
 
 # Define a model client (working with Ollama in this case)
 # OllamaModel is a generic wrapper for all Ollama models
-llava = OllamaModel(name="llava", checkpoint="llava:latest")
-llava_client = OllamaClient(llava)
+qwen_vl = OllamaModel(name="qwen_vl", checkpoint="qwen2.5vl:latest")
+qwen_client = OllamaClient(qwen_vl)
 
 # Define a VLM component (A component represents a node with a particular functionality)
-mllm = VLM(
+vlm = VLM(
     inputs=[text0, image0],
     outputs=[text1],
-    model_client=llava_client,
-    trigger=[text0],
+    model_client=qwen_client,
+    trigger=text0,
     component_name="vqa"
 )
 # Additional prompt settings
-mllm.set_topic_prompt(text0, template="""You are an amazing and funny robot.
+vlm.set_topic_prompt(text0, template="""You are an amazing and funny robot.
     Answer the following about this image: {{ text0 }}"""
 )
+
 # Launch the component
 launcher = Launcher()
-launcher.add_pkg(components=[mllm])
+launcher.add_pkg(components=[vlm])
 launcher.bringup()
 ```
 
@@ -141,7 +142,7 @@ VLM Q&Aエージェント（クイックスタート例と類似）のための�
 
 <p align="center">
 <picture align="center">
-  <img alt="EmbodiedAgents UI Example GIF" src="docs/_static/agents_ui.gif" width="60%">
+  <img alt="EmbodiedAgents UI Example GIF" src="docs/_static/ui_agents.gif" width="60%">
 </picture>
 </p>
 

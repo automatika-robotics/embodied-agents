@@ -18,32 +18,55 @@ These recipes cover the journey from a basic multimodal conversational agent to 
 
 ## Recipes
 
-- **[A Simple Conversational Agent](conversational.md)**
-  Build your first "Hello World" agent that uses **STT**, **VLM** and **TTS** components to hold a simple dialogue multimodal dialogue, introducing the basics of component configuration and clients.
+::::{grid} 1 2 2 2
+:gutter: 3
 
-- **[Prompt Engineering](prompt_engineering.md)**
-  Learn how to use **templates** at the topic or component level to create dynamic, context-aware system prompts that guide your agent's behavior.
+:::{grid-item-card} {material-regular}`forum;1.2em;sd-text-primary` A Simple Conversational Agent
+:link: conversational
+:link-type: doc
 
-- **[Semantic Map](semantic_map.md)**
-  Utilize the **MapEncoding** component to give your robot a spatio-temporal working memory, allowing it to store and retrieve semantic information about its environment using a Vector DB.
+Build your first "Hello World" agent that uses **STT**, **VLM** and **TTS** components to hold a simple multimodal dialogue, introducing the basics of component configuration and clients.
+:::
 
-- **[GoTo X](goto.md)**
-  A navigation recipe that demonstrates how to connect language understanding with physical actuation, enabling the robot to move to locations based on natural language commands.
+:::{grid-item-card} {material-regular}`edit_note;1.2em;sd-text-primary` Prompt Engineering
+:link: prompt_engineering
+:link-type: doc
 
-- **[Tool Calling](tool_calling.md)**
-  Empower your agent to act on the world by giving the **LLM** access to executable functions (tools), enabling it to perform tasks beyond simple text generation.
+Learn how to use **templates** at the topic or component level to create dynamic, context-aware system prompts that guide your agent's behavior.
+:::
 
-- **[Semantic Routing](semantic_router.md)**
-  Implement intelligent control flow using the **SemanticRouter**, which directs messages to different graph branches based on their meaning rather than hard-coded topic connections.
+:::{grid-item-card} {material-regular}`map;1.2em;sd-text-primary` Semantic Map
+:link: semantic_map
+:link-type: doc
 
-- **[A Complete Agent](complete.md)**
-  An end-to-end example that combines perception, memory, and reasoning components into a cohesive, fully embodied system.
+Utilize the **MapEncoding** component to give your robot a spatio-temporal working memory, allowing it to store and retrieve semantic information about its environment using a Vector DB.
+:::
 
-- **[Utilizing Multimodal Planning](planning_model.md)**
-  Configure a specific **VLM** to act as a high-level planner, decomposing complex user instructions into a sequence of executable low-level actions.
+:::{grid-item-card} {material-regular}`directions_walk;1.2em;sd-text-primary` GoTo X
+:link: goto
+:link-type: doc
 
-- **[Robot Manipulation](vla.md)**
-  Control physical actuators using end-to-end Vision Language Action (VLA) models. This recipe demonstrates how to use the VLA component and LeRobot policies to map visual inputs directly to robot joint commands.
+A navigation recipe that demonstrates how to connect language understanding with physical actuation, enabling the robot to move to locations based on natural language commands.
+:::
 
-- **[Event Driven Robot Manipulation](vla_with_event.md)**
-  Build a closed-loop agent where a VLM acts as a referee for a VLA. This recipe demonstrates how to use Events to automatically stop physical actions based on visual verification of task completion.
+:::{grid-item-card} {material-regular}`build;1.2em;sd-text-primary` Tool Calling
+:link: tool_calling
+:link-type: doc
+
+Empower your agent to act on the world by giving the **LLM** access to executable functions (tools), enabling it to perform tasks beyond simple text generation.
+:::
+
+:::{grid-item-card} {material-regular}`alt_route;1.2em;sd-text-primary` Semantic Routing
+:link: semantic_router
+:link-type: doc
+
+Implement intelligent control flow using the **SemanticRouter**, which directs messages to different graph branches based on their meaning rather than hard-coded topic connections.
+:::
+
+:::{grid-item-card} {material-regular}`smart_toy;1.2em;sd-text-primary` A Complete Agent
+:link: complete
+:link-type: doc
+
+An end-to-end example that combines perception, memory, and reasoning components into a cohesive, fully embodied system.
+:::
+::::

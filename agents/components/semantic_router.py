@@ -1,4 +1,4 @@
-from typing import Optional, List, Union, Dict, Callable
+from typing import Optional, List, Union, Dict, Callable, cast
 import json
 from pathlib import Path
 from enum import Enum
@@ -6,7 +6,7 @@ from enum import Enum
 from ..clients.db_base import DBClient
 from ..clients.model_base import ModelClient
 from ..config import SemanticRouterConfig, LLMConfig
-from ..ros import String, Topic, Route, get_logger
+from ..ros import String, Topic, Route, get_logger, Event, Action
 from ..utils import validate_func_args
 from .llm import LLM
 
@@ -108,12 +108,11 @@ class SemanticRouter(LLM):
 
         # Prepare output topics
         self.routes_dict: Dict[str, Route] = {}
-        route_topics: List[Topic] = []
-        for route in routes:
-            self.routes_dict[route.routes_to.name] = route
-            route_topics.append(route.routes_to)
+        self._action_routes: Dict[Event, Union[Action, List[Action]]] = {}
+        topic_routes: List[Topic] = self._config_routes(inputs, routes, component_name)
 
-        self.validate_topics(route_topics, self.allowed_outputs, "Outputs")
+        # validate outputs, inputs will be validated in parent
+        self._validate_topics(topic_routes, self.allowed_outputs, "Outputs")
 
         # Determine operation mode
         if model_client:
@@ -154,7 +153,7 @@ class SemanticRouter(LLM):
         # Create the parent, db client would be created in the parent
         super().__init__(
             inputs=inputs,
-            outputs=route_topics,
+            outputs=topic_routes,
             config=component_config
             if isinstance(component_config, LLMConfig)
             else None,
@@ -165,6 +164,10 @@ class SemanticRouter(LLM):
             **kwargs,
         )
 
+        # After super init we add any event/action pairs to component
+        for e, a in self._action_routes.items():
+            self._add_event_action_pair(e, a)
+
         # We keep an internal config as self.config is being used in LLM
         self._internal_config = (
             self.config if isinstance(component_config, LLMConfig) else component_config
@@ -172,19 +175,110 @@ class SemanticRouter(LLM):
 
         # Setup default route
         if default_route:
-            if default_route.routes_to.name not in self.routes_dict:
-                raise ValueError("default_route must be one of the specified routes")
-            self.default_route = self._internal_config._default_route = default_route
+            self._internal_config._default_route = self._get_route_name(
+                default_route.routes_to
+            )
+
+            # Check if the calculated name exists in our processed routes
+            if self._internal_config._default_route not in self.routes_dict:
+                raise ValueError(
+                    f"Default route '{self._internal_config._default_route}' must be one of the specified routes."
+                )
+
+        self.default_route = self._internal_config._default_route
 
         # Initialize internal state
         self._current_payload: Optional[str] = None
         self._route_funcs: Dict[str, Callable] = {}
 
+    def _get_route_name(
+        self, entity: Union[Topic, Action, List[Topic], List[Action]]
+    ) -> str:
+        """Helper to generate a unique string name for a route destination."""
+        if isinstance(entity, list):
+            # Sort to ensure consistent naming regardless of list order
+            # Recursive call is safe because we don't support mixed lists or nested lists
+            names = sorted([self._get_route_name(e) for e in entity])
+            return "_and_".join(names)
+        elif isinstance(entity, Topic):
+            return entity.name
+        elif isinstance(entity, Action):
+            return entity.action_name
+        raise ValueError(f"Unsupported route entity type: {type(entity)}")
+
+    def _config_routes(
+        self, inputs: List[Topic], routes: List[Route], component_name: str
+    ) -> List[Topic]:
+        """Configure routes"""
+        route_topics = []
+
+        for route in routes:
+            route_name = self._get_route_name(route.routes_to)
+
+            # Check for duplicate names
+            if route_name in self.routes_dict:
+                raise ValueError(
+                    f"Duplicate route detected: '{route_name}'. Routes must have unique destination names."
+                )
+
+            # Determine the type of the route target (Topic/List[Topic] OR Action/List[Action])
+            targets = (
+                route.routes_to
+                if isinstance(route.routes_to, list)
+                else [route.routes_to]
+            )
+
+            # Identify if this is a Topic route or an Action route based on the first element
+            is_action_route = isinstance(targets[0], Action)
+
+            # Sanity check for mixed types, should not be needed with attrs type check
+            if any(isinstance(t, Action) != is_action_route for t in targets):
+                raise ValueError(f"Route '{route_name}' cannot mix Topics and Actions.")
+
+            if is_action_route:
+                # Create event topic for action route and add to list
+                # augment action name to make it clear it's an internal topic
+                event_topic = Topic(
+                    name=f"internal_router_event/{component_name}/{route_name}",
+                    msg_type="String",
+                )
+                # Add new event topic to list which will be sent to create publishers
+                route_topics.append(event_topic)
+
+                # Create a new route based on the new topic
+                new_route = Route(routes_to=event_topic, samples=route.samples)
+                self.routes_dict[event_topic.name] = (
+                    new_route  # use the event topic name
+                )
+
+                # Create an OnAny event
+                event = Event(event_topic)
+
+                # Cast to actions to remove any type confusion
+                action_targets = cast(List[Action], targets)
+
+                # Replace any query topic inputs with event topic inputs for ALL actions
+                # This is necessary to reduce the delay for event triggering
+                for action in action_targets:
+                    for input in inputs:
+                        action.replace_input_topic(input, event_topic)
+
+                # Keep event action/list(action) pair to be added to component later
+                # Cast route.routes_to because the dict expects Action | List[Action]
+                self._action_routes[event] = cast(
+                    Union[Action, List[Action]], route.routes_to
+                )
+            else:
+                for topic in targets:
+                    # Add topic(s) to list which will be sent to create publishers
+                    route_topics.append(topic)
+
+                self.routes_dict[route_name] = route
+
+        return route_topics
+
     def custom_on_configure(self):
         self.get_logger().debug(f"Current Status: {self.health_status.value}")
-
-        # configure the rest
-        super().custom_on_configure()
 
         # initialize routes
         if self.routing_mode is RouterMode.LLM:
@@ -195,6 +289,10 @@ class SemanticRouter(LLM):
                 "SemanticRouter starting in VECTOR (Embedding) Mode."
             )
             self._initialize_vector_routes()
+
+        # NOTE: It is important to call super config AFTER setting routes as tools
+        # in case of agentic routing so that system prompt is set correctly
+        super().custom_on_configure()
 
     def custom_on_deactivate(self):
         """Deactivate component."""
@@ -242,12 +340,31 @@ class SemanticRouter(LLM):
             "based on the 'samples' provided in your Route objects."
         )
 
+    def _publish_to_route(self, route_name: str, payload: Optional[str]):
+        """Helper to publish payload to all topics associated with a route name."""
+        route = self.routes_dict.get(route_name)
+        if not route:
+            self.get_logger().error(
+                f"Attempted to publish to unknown route: {route_name}"
+            )
+            return
+
+        # route.routes_to here is guaranteed to be Topic or List[Topic]
+        # because _config_routes converts Actions to Event Topics.
+        targets = (
+            route.routes_to if isinstance(route.routes_to, list) else [route.routes_to]
+        )
+
+        for target in targets:
+            # We strictly expect Topics here (either external or internal event topics)
+            self.publishers_dict[target.name].publish(payload)
+
     def _initialize_vector_routes(self):
         """(VECTOR MODE) Create routes by saving route samples in the database."""
         self.get_logger().info("Initializing all routes in VECTOR MODE")
         for idx, (name, route) in enumerate(self.routes_dict.items()):
             route_to_add = {
-                "collection_name": self._internal_config.router_name,
+                "collection_name": self._internal_config.router_name,  # type: ignore
                 "distance_func": self._internal_config.distance_func,
                 "documents": route.samples,
                 "metadatas": [{"route_name": name} for _ in range(len(route.samples))],
@@ -263,7 +380,7 @@ class SemanticRouter(LLM):
         """(LLM MODE) Configure LLM as the router."""
         self.get_logger().info("Initializing all routes in LLM (Agentic) MODE")
         # If a system prompt has been set by the user, keep it
-        if self._internal_config._system_prompt:
+        if self._internal_config._system_prompt:  # type: ignore
             return
 
         # Define a strict system prompt
@@ -273,21 +390,19 @@ class SemanticRouter(LLM):
             "Do not respond with text. Only call functions."
         )
 
-        # Bypass the lock by calling the parent class implementation directly
-        super().set_system_prompt(system_prompt)
+        # Set it in the config
+        self._internal_config._system_prompt = system_prompt
 
-        for route in routes.values():
-            self._register_route_tool(route)
+        for name, route in routes.items():
+            self._register_route_tool(name, route)
 
-    def _register_route_tool(self, route: Route):
+    def _register_route_tool(self, route_name: str, route: Route):
         """Creates a tool and registers it via the parent class."""
-
-        route_name = route.routes_to.name
 
         # Tool: Publish the buffered payload
         def route_action():
             if self._current_payload:
-                self.publishers_dict[route_name].publish(self._current_payload)
+                self._publish_to_route(route_name, self._current_payload)
 
         # Tool Description: Use samples from the Route object
         samples_str = ", ".join(f"'{s}'" for s in route.samples)
@@ -302,14 +417,14 @@ class SemanticRouter(LLM):
 
         # Register tool
         self._route_funcs[description["function"]["name"]] = route_action
-        self._internal_config._tool_descriptions.append(description)
+        self._internal_config._tool_descriptions.append(description)  # type: ignore
 
     def _vector_mode_execution_step(self):
         """Vector mode execution"""
         self.get_logger().debug("Executing VECTOR mode routing step")
         # get route
         db_input = {
-            "collection_name": self._internal_config.router_name,
+            "collection_name": self._internal_config.router_name,  # type: ignore
             "query": self._current_payload,
             "n_results": 1,
         }
@@ -321,17 +436,17 @@ class SemanticRouter(LLM):
 
             # if default route is specified and distance is less than min
             # threshold, redirect to default route
-            route = (
-                self.default_route.routes_to.name
+            route_name = (
+                self.default_route
                 if self.default_route
-                and distance > self._internal_config.maximum_distance
+                and distance > self._internal_config.maximum_distance  # type: ignore
                 else result["output"]["metadatas"][0][0]["route_name"]
             )
 
-            self.get_logger().debug(f"Routing payload to: {route}")
+            self.get_logger().debug(f"Routing payload to: {route_name}")
 
             # Publish to route
-            self.publishers_dict[route].publish(self._current_payload)
+            self._publish_to_route(route_name, self._current_payload)
 
         else:
             self.health_status.set_fail_algorithm()
@@ -367,12 +482,8 @@ class SemanticRouter(LLM):
         if not routed:
             self.get_logger().info("LLM did not trigger any route.")
             if self.default_route:
-                self.get_logger().info(
-                    f"Using default route: {self.default_route.routes_to.name}"
-                )
-                self.publishers_dict[self.default_route.routes_to.name].publish(
-                    self._current_payload
-                )
+                self.get_logger().info(f"Using default route: {self.default_route}")
+                self._publish_to_route(self.default_route, self._current_payload)
             else:
                 self.health_status.set_fail_algorithm()
 
@@ -414,7 +525,9 @@ class SemanticRouter(LLM):
 
     def _get_routes_json(self) -> Union[str, bytes, bytearray]:
         """
-        Serialize component routes to json
+        Serialize component routes to json.
+
+        If a route destination is a Topic, it is serialized normally.
 
         :return: Serialized inputs
         :rtype:  str | bytes | bytearray

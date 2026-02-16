@@ -45,18 +45,16 @@ Now, we need to bridge the gap between detection and description. We don't want 
 We use `events.OnChangeContainsAny`. This event type is perfect for state changes. It monitors a list inside a message (in this case, the `labels` list of the detections).
 
 ```python
-from agents.ros import events
+from agents.ros import Event
 
 # Define the Event
 # This event listens to the 'detections' topic.
 # It triggers ONLY if the "labels" list inside the message contains "person"
 # after not containing a person (within a 5 second interval).
-event_person_detected = events.OnChangeContainsAny(
-    event_name="person_spotted",
-    event_source=detections,
-    trigger_value=["person"],    # The value to look for
-    nested_attributes="labels",  # The attribute in the message to check
-    keep_event_delay=5,          # A delay in seconds
+event_person_detected = Event(
+    detections.msg.labels.contains_any(["person"]),
+    on_change=True,  # Trigger only when a change has occurred to stop repeat triggering
+    keep_event_delay=5,  # A delay in seconds
 )
 ```
 
@@ -121,6 +119,27 @@ launcher.add_pkg(
 launcher.bringup()
 ```
 
+## See the results in the UI
+
+We can see this recipe in action if we enable the UI. We can do so by simply adding the following line in the launcher.
+
+```python
+launcher.enable_ui(outputs=[camera_image, detections, description_output])
+```
+
+````{note}
+In order to run the client you will need to install [FastHTML](https://www.fastht.ml/) and [MonsterUI](https://github.com/AnswerDotAI/MonsterUI) with
+```shell
+pip install python-fasthtml monsterui
+````
+
+The client displays a web UI on **http://localhost:5001** if you have run it on your machine. Or you can access it at **http://<IP_ADDRESS_OF_THE_ROBOT>:5001** if you have run it on the robot.
+
+In the screencast below, we have replaced the event triggering label from `person` with `cup` for demonstration purposes.
+
+
+![Demo screencast](https://automatikarobotics.com/docs/ui_agents_event_see_cup.gif)
+
 ### Complete Code
 
 Here is the complete recipe for the Event-Driven Visual Description agent:
@@ -132,7 +151,7 @@ from agents.components import Vision, VLM
 from agents.config import VisionConfig
 from agents.clients import OllamaClient
 from agents.models import OllamaModel
-from agents.ros import Launcher, Topic, FixedInput, events
+from agents.ros import Launcher, Topic, FixedInput, Event
 
 # Define Topics
 camera_image = Topic(name="/image_raw", msg_type="Image")
@@ -155,12 +174,10 @@ vision_detector = Vision(
 # This event listens to the 'detections' topic.
 # It triggers ONLY if the "labels" list inside the message contains "person"
 # after not containing a person (within a 5 second interval).
-event_person_detected = events.OnChangeContainsAny(
-    event_name="person_spotted",
-    event_source=detections,
-    trigger_value=["person"],    # The value to look for
-    nested_attributes="labels",  # The attribute in the message to check
-    keep_event_delay=5,          # A delay in seconds
+event_person_detected = Event(
+    detections.msg.labels.contains_any(["person"]),
+    on_change=True,  # Trigger only when a change has occurred to stop repeat triggering
+    keep_event_delay=5,  # A delay in seconds
 )
 
 # Setup the VLM Component (The Responder)
@@ -188,6 +205,7 @@ visual_describer = VLM(
 
 # Launch
 launcher = Launcher()
+launcher.enable_ui(outputs=[camera_image, detections, description_output])
 launcher.add_pkg(
     components=[vision_detector, visual_describer],
     multiprocessing=True,

@@ -30,8 +30,8 @@ vision = Vision(
 
 
 # Define a model client (working with Ollama in this case)
-llava = OllamaModel(name="llava", checkpoint="llava:latest")
-llava_client = OllamaClient(llava)
+qwen_vl = OllamaModel(name="qwen_vl", checkpoint="qwen2.5vl:latest")
+qwen_client = OllamaClient(qwen_vl)
 
 # Define a fixed input for the component
 introspection_query = FixedInput(
@@ -47,7 +47,7 @@ introspection_answer = Topic(name="introspection_answer", msg_type="String")
 introspector = MLLM(
     inputs=[introspection_query, image0],  # we use the image0 topic defined earlier
     outputs=[introspection_answer],
-    model_client=llava_client,
+    model_client=qwen_client,
     trigger=15.0,  # we provide the time interval as a float value to the trigger parameter
     component_name="introspector",
 )

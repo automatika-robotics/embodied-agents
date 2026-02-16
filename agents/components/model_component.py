@@ -57,21 +57,79 @@ class ModelComponent(Component):
 
     @property
     def additional_model_clients(self) -> Optional[Dict[str, ModelClient]]:
-        """Get additional model clients."""
+        """
+        Get the dictionary of additional model clients registered to this component.
+
+        :return: A dictionary mapping client names (str) to ModelClient instances, or None if not set.
+        :rtype: Optional[Dict[str, ModelClient]]
+        """
         return self._additional_model_clients
 
     @additional_model_clients.setter
     def additional_model_clients(self, value: Dict[str, ModelClient]) -> None:
-        """Set additional model clients."""
+        """
+        Set additional model clients for the component.
+
+        This property allows you to dynamically configure secondary or fallback model clients.
+        These clients can be swapped in at runtime using :meth:`change_model_client`, enabling
+        robustness strategies (e.g., falling back to a local model when a cloud model fails)
+        or adaptive intelligence (switching models based on task complexity).
+
+        :param value: A dictionary where keys are unique identifiers (names) for the clients and
+                      values are the initialized :class:`~agents.clients.model_base.ModelClient` instances.
+        :type value: Dict[str, ModelClient]
+
+        :Example:
+
+        ```python
+            # Primary client (Cloud)
+            primary_model = TransformersLLM(name="gpt4", checkpoint="gpt-4")
+            primary_client = GenericHTTPClient(model=primary_model)
+
+            # Backup client (Local)
+            backup_model = OllamaModel(name="llama_local", checkpoint="llama3:8b")
+            backup_client = OllamaClient(model=backup_model)
+
+            # Initialize component with primary
+            brain = LLM(..., model_client=primary_client)
+
+            # Register backup
+            brain.additional_model_clients = {"local_backup": backup_client}
+        ```
+        """
         self._additional_model_clients = value
 
     @component_fallback
     def change_model_client(self, model_client_name: str) -> bool:
-        """Change the model client
+        """
+        Hot-swap the active model client at runtime.
 
-        This method can change the model client that the component is using, at runtime.
+        This method replaces the component's current ``model_client`` with one from the
+        registered ``additional_model_clients``. It handles the safe de-initialization of the
+        old client and initialization of the new one.
 
-        It can be invoked as a consequent action in response to an event. For example if one client communicating with a cloud model becomes unresponsive, one can replace it with another client for a locally deployed model.
+        This is commonly used as a target for Actions in the Event system.
+
+        :param model_client_name: The key corresponding to the desired client in ``additional_model_clients``.
+        :type model_client_name: str
+        :return: True if the swap was successful, False otherwise (e.g., if the name was not found or initialization failed).
+        :rtype: bool
+
+        :Example:
+
+        ```python
+
+            from agents.ros import Action
+
+            # Define an action to switch to the 'local_backup' client defined previously
+            switch_to_local = Action(
+                method=brain.change_model_client,
+                args=("local_backup",)
+            )
+
+            # Trigger this action if the component fails (e.g. internet loss)
+            brain.on_component_fail(action=switch_to_local, max_retries=3)
+        ```
         """
         if not self._additional_model_clients:
             self.get_logger().error(
@@ -107,11 +165,16 @@ class ModelComponent(Component):
         """
         Create model client if provided and initialize model.
         """
+        super().custom_on_configure()
+
         self.get_logger().debug(f"Current Status: {self.health_status.value}")
 
         # validate output topics if handled_outputs exist
         self.get_logger().info("Validating Model Component Output Topics")
         self._validate_output_topics()
+
+        # get inference params
+        self.inference_params = self.config.get_inference_params()
 
         # Initialize model
         if self.model_client:
@@ -150,14 +213,14 @@ class ModelComponent(Component):
                         "Warmup cannot not be called with websocket client."
                     )
             else:
+                self.get_logger().debug(f"Warming up: {self.config.warmup}")
                 if self.config.warmup:
                     try:
+                        # call warpup twice
+                        self._warmup()
                         self._warmup()
                     except Exception as e:
                         self.get_logger().error(f"Error encountered in warmup: {e}")
-
-        # get inference params
-        self.inference_params = self.config.get_inference_params()
 
     def custom_on_deactivate(self):
         """

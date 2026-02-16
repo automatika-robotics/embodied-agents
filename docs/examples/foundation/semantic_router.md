@@ -123,6 +123,10 @@ llm_route = Route(routes_to=llm_in,
         "How many tablespoons in a cup?", "How are you today?", "Whats up?"])
 ```
 
+```{note}
+The `routes_to` parameter of a `Route` can be a `Topic` or an `Action`. `Actions` can be system level functions (e.g. to restart a component), functions exposed by components (e.g. to start the VLA component for manipulation, or the 'say' method in TextToSpeech component) or arbitrary functions written in the recipe. `Actions` are a powerful concept in EmbodiedAgents, because their arguments can come from any topic in the system. To learn more, check out [Events & Actions](../events/index.md)
+```
+
 ## Option 1: Vector Mode (Similarity)
 
 This is the standard approach. In Vector mode, the SemanticRouter component works by storing these examples in a vector DB. Distance is calculated between an incoming query's embedding and the embeddings of example queries to determine which _Route_(_Topic_) the query should be sent on. For the database client we will use the ChromaDB client setup in [this example](semantic_map.md). We will specify a router name in our router config, which will act as a _collection_name_ in the database.
