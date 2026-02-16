@@ -12,16 +12,14 @@ permissions:
   pages: write
   id-token: write
 
-# Allow only one concurrent deployment, skipping runs queued between the run in-progress and latest queued.
+# Allow only one concurrent deployment
 concurrency:
   group: "pages"
   cancel-in-progress: false
 
 jobs:
-  docs:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  # JOB 1: Build (Runs on PRs and Push)
+  build:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -36,18 +34,26 @@ jobs:
         run: |
           sphinx-build docs _build
 
-      # Read custom domain from Repo Settings and configures the environment
+      # Configure Pages
       - name: Setup GitHub Pages
         uses: actions/configure-pages@v5
 
-      # Uploads the '_build' directory as a compressed artifact
+      # Upload Artifact
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: '_build'
 
-      # Deploy the artifact to Pages
+  # JOB 2: Deploy (Runs ONLY on Push to Main)
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-24.04
+    needs: build
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+
