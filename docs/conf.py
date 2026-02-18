@@ -81,12 +81,13 @@ myst_html_meta = {
 }
 myst_heading_anchors = 7  # to remove cross reference errors with md
 
-html_baseurl = "https://automatika-robotics.github.io/embodied-agents/"
+html_baseurl = "https://agents.automatikarobotics.com/"
 language = "en"
 html_theme = "shibuya"  # install with `pip install shibuya`
 html_static_path = ["_static"]
 html_css_files = ["custom.css"]
 html_favicon = "_static/favicon.png"
+sitemap_url_scheme = "{link}"
 
 html_theme_options = {
     "light_logo": "_static/EMBODIED_AGENTS_LIGHT.png",
@@ -198,7 +199,7 @@ def create_robots_txt(app, exception):
         robots_path = os.path.join(dst_dir, "robots.txt")
         content = f"""User-agent: *
 
-Sitemap: {html_baseurl}/sitemap.xml
+Sitemap: {html_baseurl}sitemap.xml
 """
         with open(robots_path, "w") as f:
             f.write(content)
