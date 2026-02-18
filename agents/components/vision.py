@@ -185,23 +185,36 @@ class Vision(ModelComponent):
         :raises ValueError: If the provided topic_name is not found in inputs.
         """
         try:
+            # Preflight check for timed components
+            if (
+                self.run_type == ComponentRunType.TIMED
+                and (loop_time := 1 / self.config.loop_rate) > timeout
+            ):
+                self.get_logger().warning(
+                    f"Warning: take_picture timeout ({timeout}s) is strictly shorter than the component's trigger period ({loop_time}s) for this timed component. "
+                    f"The action is highly likely to timeout before the image callback executes. Consider running the component faster or increasing the timeout for this action."
+                )
             # Expand user path
             save_path = os.path.expanduser(save_path)
             os.makedirs(save_path, exist_ok=True)
 
             # Identify callback type
-            is_trigger = (
-                hasattr(self, "trig_callbacks") and topic_name in self.trig_callbacks
+            trig_dict = getattr(self, "trig_callbacks", {})
+            target_callback = trig_dict.get(topic_name) or self.callbacks.get(
+                topic_name
             )
-            if is_trigger:
-                target_callback = self.trig_callbacks[topic_name]
-            elif topic_name in self.callbacks:
-                target_callback = self.callbacks[topic_name]
-            else:
-                raise ValueError(
+            if not target_callback:
+                self.get_logger().error(
                     f"Topic '{topic_name}' is not one of the component inputs. You can only take pictures on topics that are provided as inputs to this component."
                 )
+                return False
 
+            # if target is a trigger, issue a warning
+            is_trigger = topic_name in trig_dict
+            if is_trigger:
+                self.get_logger().warning(
+                    f"Capturing image from trigger '{topic_name}'. Inference paused momentarily."
+                )
             # save callback state
             original_callback = target_callback._extra_callback
             original_get_processed = target_callback._get_processed
@@ -216,11 +229,6 @@ class Vision(ModelComponent):
 
             # Swap extracallback, wait and restore
             try:
-                if is_trigger:
-                    self.get_logger().warning(
-                        f"Capturing image from trigger '{topic_name}'. Inference paused momentarily."
-                    )
-
                 target_callback.on_callback_execute(
                     single_frame_interceptor, get_processed=True
                 )
@@ -231,11 +239,7 @@ class Vision(ModelComponent):
 
             finally:
                 # Always restore the original callback state
-                if is_trigger:
-                    target_callback.on_callback_execute(
-                        self._execution_step, get_processed=False
-                    )
-                elif original_callback is not None:
+                if original_callback:
                     target_callback.on_callback_execute(
                         original_callback, get_processed=original_get_processed
                     )
@@ -292,21 +296,40 @@ class Vision(ModelComponent):
         :raises ValueError: If the topic_name is not registered.
         """
         try:
+            # Preflight checks for timed components
+            if self.run_type == ComponentRunType.TIMED:
+                if self.config.loop_rate < fps:
+                    self.get_logger().warning(
+                        f"Warning: Requested {fps} FPS, but the component's trigger period is {1 / self.config.loop_rate}s "
+                        f"(~{self.config.loop_rate:.2f} FPS max). The recorded video will heavily repeat frames or play too fast. Consider running the component faster or reduce the fps"
+                    )
+
+                if duration < 1 / self.config.loop_rate:
+                    self.get_logger().warning(
+                        f"Warning: Recording duration ({duration}s) is shorter than the component's loop period "
+                        f"({1 / self.config.loop_rate}s). You are likely to capture 0 frames. Consider running the component faster or increase duration."
+                    )
             # Expand user path
             save_path = os.path.expanduser(save_path)
             os.makedirs(save_path, exist_ok=True)
 
-            # Identify callback type
-            is_trigger = (
-                hasattr(self, "trig_callbacks") and topic_name in self.trig_callbacks
+            trig_dict = getattr(self, "trig_callbacks", {})
+            target_callback = trig_dict.get(topic_name) or self.callbacks.get(
+                topic_name
             )
-            if is_trigger:
-                target_callback = self.trig_callbacks[topic_name]
-            elif topic_name in self.callbacks:
-                target_callback = self.callbacks[topic_name]
-            else:
-                raise ValueError(
+            # Identify callback type
+            if not target_callback:
+                self.get_logger().error(
                     f"Topic '{topic_name}' is not one of the component inputs. You can only record videos on topics that are provided as inputs to this component."
+                )
+                return False
+
+            # if target is a trigger, issue a warning
+            is_trigger = topic_name in trig_dict
+            if is_trigger:
+                self.get_logger().warning(
+                    f"Recording video on trigger topic '{topic_name}'. "
+                    f"Detection or tracking will be PAUSED for {duration} seconds!"
                 )
 
             # Spawn the background thread
@@ -351,12 +374,6 @@ class Vision(ModelComponent):
         original_callback = target_callback._extra_callback
         original_get_processed = target_callback._get_processed
 
-        if is_trigger:
-            self.get_logger().warning(
-                f"Recording video on trigger topic '{topic_name}'. "
-                f"Detection or tracking will be PAUSED for {duration} seconds!"
-            )
-
         # extra callback for capturing images
         def frame_interceptor(msg, topic, output=None):
             if output is not None:
@@ -367,17 +384,14 @@ class Vision(ModelComponent):
             time.sleep(duration)
         finally:
             # Safely restore execution step or original state
-            if is_trigger:
-                target_callback.on_callback_execute(
-                    self._execution_step, get_processed=False
-                )
-                self.get_logger().info(
-                    f"Video recording finished. Vision inference RESUMED on '{topic_name}'."
-                )
-            elif original_callback is not None:
+            if original_callback:
                 target_callback.on_callback_execute(
                     original_callback, get_processed=original_get_processed
                 )
+                if is_trigger:
+                    self.get_logger().info(
+                        f"Video recording finished. Vision inference RESUMED on '{topic_name}'."
+                    )
             else:
                 target_callback._extra_callback = None
 
