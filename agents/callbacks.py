@@ -137,7 +137,7 @@ class RGBDCallback(GenericCallback):
         :returns:   Image and Depth as nd_array
         :rtype:     np.ndarray
         """
-        if not self.msg:
+        if not self.msg or not self.msg.rgb:
             return None
 
         # pre-process and reshape the RGB image
