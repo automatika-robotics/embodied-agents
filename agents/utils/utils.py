@@ -333,6 +333,39 @@ def load_model(model_name: str, model_path: str) -> str:
     return str(model_full_path)
 
 
+def load_model_repo(model_name: str, repo_id: str) -> str:
+    """Download a multi-file HuggingFace model repository.
+
+    :param model_name: Local cache name for the model
+    :type model_name: str
+    :param repo_id: HuggingFace repository ID (e.g. 'onnx-community/Qwen3-0.6B-ONNX')
+    :type repo_id: str
+    :returns: Path to the downloaded model directory
+    :rtype: str
+    """
+    from pathlib import Path
+    from platformdirs import user_cache_dir
+
+    cachedir = user_cache_dir("ros_agents")
+    model_dir = Path(cachedir) / "models" / model_name
+    model_dir.mkdir(parents=True, exist_ok=True)
+
+    # If already downloaded, return cached path
+    if any(model_dir.iterdir()):
+        return str(model_dir)
+
+    try:
+        from huggingface_hub import snapshot_download
+    except ModuleNotFoundError as e:
+        raise ModuleNotFoundError(
+            "Downloading HuggingFace model repos requires huggingface-hub. "
+            "Install it with: pip install huggingface-hub"
+        ) from e
+
+    snapshot_download(repo_id=repo_id, local_dir=str(model_dir))
+    return str(model_dir)
+
+
 def flatten(xs):
     """Generator to flatten lists of arbitrary types"""
     for x in xs:

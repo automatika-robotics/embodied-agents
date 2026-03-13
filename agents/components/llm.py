@@ -18,7 +18,7 @@ from ..ros import (
     Detections,
     StreamingString,
 )
-from ..utils import get_prompt_template, validate_func_args
+from ..utils import get_prompt_template, validate_func_args, load_model_repo
 from .model_component import ModelComponent
 from .component_base import ComponentRunType
 
@@ -37,8 +37,8 @@ class LLM(ModelComponent):
         This should be a list of Topic objects. String type is handled automatically.
     :type outputs: list[Topic]
     :param model_client: The model client for the LLM component.
-        This should be an instance of ModelClient.
-    :type model_client: ModelClient
+        This should be an instance of ModelClient. Optional if ``enable_local_model`` is set to True in the config.
+    :type model_client: Optional[ModelClient]
     :param config: The configuration for the LLM component.
         This should be an instance of LLMConfig. If not provided, defaults to LLMConfig().
     :type config: LLMConfig
@@ -64,6 +64,17 @@ class LLM(ModelComponent):
                         model_client=model_client,
                         config=config,
                         component_name='llama_component')
+    ```
+
+    Example usage with local model:
+    ```python
+    text0 = Topic(name="text0", msg_type="String")
+    text1 = Topic(name="text1", msg_type="String")
+    config = LLMConfig(enable_local_model=True)
+    llm_component = LLM(inputs=[text0],
+                        outputs=[text1],
+                        config=config,
+                        component_name='local_llm')
     ```
     """
 
@@ -93,9 +104,10 @@ class LLM(ModelComponent):
         self.handled_outputs = [String, StreamingString]
 
         if type(self) is LLM and not model_client:
-            raise RuntimeError(
-                "LLM component cannot be initialized without a model_client. Please pass a valid model_client."
-            )
+            if not self.config.enable_local_model:
+                raise RuntimeError(
+                    "LLM component requires a model_client or enable_local_model=True in LLMConfig."
+                )
 
         self.model_client = model_client
 
@@ -125,6 +137,21 @@ class LLM(ModelComponent):
         )
 
     def custom_on_configure(self):
+
+        # deploy local LLM if enabled (only for LLM, not subclasses like MLLM)
+        if (
+            not self.model_client
+            and self.config.enable_local_model
+            and type(self) is LLM
+        ):
+            from ..utils.local_llm import LocalLLM
+
+            self.local_model = LocalLLM(
+                model_path=load_model_repo("local_llm", self.config.local_model_path),
+                device=self.config.device_local_model,
+                ncpu=self.config.ncpu_local_model,
+            )
+
         # configure the rest
         super().custom_on_configure()
 
@@ -320,6 +347,8 @@ class LLM(ModelComponent):
             }
             if self.model_client:
                 return self.model_client.inference(input)
+            elif hasattr(self, "local_model"):
+                return self.local_model(input)
 
         else:
             # return result with its output set to last function response
@@ -684,11 +713,15 @@ class LLM(ModelComponent):
         # Run inference once to warm up and once to measure time
         if self.model_client:
             self.model_client.inference(inference_input)
+        elif hasattr(self, "local_model"):
+            self.local_model(inference_input)
 
         inference_input = {"query": [message], **self.config._get_inference_params()}
         start_time = time.time()
         if self.model_client:
             result = self.model_client.inference(inference_input)
+        elif hasattr(self, "local_model"):
+            result = self.local_model(inference_input)
         else:
             result = None
         elapsed_time = time.time() - start_time

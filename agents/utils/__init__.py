@@ -10,6 +10,7 @@ from .utils import (
     VADStatus,
     WakeWordStatus,
     load_model,
+    load_model_repo,
     flatten,
     build_lerobot_features_from_dataset_info,
     find_missing_values,
@@ -32,4 +33,5 @@ __all__ = [
     "VADStatus",
     "WakeWordStatus",
     "load_model",
+    "load_model_repo",
 ]

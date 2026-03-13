@@ -35,8 +35,9 @@ class ModelComponent(Component):
         component_name: str = "model_component",
         **kwargs,
     ):
-        # setup model client
+        # setup model client/local model
         self.model_client = model_client if model_client else None
+        self.local_model = None
 
         self.handled_outputs: List[Type[SupportedType]]
 
@@ -325,38 +326,48 @@ class ModelComponent(Component):
         self, inference_input: Dict, unpack: bool = False
     ) -> Optional[MutableMapping]:
         """Call model inference"""
-        if isinstance(self.model_client, RoboMLWSClient):
-            self.req_queue.put_nowait(inference_input)
-            if getattr(self.config, "stream", None):
-                return
-            else:
-                result = {}
-                try:
-                    if not unpack:
-                        result["output"] = self.resp_queue.get(
-                            block=True, timeout=self.model_client.inference_timeout
-                        )
-                    else:
-                        result["output"] = msgpack.unpackb(
-                            self.resp_queue.get(
+        if self.model_client:
+            if isinstance(self.model_client, RoboMLWSClient):
+                self.req_queue.put_nowait(inference_input)
+                if getattr(self.config, "stream", None):
+                    return
+                else:
+                    result = {}
+                    try:
+                        if not unpack:
+                            result["output"] = self.resp_queue.get(
                                 block=True, timeout=self.model_client.inference_timeout
                             )
+                        else:
+                            result["output"] = msgpack.unpackb(
+                                self.resp_queue.get(
+                                    block=True,
+                                    timeout=self.model_client.inference_timeout,
+                                )
+                            )
+                        return result
+                    except queue.Empty:
+                        self.get_logger().error(
+                            "Did not receive result in websocket response queue"
                         )
-                    return result
-                except queue.Empty:
-                    self.get_logger().error(
-                        "Did not receive result in websocket response queue"
-                    )
-                    # raise a fallback trigger via health status
-                    self.health_status.set_fail_algorithm()
-                    return None
-        else:
-            if self.model_client:
+                        # raise a fallback trigger via health status
+                        self.health_status.set_fail_algorithm()
+                        return None
+            else:
                 result = self.model_client.inference(inference_input)
                 if not result:
                     # raise a fallback trigger via health status
                     self.health_status.set_fail_algorithm()
-                return result
+        elif self.local_model:
+            stream = getattr(self.config, "stream", None)
+            result = self.local_model(inference_input, stream)
+            if not result:
+                # raise a fallback trigger via health status
+                self.health_status.set_fail_algorithm()
+            return result
+        else:
+            self.get_logger().error("No model client or local model available")
+            self.health_status.set_fail_component()
 
     def _publish(self, result: MutableMapping, **kwargs) -> None:
         """

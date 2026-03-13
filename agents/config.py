@@ -82,10 +82,23 @@ class LLMConfig(ModelComponentConfig):
     :param response_terminator: A string token marking that the end of a single response from the model. This token is only used in case of a persistent clients, such as a websocket client and when stream is set to True. It is not published. This value cannot be an empty string.
         Default is '<<Response Ended>>'
     :type response_terminator: str
+    :param enable_local_model: Whether to enable a local LLM model via ONNX Runtime, allowing the component to run without a remote model client. Requires the ``onnxruntime-genai`` package. Default is False.
+    :type enable_local_model: bool
+    :param device_local_model: Device to run the local model on, either "cpu" or "cuda" (default: "cuda"). This parameter is only effective when ``enable_local_model`` is True.
+    :type device_local_model: str
+    :param ncpu_local_model: Number of CPU cores to allocate to the local model when using CPU (default: 1). This parameter is only effective when ``enable_local_model`` is True.
+    :type ncpu_local_model: int
+    :param local_model_path: HuggingFace repository ID for the local ONNX model (default: ``onnx-community/Qwen3-0.6B-ONNX``). This parameter is only effective when ``enable_local_model`` is True.
+    :type local_model_path: Optional[str]
 
     Example of usage:
     ```python
     config = LLMConfig(enable_rag=True, collection_name="my_collection", distance_func="l2")
+    ```
+
+    Example of usage with local model:
+    ```python
+    config = LLMConfig(enable_local_model=True)
     ```
     """
 
@@ -104,6 +117,10 @@ class LLMConfig(ModelComponentConfig):
     stream: bool = field(default=False)
     break_character: str = field(default=".")
     response_terminator: str = field(default="<<Response Ended>>")
+    enable_local_model: bool = field(default=False)
+    device_local_model: Literal["cpu", "cuda"] = field(default="cuda")
+    ncpu_local_model: int = field(default=1)
+    local_model_path: Optional[str] = field(default="onnx-community/Qwen3-0.6B-ONNX")
     _system_prompt: Optional[str] = field(default=None, alias="_system_prompt")
     _component_prompt: Optional[Union[str, Path]] = field(
         default=None, alias="_component_prompt"
