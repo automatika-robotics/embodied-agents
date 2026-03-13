@@ -5,7 +5,10 @@ log_cli = true
 log_cli_level = "INFO"
 log_cli_format="[%(levelname)s] [%(asctime)s] [%(name)s] [%(process)d-%(thread)d] %(message)s"
 testpaths = [
-    "agents/tests"
+    "tests"
+]
+markers = [
+    "local_only: tests requiring external servers (cannot run in CI)",
 ]
 
 [tool.interrogate]
