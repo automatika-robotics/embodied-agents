@@ -423,6 +423,12 @@ class TextToSpeechConfig(ModelComponentConfig):
 
     This class defines the configuration options for a Text-To-Speech component.
 
+    :param enable_local_model: Whether to enable a local TTS model via the ``kokoro-onnx`` package (Kokoro-82M), allowing the component to run without a remote model client. Requires the ``kokoro-onnx`` and ``soundfile`` pip packages. Default is False.
+    :type enable_local_model: bool
+    :param device_local_model: Device to run the local model on, either "cpu" or "cuda" (default: "cuda"). This parameter is only effective when ``enable_local_model`` is True.
+    :type device_local_model: str
+    :param ncpu_local_model: Number of CPU cores to allocate to the local model when using CPU (default: 1). This parameter is only effective when ``enable_local_model`` is True.
+    :type ncpu_local_model: int
     :param play_on_device: Whether to play the audio on available audio device (default: False).
     :type play_on_device: bool
     :param device: Optional device id (int) for playing the audio. Only effective if play_on_device is True (default: None).
@@ -438,7 +444,7 @@ class TextToSpeechConfig(ModelComponentConfig):
     :param thread_shutdown_timeout: Timeout to shutdown a playback thread, if data is not received for more than a certain number of seconds. Only effective if play_on_device is True (default: 5 seconds).
     :type thread_shutdown_timeout: int
     :param stream: Stram output when used with WebSocketClient. Useful when model output is large and broken into chunks by the server. (default: True).
-    :type thread_shutdown_timeout: int
+    :type stream: bool
 
     Example of usage for local playback:
     ```python
@@ -449,8 +455,16 @@ class TextToSpeechConfig(ModelComponentConfig):
     ```python
     config = TextToSpeechConfig(play_on_device=True, stream_to_ip="192.168.1.100", stream_to_port=12345)
     ```
+
+    Example of usage with local model:
+    ```python
+    config = TextToSpeechConfig(enable_local_model=True, play_on_device=True)
+    ```
     """
 
+    enable_local_model: bool = field(default=False)
+    device_local_model: Literal["cpu", "cuda"] = field(default="cuda")
+    ncpu_local_model: int = field(default=1)
     play_on_device: bool = field(default=False)
     device: Optional[int] = field(default=None)
     stream_to_ip: Optional[str] = field(default=None)
@@ -460,6 +474,15 @@ class TextToSpeechConfig(ModelComponentConfig):
     thread_shutdown_timeout: int = field(default=5)
     stream: bool = field(default=True)
     _get_bytes: bool = field(default=False, alias="_get_bytes")
+
+    @stream.validator
+    def _check_stream(self, _, value):
+        """Stream validator"""
+        if value and self.enable_local_model:
+            raise ValueError(
+                "stream cannot be set to True when enable_local_model is True in TextToSpeechConfig. "
+                "Local TTS model does not support streaming."
+            )
 
     def _get_inference_params(self) -> Dict:
         """get_inference_params.
@@ -500,9 +523,19 @@ class SpeechToTextConfig(ModelComponentConfig):
     This class defines the configuration options for speech transcription, voice activity detection,
     wakeword detection, and audio streaming.
 
-    --------------------
+    --
+    Local Model
+    --
+    :param enable_local_model: Whether to enable a local STT model via the ``moonshine-onnx`` package (Moonshine Base, 62M params), allowing the component to run without a remote model client. Requires the ``moonshine-onnx`` pip package. Default is False.
+    :type enable_local_model: bool
+    :param device_local_model: Device to run the local model on, either "cpu" or "cuda" (default: "cuda"). This parameter is only effective when ``enable_local_model`` is True.
+    :type device_local_model: str
+    :param ncpu_local_model: Number of CPU cores to allocate to the local model when using CPU (default: 1). This parameter is only effective when ``enable_local_model`` is True.
+    :type ncpu_local_model: int
+
+    --
     Transcription
-    --------------------
+    --
     :param initial_prompt: Optional initial prompt to guide transcription (e.g. speaker name or topic).
                            Defaults to None.
     :type initial_prompt: str or None
@@ -515,9 +548,9 @@ class SpeechToTextConfig(ModelComponentConfig):
                            Defaults to None.
     :type max_new_tokens: int or None
 
-    --------------------
+    --
     Voice Activity Detection (VAD)
-    --------------------
+    --
     :param enable_vad: Enable VAD to detect when speech is present in audio input.
                        Requires onnxruntime and silero-vad model.
                        Defaults to False.
@@ -556,9 +589,9 @@ class SpeechToTextConfig(ModelComponentConfig):
                      Defaults to 1.
     :type ncpu_vad: int
 
-    --------------------
+    --
     Wakeword Detection
-    --------------------
+    --
     :param enable_wakeword: Enable detection of a wakeword phrase (e.g. 'Hey Jarvis').
                             Requires `enable_vad` to be True.
                             Defaults to False.
@@ -578,9 +611,9 @@ class SpeechToTextConfig(ModelComponentConfig):
                           Defaults to 1.
     :type ncpu_wakeword: int
 
-    --------------------
+    --
     Streaming
-    --------------------
+    --
     :param stream: Send audio as a stream to a persistent client (e.g., websockets).
                    Requires `enable_vad` to be True.
                    Useful for real-time transcription.
@@ -592,9 +625,9 @@ class SpeechToTextConfig(ModelComponentConfig):
                        Defaults to 2000.
     :type min_chunk_size: int
 
-    --------------------
+    --
     Model Paths
-    --------------------
+    --
     :param vad_model_path: Path or URL to VAD ONNX model.
                            Defaults to the Silero VAD model URL.
     :type vad_model_path: str
@@ -613,9 +646,9 @@ class SpeechToTextConfig(ModelComponentConfig):
                                 https://github.com/dscripka/openWakeWord/blob/main/notebooks/automatic_model_training.ipynb
     :type wakeword_model_path: str
 
-    --------------------
+    --
     Example
-    --------------------
+    --
     Example usage:
     ```python
     config = SpeechToTextConfig(
@@ -628,8 +661,16 @@ class SpeechToTextConfig(ModelComponentConfig):
         speech_buffer_max_len=8000,
     )
     ```
+
+    Example of usage with local model:
+    ```python
+    config = SpeechToTextConfig(enable_local_model=True, enable_vad=True)
+    ```
     """
 
+    enable_local_model: bool = field(default=False)
+    device_local_model: Literal["cpu", "cuda"] = field(default="cuda")
+    ncpu_local_model: int = field(default=1)
     initial_prompt: Optional[str] = field(default=None)
     language: Optional[str] = field(
         default="en",
@@ -685,6 +726,11 @@ class SpeechToTextConfig(ModelComponentConfig):
         if value and not self.enable_vad:
             raise ValueError(
                 "enable_vad (voice activity detection) must be set to True when stream is set to True"
+            )
+        if value and self.enable_local_model:
+            raise ValueError(
+                "stream cannot be set to True when enable_local_model is True in SpeechToTextConfig. "
+                "Local STT model does not support streaming. Use a WebSocket client for streaming."
             )
 
     def __attrs_post_init__(self):
