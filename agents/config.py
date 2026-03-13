@@ -196,23 +196,55 @@ class MLLMConfig(LLMConfig):
         Supported values are: "general", "pointing", "affordance", "trajectory", and "grounding".
         Default is None.
     :type task: Optional[Literal["general", "pointing", "affordance", "trajectory", "grounding"]]
+    :param enable_local_model: Whether to enable a local VLM via the ``moondream`` package (Moondream2), allowing the component to run without a remote model client. Requires the ``moondream`` pip package. Default is False.
+    :type enable_local_model: bool
+    :param device_local_model: Device to run the local model on, either "cpu" or "cuda" (default: "cuda"). This parameter is only effective when ``enable_local_model`` is True.
+    :type device_local_model: str
+    :param ncpu_local_model: Number of CPU cores to allocate to the local model when using CPU (default: 1). This parameter is only effective when ``enable_local_model`` is True.
+    :type ncpu_local_model: int
 
     Example of usage:
     ```python
     config = MLLMConfig(enable_rag=True, collection_name="my_collection", distance_func="l2", task=grounding)
+    ```
+
+    Example of usage with local model:
+    ```python
+    config = MLLMConfig(enable_local_model=True)
     ```
     """
 
     task: Optional[
         Literal["general", "pointing", "affordance", "trajectory", "grounding"]
     ] = field(default=None)
+    local_model_path: Optional[str] = None
 
     @task.validator
     def _check_task(self, _, value):
-        """Stream validator"""
+        """Task validator"""
         if value and self.stream:
             raise ValueError(
-                "stream cannot be set to True when a task is set in MLLMConfig"
+                "stream cannot be set to True when a task is set in VLMConfig"
+            )
+        if value and value != "general" and self.enable_local_model:
+            raise ValueError(
+                f"Local VLM model only supports general VQA. "
+                f"Task '{value}' requires a remote model client."
+            )
+
+    @local_model_path.validator
+    def _check_local_model_path(self, _, value):
+        """Local model path validator"""
+        if value:
+            raise ValueError(
+                "local_model_path is currently ineffective for VLM component config. Please unset it. The only available local VLM model is MoonDream and its configured by default."
+            )
+
+    def __attrs_post_init__(self):
+        """Validate cross-field constraints for local model"""
+        if self.enable_local_model and self.stream:
+            raise ValueError(
+                "stream cannot be set to True when enable_local_model is True in VLMConfig. Local VLM model does not support streaming."
             )
 
     def _get_inference_params(self) -> Dict:
