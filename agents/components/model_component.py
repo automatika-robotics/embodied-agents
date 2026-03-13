@@ -358,6 +358,7 @@ class ModelComponent(Component):
                 if not result:
                     # raise a fallback trigger via health status
                     self.health_status.set_fail_algorithm()
+                return result
         elif self.local_model:
             stream = getattr(self.config, "stream", None)
             result = self.local_model(inference_input, stream)

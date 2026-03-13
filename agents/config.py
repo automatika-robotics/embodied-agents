@@ -217,7 +217,7 @@ class MLLMConfig(LLMConfig):
     task: Optional[
         Literal["general", "pointing", "affordance", "trajectory", "grounding"]
     ] = field(default=None)
-    local_model_path: Optional[str] = None
+    local_model_path: Optional[str] = field(default=None)
 
     @task.validator
     def _check_task(self, _, value):
