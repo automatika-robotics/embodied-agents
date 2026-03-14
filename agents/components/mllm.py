@@ -123,14 +123,7 @@ class MLLM(LLM):
     def custom_on_configure(self):
         # deploy local VLM if enabled
         if not self.model_client and self.config.enable_local_model:
-            from ..utils.local_vlm import LocalVLM
-
-            # TODO: Multiple models
-            self.local_model = LocalVLM(
-                model_path=load_model_repo("local_vlm", "vikhyatk/moondream2"),
-                device=self.config.device_local_model,
-                ncpu=self.config.ncpu_local_model,
-            )
+            self._deploy_local_model()
 
         # configure the rest
         super().custom_on_configure()
@@ -153,6 +146,19 @@ class MLLM(LLM):
                     self._detections_publishers.append(topic.name)
                 else:
                     pass
+
+    def _deploy_local_model(self):
+        """Deploy local VLM model on demand."""
+        if self.local_model is not None:
+            return  # already deployed
+        from ..utils.local_vlm import LocalVLM
+
+        # TODO: Multiple models
+        self.local_model = LocalVLM(
+            model_path=load_model_repo("local_vlm", "vikhyatk/moondream2"),
+            device=self.config.device_local_model,
+            ncpu=self.config.ncpu_local_model,
+        )
 
     def _create_input(self, *_, **kwargs) -> Optional[Dict[str, Any]]:
         """Create inference input for MLLM models

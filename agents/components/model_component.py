@@ -101,6 +101,56 @@ class ModelComponent(Component):
         self._additional_model_clients = value
 
     @component_fallback
+    def fallback_to_local(self) -> bool:
+        """Switch from remote model_client to the built-in local model at runtime.
+
+        The local model is deployed on first call (lazy initialization) to avoid
+        consuming GPU memory until actually needed. If ``enable_local_model`` is
+        not already set in config, it is enabled automatically.
+
+        This is commonly used as a target for Actions in the Event system.
+
+        :return: True if the switch was successful, False otherwise.
+        :rtype: bool
+
+        :Example:
+
+        ```python
+
+            from agents.ros import Action
+
+            # Define an action to switch to the 'local model' available in each component
+            switch_to_local = Action(
+                method=brain.fallback_to_local,
+            )
+
+            # Trigger this action if the component fails (e.g. internet outage)
+            brain.on_component_fail(action=switch_to_local, max_retries=3)
+        ```
+        """
+        # Auto-enable local model in config if not already set
+        if hasattr(self.config, "enable_local_model"):
+            self.config.enable_local_model = True
+
+        # Deploy local model if not already loaded
+        try:
+            self._deploy_local_model()
+        except Exception as e:
+            self.get_logger().error(f"Failed to deploy local model: {e}")
+            return False
+
+        # Deinitialize remote client
+        if self.model_client:
+            try:
+                self.model_client.deinitialize()
+            except Exception as e:
+                self.get_logger().warning(f"Error deinitializing model client: {e}")
+            self.model_client = None
+
+        self.get_logger().info("Switched to local model for inference.")
+        return True
+
+    @component_fallback
     def change_model_client(self, model_client_name: str) -> bool:
         """
         Hot-swap the active model client at runtime.
@@ -122,14 +172,14 @@ class ModelComponent(Component):
 
             from agents.ros import Action
 
-            # Define an action to switch to the 'local_backup' client defined previously
-            switch_to_local = Action(
+            # Define an action to switch to the 'remote_backup' client defined previously
+            switch_to_backup = Action(
                 method=brain.change_model_client,
-                args=("local_backup",)
+                args=("remote_backup",)
             )
 
-            # Trigger this action if the component fails (e.g. internet loss)
-            brain.on_component_fail(action=switch_to_local, max_retries=3)
+            # Trigger this action if the component fails (e.g. server down)
+            brain.on_component_fail(action=switch_to_backup, max_retries=3)
         ```
         """
         if not self._additional_model_clients:
@@ -309,6 +359,12 @@ class ModelComponent(Component):
         """
         raise NotImplementedError(
             "_warmup method needs to be implemented by child components."
+        )
+
+    def _deploy_local_model(self):
+        """Deploy local model on demand. Override in subclasses."""
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement local model deployment."
         )
 
     @abstractmethod

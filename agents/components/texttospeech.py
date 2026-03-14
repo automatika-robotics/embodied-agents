@@ -107,13 +107,7 @@ class TextToSpeech(ModelComponent):
     def custom_on_configure(self):
         # deploy local TTS if enabled
         if not self.model_client and self.config.enable_local_model:
-            from ..utils.local_tts import LocalTTS
-
-            self.local_model = LocalTTS(
-                model_path=load_model_repo("local_tts", "hexgrad/Kokoro-82M"),
-                device=self.config.device_local_model,
-                ncpu=self.config.ncpu_local_model,
-            )
+            self._deploy_local_model()
         # Configure component
         super().custom_on_configure()
 
@@ -143,6 +137,23 @@ class TextToSpeech(ModelComponent):
 
         # Deactivate component
         super().custom_on_deactivate()
+
+    def _deploy_local_model(self):
+        """Deploy local TTS model on demand."""
+        if self.local_model is not None:
+            return  # already deployed
+        from ..utils.local_tts import LocalTTS
+
+        # TODO: Multiple models
+        self.local_model = LocalTTS(
+            model_path=load_model_repo("local_tts", "hexgrad/Kokoro-82M"),
+            device=self.config.device_local_model,
+            ncpu=self.config.ncpu_local_model,
+        )
+        # Local TTS does not support streaming
+        if self.config.stream:
+            self.config.stream = False
+            self.inference_params = self.config.get_inference_params()
 
     def __stream_callback(
         self, _: bytes, frames: int, time_info: Dict, status: int

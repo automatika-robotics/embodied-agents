@@ -124,13 +124,7 @@ class SpeechToText(ModelComponent):
         """Custom configuration"""
         # deploy local STT if enabled
         if not self.model_client and self.config.enable_local_model:
-            from ..utils.local_stt import LocalSTT
-
-            self.local_model = LocalSTT(
-                model_path=load_model_repo("local_stt", "UsefulSensors/moonshine-base"),
-                device=self.config.device_local_model,
-                ncpu=self.config.ncpu_local_model,
-            )
+            self._deploy_local_model()
 
         super().custom_on_configure()
 
@@ -215,6 +209,22 @@ class SpeechToText(ModelComponent):
 
         # Deactivate component
         super().custom_on_deactivate()
+
+    def _deploy_local_model(self):
+        """Deploy local STT model on demand."""
+        if self.local_model is not None:
+            return  # already deployed
+        from ..utils.local_stt import LocalSTT
+
+        # TODO: Multiple models
+        self.local_model = LocalSTT(
+            model_path=load_model_repo("local_stt", "UsefulSensors/moonshine-base"),
+            device=self.config.device_local_model,
+            ncpu=self.config.ncpu_local_model,
+        )
+        # Local STT does not support streaming
+        if self.config.stream:
+            self.config.stream = False
 
     def __stream_callback(
         self, indata: bytes, frames: int, _, status

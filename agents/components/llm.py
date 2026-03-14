@@ -144,13 +144,7 @@ class LLM(ModelComponent):
             and self.config.enable_local_model
             and type(self) is LLM
         ):
-            from ..utils.local_llm import LocalLLM
-
-            self.local_model = LocalLLM(
-                model_path=load_model_repo("local_llm", self.config.local_model_path),
-                device=self.config.device_local_model,
-                ncpu=self.config.ncpu_local_model,
-            )
+            self._deploy_local_model()
 
         # configure the rest
         super().custom_on_configure()
@@ -265,6 +259,18 @@ class LLM(ModelComponent):
                 else "\n".join(doc for doc in result["output"]["documents"])
             )
             return rag_docs
+
+    def _deploy_local_model(self):
+        """Deploy local LLM model on demand."""
+        if self.local_model is not None:
+            return  # already deployed
+        from ..utils.local_llm import LocalLLM
+
+        self.local_model = LocalLLM(
+            model_path=load_model_repo("local_llm", self.config.local_model_path),
+            device=self.config.device_local_model,
+            ncpu=self.config.ncpu_local_model,
+        )
 
     def _handle_chat_history(self, message: Dict) -> None:
         """Internal handler for chat history"""
