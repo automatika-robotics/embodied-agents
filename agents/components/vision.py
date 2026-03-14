@@ -121,6 +121,10 @@ class Vision(ModelComponent):
                 )
 
     def custom_on_configure(self):
+        # deploy local model if enabled
+        if not self.model_client and self.config.enable_local_classifier:
+            self._deploy_local_model()
+
         # configure parent component
         super().custom_on_configure()
 
@@ -131,23 +135,31 @@ class Vision(ModelComponent):
             self.visualization_thread = threading.Thread(target=self._visualize)
             self.visualization_thread.start()
 
-        # deploy local model if enabled
-        if not self.model_client and self.config.enable_local_classifier:
-            from ..utils.vision import LocalVisionModel, _MS_COCO_LABELS
+    def _deploy_local_model(self):
+        """Deploy local vision model on demand."""
+        if self.local_model is not None:
+            return  # already deployed
+        from ..utils.local_vision import LocalVisionModel, _MS_COCO_LABELS
 
-            if not self.config.dataset_labels:
-                self.get_logger().warning(
-                    "No dataset labels provided for the local model, using default MS_COCO labels"
-                )
-                self.config.dataset_labels = _MS_COCO_LABELS
-
-            self.local_classifier = LocalVisionModel(
-                model_path=load_model(
-                    "local_classifier", self.config.local_classifier_model_path
-                ),
-                ncpu=self.config.ncpu_local_classifier,
-                device=self.config.device_local_classifier,
+        if not self.config.dataset_labels:
+            self.get_logger().warning(
+                "No dataset labels provided for the local model, using default MS_COCO labels"
             )
+            self.config.dataset_labels = _MS_COCO_LABELS
+
+        # Auto-enable config flag
+        self.config.enable_local_classifier = True
+
+        self.local_model = LocalVisionModel(
+            model_path=load_model(
+                "local_classifier", self.config.local_classifier_model_path
+            ),
+            ncpu=self.config.ncpu_local_classifier,
+            device=self.config.device_local_classifier,
+            input_height=self.config.input_height,
+            input_width=self.config.input_width,
+            dataset_labels=self.config.dataset_labels,
+        )
 
     def custom_on_deactivate(self):
         # if visualization is enabled, shutdown the thread
@@ -514,25 +526,9 @@ class Vision(ModelComponent):
             return
 
         # conduct inference
-        if self.model_client:
-            result = self._call_inference(inference_input, unpack=True)
-            if not result:
-                return
-        elif self.config.enable_local_classifier:
-            result = self.local_classifier(
-                inference_input,
-                self.config.input_height,
-                self.config.input_width,
-                self.config.dataset_labels,
-            )
-            if not result:
-                # raise a fallback trigger via health status
-                self.health_status.set_fail_algorithm()
-                return
-        else:
-            raise TypeError(
-                "Vision component either requires a model client or enable_local_classifier needs to be set True in the VisionConfig. If latter was done, make sure no errors occurred during initialization of the local classifier model."
-            )
+        result = self._call_inference(inference_input, unpack=True)
+        if not result:
+            return
 
         # result acquired, publish inference result
         self._publish(
@@ -568,10 +564,22 @@ class Vision(ModelComponent):
         # Run inference once to warm up and once to measure time
         if self.model_client:
             self.model_client.inference(inference_input)
+        elif self.local_model:
+            self.local_model(inference_input)
 
         start_time = time.time()
         if self.model_client:
             result = self.model_client.inference(inference_input)
+            elapsed_time = time.time() - start_time
+            self.get_logger().warning(f"Model Output: {result}")
+            self.get_logger().warning(
+                f"Approximate Inference time: {elapsed_time} seconds"
+            )
+            self.get_logger().warning(
+                f"Max throughput: {1 / elapsed_time} frames per second"
+            )
+        elif self.local_model:
+            result = self.local_model(inference_input)
             elapsed_time = time.time() - start_time
             self.get_logger().warning(f"Model Output: {result}")
             self.get_logger().warning(
