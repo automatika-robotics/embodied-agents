@@ -19,7 +19,7 @@ from ..ros import (
     Detections,
     StreamingString,
 )
-from ..utils import get_prompt_template, validate_func_args, load_model_repo
+from ..utils import get_prompt_template, validate_func_args
 from .model_component import ModelComponent
 from .component_base import ComponentRunType
 
@@ -237,30 +237,14 @@ class LLM(ModelComponent):
             return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
         return text
 
-    # TODO: Remove patterns if an officially supported version is released
-    # Default allow_patterns for the default GenAI model repo, keyed by device.
-    _DEFAULT_GENAI_PATTERNS = {
-        "cpu": "cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/*",
-        "cuda": "cuda/cuda-int4-rtn-block-32/*",
-    }
-
     def _deploy_local_model(self):
         """Deploy local LLM model on demand."""
         if self.local_model is not None:
             return  # already deployed
         from ..utils.local_llm import LocalLLM
 
-        # For the default GenAI repo, select the right device variant
-        allow_patterns = self._DEFAULT_GENAI_PATTERNS.get(
-            self.config.device_local_model
-        )
-
         self.local_model = LocalLLM(
-            model_path=load_model_repo(
-                "local_llm",
-                self.config.local_model_path,
-                allow_patterns=allow_patterns,
-            ),
+            model_path=self.config.local_model_path,
             device=self.config.device_local_model,
             ncpu=self.config.ncpu_local_model,
         )

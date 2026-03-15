@@ -84,13 +84,13 @@ class LLMConfig(ModelComponentConfig):
     :type response_terminator: str
     :param strip_think_tokens: Whether to strip ``<think>...</think>`` blocks from model output. Reasoning models (e.g. Qwen3, DeepSeek-R1) emit these blocks which are useful for debugging but should typically not be forwarded to downstream components such as TTS or UI. Applies to both streaming and non-streaming output. Default is True.
     :type strip_think_tokens: bool
-    :param enable_local_model: Whether to enable a local LLM model via ONNX Runtime, allowing the component to run without a remote model client. Requires the ``onnxruntime-genai`` package. Default is False.
+    :param enable_local_model: Whether to enable a local LLM model via llama.cpp, allowing the component to run without a remote model client. Requires the ``llama-cpp-python`` package. Default is False.
     :type enable_local_model: bool
     :param device_local_model: Device to run the local model on, either "cpu" or "cuda" (default: "cuda"). This parameter is only effective when ``enable_local_model`` is True.
     :type device_local_model: str
     :param ncpu_local_model: Number of CPU cores to allocate to the local model when using CPU (default: 1). This parameter is only effective when ``enable_local_model`` is True.
     :type ncpu_local_model: int
-    :param local_model_path: HuggingFace repository ID for the local ONNX Runtime GenAI model (default: ``xiaoyao9184/Qwen3-0.6B-onnx-genai``). The repository must contain ``genai_config.json``. This parameter is only effective when ``enable_local_model`` is True.
+    :param local_model_path: HuggingFace repository ID for a GGUF model (default: ``Qwen/Qwen3-0.6B-GGUF``), or a local path to a ``.gguf`` file. This parameter is only effective when ``enable_local_model`` is True.
     :type local_model_path: Optional[str]
 
     Example of usage:
@@ -123,7 +123,7 @@ class LLMConfig(ModelComponentConfig):
     enable_local_model: bool = field(default=False)
     device_local_model: Literal["cpu", "cuda"] = field(default="cuda")
     ncpu_local_model: int = field(default=1)
-    local_model_path: Optional[str] = field(default="xiaoyao9184/Qwen3-0.6B-onnx-genai")
+    local_model_path: Optional[str] = field(default="Qwen/Qwen3-0.6B-GGUF")
     _system_prompt: Optional[str] = field(default=None, alias="_system_prompt")
     _component_prompt: Optional[Union[str, Path]] = field(
         default=None, alias="_component_prompt"
@@ -201,12 +201,14 @@ class MLLMConfig(LLMConfig):
         Supported values are: "general", "pointing", "affordance", "trajectory", and "grounding".
         Default is None.
     :type task: Optional[Literal["general", "pointing", "affordance", "trajectory", "grounding"]]
-    :param enable_local_model: Whether to enable a local VLM via the ``moondream`` package (Moondream2), allowing the component to run without a remote model client. Requires the ``moondream`` pip package. Default is False.
+    :param enable_local_model: Whether to enable a local VLM via llama.cpp (Moondream2), allowing the component to run without a remote model client. Requires the ``llama-cpp-python`` package. Default is False.
     :type enable_local_model: bool
     :param device_local_model: Device to run the local model on, either "cpu" or "cuda" (default: "cuda"). This parameter is only effective when ``enable_local_model`` is True.
     :type device_local_model: str
     :param ncpu_local_model: Number of CPU cores to allocate to the local model when using CPU (default: 1). This parameter is only effective when ``enable_local_model`` is True.
     :type ncpu_local_model: int
+    :param local_model_path: HuggingFace repository ID for a GGUF VLM model (default: ``ggml-org/moondream2-20250414-GGUF``). This parameter is only effective when ``enable_local_model`` is True.
+    :type local_model_path: Optional[str]
 
     Example of usage:
     ```python
@@ -222,7 +224,7 @@ class MLLMConfig(LLMConfig):
     task: Optional[
         Literal["general", "pointing", "affordance", "trajectory", "grounding"]
     ] = field(default=None)
-    local_model_path: Optional[str] = field(default=None)
+    local_model_path: Optional[str] = field(default="ggml-org/moondream2-20250414-GGUF")
 
     @task.validator
     def _check_task(self, _, value):
@@ -235,14 +237,6 @@ class MLLMConfig(LLMConfig):
             raise ValueError(
                 f"Local VLM model only supports general VQA. "
                 f"Task '{value}' requires a remote model client."
-            )
-
-    @local_model_path.validator
-    def _check_local_model_path(self, _, value):
-        """Local model path validator"""
-        if value:
-            raise ValueError(
-                "local_model_path is currently ineffective for VLM component config. Please unset it. The only available local VLM model is MoonDream and its configured by default."
             )
 
     def __attrs_post_init__(self):

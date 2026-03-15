@@ -59,7 +59,7 @@ class TestMLLMConfig:
     def test_defaults(self):
         c = MLLMConfig()
         assert c.task is None
-        assert c.local_model_path is None
+        assert c.local_model_path == "ggml-org/moondream2-20250414-GGUF"
 
     def test_task_with_stream_raises(self):
         with pytest.raises(ValueError):
@@ -74,9 +74,9 @@ class TestMLLMConfig:
         assert c.task == "general"
         assert c.enable_local_model is True
 
-    def test_local_model_path_set_raises(self):
-        with pytest.raises(ValueError):
-            MLLMConfig(local_model_path="/some/path")
+    def test_local_model_path_configurable(self):
+        c = MLLMConfig(local_model_path="/some/path/model.gguf")
+        assert c.local_model_path == "/some/path/model.gguf"
 
     def test_stream_with_local_raises(self):
         with pytest.raises(ValueError):

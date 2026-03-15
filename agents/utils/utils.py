@@ -265,9 +265,10 @@ def encode_img_base64(img: np.ndarray) -> str:
     :type img: np.ndarray
     :rtype: str
     """
-    encode_params = [int(cv2.IMWRITE_PNG_COMPRESSION), 9]
-    _, buffer = cv2.imencode(".png", img, encode_params)
-    return base64.b64encode(buffer).decode("utf-8")
+    # OpenCV expects BGR for encoding
+    bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+    _, buf = cv2.imencode(".png", bgr)
+    return base64.b64encode(buf).decode("utf-8")
 
 
 class VADStatus(Enum):

@@ -7,113 +7,84 @@ from unittest.mock import MagicMock, patch
 
 
 @pytest.fixture(autouse=True)
-def mock_onnxruntime_genai():
-    """Mock onnxruntime_genai before importing LocalLLM."""
-    mock_og = MagicMock()
-    mock_og.Model.return_value = MagicMock()
-    mock_og.Tokenizer.return_value = MagicMock()
-    with patch.dict(sys.modules, {"onnxruntime_genai": mock_og}):
-        yield mock_og
+def mock_llama_cpp():
+    """Mock llama_cpp before importing LocalLLM."""
+    mock_module = MagicMock()
+    with patch.dict(sys.modules, {"llama_cpp": mock_module}):
+        yield mock_module
 
 
 @pytest.fixture
-def local_llm(mock_onnxruntime_genai):
+def local_llm(mock_llama_cpp):
     from agents.utils.local_llm import LocalLLM
 
     llm = LocalLLM.__new__(LocalLLM)
-    llm._og = mock_onnxruntime_genai
-    llm.model = MagicMock()
-    llm.tokenizer = MagicMock()
+    llm.llm = MagicMock()
     llm.device = "cpu"
     llm.ncpu = 1
     return llm
 
 
-def _mock_generator(og_mock, tokenizer, token_ids, decoded_texts):
-    """Set up a mock Generator that yields the given tokens then reports done."""
-    mock_gen = MagicMock()
-    # is_done returns False for each token, then True
-    mock_gen.is_done.side_effect = [False] * len(token_ids) + [True]
-    mock_gen.get_next_tokens.side_effect = [[t] for t in token_ids]
-    og_mock.Generator.return_value = mock_gen
-
-    mock_stream = MagicMock()
-    mock_stream.decode.side_effect = decoded_texts
-    tokenizer.create_stream.return_value = mock_stream
-
-    return mock_gen
-
-
-class TestApplyChatTemplate:
-    def test_basic_template(self, local_llm):
-        messages = [
-            {"role": "system", "content": "You are helpful."},
-            {"role": "user", "content": "Hello"},
-        ]
-        result = local_llm._apply_chat_template(messages)
-        assert "<|im_start|>system\nYou are helpful.<|im_end|>" in result
-        assert "<|im_start|>user\nHello<|im_end|>" in result
-        assert result.endswith("<|im_start|>assistant\n")
+def _mock_response(content="Hello there!", tool_calls=None):
+    """Build a mock non-streaming chat completion response."""
+    message = {"role": "assistant", "content": content}
+    finish_reason = "stop"
+    if tool_calls:
+        message["tool_calls"] = tool_calls
+        finish_reason = "tool_calls"
+    return {
+        "choices": [
+            {
+                "index": 0,
+                "message": message,
+                "finish_reason": finish_reason,
+            }
+        ],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+    }
 
 
-class TestParseToolCalls:
-    def test_valid_tool_call(self, local_llm):
-        text = '<tool_call>{"name": "my_func", "arguments": {"a": 1}}</tool_call>'
-        calls = local_llm._parse_tool_calls(text)
-        assert len(calls) == 1
-        assert calls[0]["function"]["name"] == "my_func"
-        assert calls[0]["function"]["arguments"] == {"a": 1}
-
-    def test_invalid_json_skipped(self, local_llm):
-        text = "<tool_call>not valid json</tool_call>"
-        calls = local_llm._parse_tool_calls(text)
-        assert len(calls) == 0
-
-    def test_multiple_tool_calls(self, local_llm):
-        text = (
-            '<tool_call>{"name": "f1", "arguments": {}}</tool_call>'
-            '<tool_call>{"name": "f2", "arguments": {"x": 2}}</tool_call>'
-        )
-        calls = local_llm._parse_tool_calls(text)
-        assert len(calls) == 2
+def _mock_stream_chunks(tokens):
+    """Build mock streaming chunks from a list of token strings."""
+    chunks = []
+    # First chunk: role announcement
+    chunks.append({"choices": [{"delta": {"role": "assistant"}, "finish_reason": None}]})
+    # Content chunks
+    for token in tokens:
+        chunks.append({"choices": [{"delta": {"content": token}, "finish_reason": None}]})
+    # Final chunk
+    chunks.append({"choices": [{"delta": {}, "finish_reason": "stop"}]})
+    return chunks
 
 
 class TestCallNonStreaming:
     def test_returns_output(self, local_llm):
-        local_llm.tokenizer.encode.return_value = [1, 2, 3]
-        _mock_generator(
-            local_llm._og,
-            local_llm.tokenizer,
-            token_ids=[4, 5],
-            decoded_texts=["Hello", " there!"],
+        local_llm.llm.create_chat_completion.return_value = _mock_response(
+            "Hello there!"
         )
 
         result = local_llm({"query": [{"role": "user", "content": "Hi"}]})
         assert result["output"] == "Hello there!"
+        local_llm.llm.create_chat_completion.assert_called_once()
 
-    def test_stops_at_end_token(self, local_llm):
-        local_llm.tokenizer.encode.return_value = [1]
-        _mock_generator(
-            local_llm._og,
-            local_llm.tokenizer,
-            token_ids=[2, 3],
-            decoded_texts=["Response", "<|im_end|>"],
-        )
+    def test_passes_temperature_and_max_tokens(self, local_llm):
+        local_llm.llm.create_chat_completion.return_value = _mock_response("ok")
 
-        result = local_llm({"query": [{"role": "user", "content": "Test"}]})
-        assert result["output"] == "Response"
+        local_llm({
+            "query": [{"role": "user", "content": "Hi"}],
+            "temperature": 0.5,
+            "max_new_tokens": 100,
+        })
+
+        call_kwargs = local_llm.llm.create_chat_completion.call_args[1]
+        assert call_kwargs["temperature"] == 0.5
+        assert call_kwargs["max_tokens"] == 100
 
 
 class TestCallStreaming:
     def test_returns_generator(self, local_llm):
-        local_llm.tokenizer.encode.return_value = [1]
-
-        _mock_generator(
-            local_llm._og,
-            local_llm.tokenizer,
-            token_ids=[1, 2],
-            decoded_texts=["Hello", " world"],
-        )
+        chunks = _mock_stream_chunks(["Hello", " world"])
+        local_llm.llm.create_chat_completion.return_value = iter(chunks)
 
         result = local_llm(
             {"query": [{"role": "user", "content": "Hi"}]}, stream=True
@@ -124,14 +95,19 @@ class TestCallStreaming:
 
 
 class TestCallWithTools:
-    def test_tools_parsed_from_output(self, local_llm):
-        tool_call_text = '<tool_call>{"name": "route_to_nav", "arguments": {}}</tool_call>'
-        local_llm.tokenizer.encode.return_value = [1]
-        _mock_generator(
-            local_llm._og,
-            local_llm.tokenizer,
-            token_ids=[2],
-            decoded_texts=[tool_call_text],
+    def test_tools_parsed_from_response(self, local_llm):
+        tool_calls = [
+            {
+                "id": "call_0",
+                "type": "function",
+                "function": {
+                    "name": "route_to_nav",
+                    "arguments": json.dumps({"x": 1}),
+                },
+            }
+        ]
+        local_llm.llm.create_chat_completion.return_value = _mock_response(
+            content=None, tool_calls=tool_calls
         )
 
         tools = [{"type": "function", "function": {"name": "route_to_nav"}}]
@@ -140,3 +116,16 @@ class TestCallWithTools:
         )
         assert "tool_calls" in result
         assert result["tool_calls"][0]["function"]["name"] == "route_to_nav"
+        assert result["tool_calls"][0]["function"]["arguments"] == {"x": 1}
+
+    def test_passes_tools_to_api(self, local_llm):
+        local_llm.llm.create_chat_completion.return_value = _mock_response("ok")
+
+        tools = [{"type": "function", "function": {"name": "test_fn"}}]
+        local_llm(
+            {"query": [{"role": "user", "content": "Hi"}], "tools": tools}
+        )
+
+        call_kwargs = local_llm.llm.create_chat_completion.call_args[1]
+        assert call_kwargs["tools"] == tools
+        assert call_kwargs["tool_choice"] == "auto"

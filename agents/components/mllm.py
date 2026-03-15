@@ -19,7 +19,7 @@ from ..ros import (
     ROSImage,
     ROSCompressedImage,
 )
-from ..utils import validate_func_args, load_model_repo
+from ..utils import validate_func_args
 from .llm import LLM
 
 
@@ -153,9 +153,8 @@ class MLLM(LLM):
             return  # already deployed
         from ..utils.local_vlm import LocalVLM
 
-        # TODO: Multiple models
         self.local_model = LocalVLM(
-            model_path=load_model_repo("local_vlm", "vikhyatk/moondream2"),
+            model_path=self.config.local_model_path,
             device=self.config.device_local_model,
             ncpu=self.config.ncpu_local_model,
         )
