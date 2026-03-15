@@ -14,10 +14,11 @@ class LocalLLM:
     def __init__(self, model_path: str, device: str = "cuda", ncpu: int = 1):
         try:
             import onnxruntime_genai as og
-        except ModuleNotFoundError as e:
-            raise ModuleNotFoundError(
+        except ImportError as e:
+            raise ImportError(
                 "Local LLM model deployment requires onnxruntime-genai. "
-                "Install it with: pip install onnxruntime-genai"
+                "Install it with: pip install onnxruntime-genai\n"
+                f"Original error: {e}"
             ) from e
 
         self._og = og
