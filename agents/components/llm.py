@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 from typing import Any, Optional, Union, Callable, List, Dict, MutableMapping
 import msgpack
@@ -175,6 +176,9 @@ class LLM(ModelComponent):
 
         # initialize response buffers used for streaming
         if self.config.stream:
+            # initialize think block state for streaming
+            self._in_think_block: bool = False
+            # initialize result buffers
             self.result_partial: List = []
             self.result_complete: List = []
             # issue a warning in case StreamingText type is not used in output
@@ -227,6 +231,40 @@ class LLM(ModelComponent):
         }
         self.db_client.add(db_input)
 
+    def _strip_think_tokens(self, text: str) -> str:
+        """Strip <think>...</think> blocks from model output."""
+        if self.config.strip_think_tokens:
+            return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+        return text
+
+    # TODO: Remove patterns if an officially supported version is released
+    # Default allow_patterns for the default GenAI model repo, keyed by device.
+    _DEFAULT_GENAI_PATTERNS = {
+        "cpu": "cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/*",
+        "cuda": "cuda/cuda-int4-rtn-block-32/*",
+    }
+
+    def _deploy_local_model(self):
+        """Deploy local LLM model on demand."""
+        if self.local_model is not None:
+            return  # already deployed
+        from ..utils.local_llm import LocalLLM
+
+        # For the default GenAI repo, select the right device variant
+        allow_patterns = self._DEFAULT_GENAI_PATTERNS.get(
+            self.config.device_local_model
+        )
+
+        self.local_model = LocalLLM(
+            model_path=load_model_repo(
+                "local_llm",
+                self.config.local_model_path,
+                allow_patterns=allow_patterns,
+            ),
+            device=self.config.device_local_model,
+            ncpu=self.config.ncpu_local_model,
+        )
+
     def _handle_rag_query(self, query: str) -> Optional[str]:
         """Internal handler for retrieving documents for RAG.
         :param query:
@@ -259,34 +297,6 @@ class LLM(ModelComponent):
                 else "\n".join(doc for doc in result["output"]["documents"])
             )
             return rag_docs
-
-    # TODO: Remove patterns if an officially supported version is released
-    # Default allow_patterns for the default GenAI model repo, keyed by device.
-    _DEFAULT_GENAI_PATTERNS = {
-        "cpu": "cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/*",
-        "cuda": "cuda/cuda-int4-rtn-block-32/*",
-    }
-
-    def _deploy_local_model(self):
-        """Deploy local LLM model on demand."""
-        if self.local_model is not None:
-            return  # already deployed
-        from ..utils.local_llm import LocalLLM
-
-        # For the default GenAI repo, select the right device variant
-        allow_patterns = self._DEFAULT_GENAI_PATTERNS.get(
-            self.config.device_local_model
-        )
-
-        self.local_model = LocalLLM(
-            model_path=load_model_repo(
-                "local_llm",
-                self.config.local_model_path,
-                allow_patterns=allow_patterns,
-            ),
-            device=self.config.device_local_model,
-            ncpu=self.config.ncpu_local_model,
-        )
 
     def _handle_chat_history(self, message: Dict) -> None:
         """Internal handler for chat history"""
@@ -454,6 +464,15 @@ class LLM(ModelComponent):
         """
         Processes a single token from a stream based on the break_character config.
         """
+        if self.config.strip_think_tokens:
+            if "<think>" in token:
+                self._in_think_block = True
+                return
+            if "</think>" in token:
+                self._in_think_block = False
+                return
+            if self._in_think_block:
+                return
         if self.config.break_character:
             self.result_partial.append(token)
             if self.config.break_character in token:
@@ -476,6 +495,7 @@ class LLM(ModelComponent):
         Finalizes the stream by publishing any remaining partial results and
         appending the complete message to the message history.
         """
+        self._in_think_block = False
         # Send remaining result after break character or termination if any
         if self.config.break_character:
             if self.result_partial:
@@ -556,6 +576,7 @@ class LLM(ModelComponent):
                 self.__handle_streaming_generator(result)
                 return
 
+            result["output"] = self._strip_think_tokens(result["output"])
             self.messages.append({"role": "assistant", "content": result["output"]})
 
             # handle tool calls

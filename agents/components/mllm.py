@@ -250,6 +250,7 @@ class MLLM(LLM):
     def _publish_task_specific_outputs(self, result: MutableMapping) -> None:
         """Publish outputs based on task type"""
         if self._task == "general":
+            result["output"] = self._strip_think_tokens(result["output"])
             self.messages.append({"role": "assistant", "content": result["output"]})
             for pub_name in self._string_publishers:
                 self.publishers_dict[pub_name].publish(
