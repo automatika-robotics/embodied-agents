@@ -32,7 +32,6 @@ class LocalLLM:
         config.clear_providers()
         if device == "cuda":
             config.append_provider("CUDAExecutionProvider")
-        config.append_provider("CPUExecutionProvider")
         self.model = og.Model(config)
         self.tokenizer = og.Tokenizer(self.model)
 
