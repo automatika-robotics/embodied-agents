@@ -37,9 +37,10 @@ class LocalTTS:
                     voices=f"{model_path}/voices.bin",
                     tokens=f"{model_path}/tokens.txt",
                     data_dir=f"{model_path}/espeak-ng-data",
-                )
+                ),
+                num_threads=ncpu,
+                provider="cuda" if device == "cuda" else "cpu",
             ),
-            num_threads=ncpu,
         )
         self._tts = sherpa_onnx.OfflineTts(tts_config)
 
