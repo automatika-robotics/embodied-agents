@@ -67,6 +67,7 @@ class LocalTTS:
         :param sample_rate: Sample rate in Hz
         :returns: WAV file bytes
         """
+        samples = np.array(samples, dtype=np.float32)
         int16_data = (samples * 32767).astype(np.int16)
         buf = io.BytesIO()
         with wave.open(buf, "wb") as wf:
