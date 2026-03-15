@@ -88,7 +88,7 @@ class LLMConfig(ModelComponentConfig):
     :type device_local_model: str
     :param ncpu_local_model: Number of CPU cores to allocate to the local model when using CPU (default: 1). This parameter is only effective when ``enable_local_model`` is True.
     :type ncpu_local_model: int
-    :param local_model_path: HuggingFace repository ID for the local ONNX model (default: ``onnx-community/Qwen3-0.6B-ONNX``). This parameter is only effective when ``enable_local_model`` is True.
+    :param local_model_path: HuggingFace repository ID for the local ONNX Runtime GenAI model (default: ``xiaoyao9184/Qwen3-0.6B-onnx-genai``). The repository must contain ``genai_config.json``. This parameter is only effective when ``enable_local_model`` is True.
     :type local_model_path: Optional[str]
 
     Example of usage:
@@ -120,7 +120,7 @@ class LLMConfig(ModelComponentConfig):
     enable_local_model: bool = field(default=False)
     device_local_model: Literal["cpu", "cuda"] = field(default="cuda")
     ncpu_local_model: int = field(default=1)
-    local_model_path: Optional[str] = field(default="onnx-community/Qwen3-0.6B-ONNX")
+    local_model_path: Optional[str] = field(default="xiaoyao9184/Qwen3-0.6B-onnx-genai")
     _system_prompt: Optional[str] = field(default=None, alias="_system_prompt")
     _component_prompt: Optional[Union[str, Path]] = field(
         default=None, alias="_component_prompt"
