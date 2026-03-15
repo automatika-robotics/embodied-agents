@@ -63,9 +63,8 @@ class LocalLLM:
                 continue
         return tool_calls
 
-    def _get_params(self, inference_input: Dict, tokens) -> Dict:
+    def _get_params(self, inference_input: Dict):
         params = self._og.GeneratorParams(self.model)
-        params.input_ids = tokens
         if temperature := inference_input.get("temperature"):
             params.set_search_options(temperature=temperature)
         if max_new_tokens := inference_input.get("max_new_tokens"):
@@ -95,20 +94,14 @@ class LocalLLM:
                 f"<|im_start|>assistant\n"
             )
 
-        # Get params
-        params = self._get_params(inference_input, self.tokenizer.encode(prompt))
+        input_tokens = self.tokenizer.encode(prompt)
+        params = self._get_params(inference_input)
+        token_gen = self._generate_tokens(params, input_tokens)
 
         if stream:
-            return {"output": self._stream(params)}
+            return {"output": token_gen}
 
-        output_tokens = self.model.generate(params)[0]
-        output_text = self.tokenizer.decode(output_tokens)
-
-        # Strip the prompt echo if present
-        if output_text.startswith(prompt):
-            output_text = output_text[len(prompt) :]
-        # Strip end token
-        output_text = output_text.replace("<|im_end|>", "").strip()
+        output_text = "".join(token_gen)
 
         result = {"output": output_text}
 
@@ -120,21 +113,23 @@ class LocalLLM:
 
         return result
 
-    def _stream(self, params: Dict) -> Generator[str, None, None]:
-        """Stream inference output token by token.
+    def _generate_tokens(self, params, input_tokens) -> Generator[str, None, None]:
+        """Generate decoded text tokens from the model.
 
-        :param inference_input: Dict with 'query' (messages list) and optional params
-        :yields: String tokens
+        :param params: GeneratorParams
+        :param input_tokens: Encoded input tokens
+        :yields: Decoded text strings, one per generated token
         """
         generator = self._og.Generator(self.model, params)
+        generator.append_tokens(input_tokens)
         tokenizer_stream = self.tokenizer.create_stream()
 
         while not generator.is_done():
-            generator.compute_logits()
             generator.generate_next_token()
             token = generator.get_next_tokens()[0]
             text = tokenizer_stream.decode(token)
-            # Skip end tokens
             if "<|im_end|>" in text:
                 break
             yield text
+
+        del generator

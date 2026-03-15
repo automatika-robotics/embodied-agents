@@ -29,6 +29,21 @@ def local_llm(mock_onnxruntime_genai):
     return llm
 
 
+def _mock_generator(og_mock, tokenizer, token_ids, decoded_texts):
+    """Set up a mock Generator that yields the given tokens then reports done."""
+    mock_gen = MagicMock()
+    # is_done returns False for each token, then True
+    mock_gen.is_done.side_effect = [False] * len(token_ids) + [True]
+    mock_gen.get_next_tokens.side_effect = [[t] for t in token_ids]
+    og_mock.Generator.return_value = mock_gen
+
+    mock_stream = MagicMock()
+    mock_stream.decode.side_effect = decoded_texts
+    tokenizer.create_stream.return_value = mock_stream
+
+    return mock_gen
+
+
 class TestApplyChatTemplate:
     def test_basic_template(self, local_llm):
         messages = [
@@ -65,19 +80,25 @@ class TestParseToolCalls:
 
 class TestCallNonStreaming:
     def test_returns_output(self, local_llm):
-        prompt = "<|im_start|>user\nHi<|im_end|>\n<|im_start|>assistant\n"
         local_llm.tokenizer.encode.return_value = [1, 2, 3]
-        local_llm.model.generate.return_value = [[1, 2, 3, 4, 5]]
-        local_llm.tokenizer.decode.return_value = prompt + "Hello there!<|im_end|>"
+        _mock_generator(
+            local_llm._og,
+            local_llm.tokenizer,
+            token_ids=[4, 5],
+            decoded_texts=["Hello", " there!"],
+        )
 
         result = local_llm({"query": [{"role": "user", "content": "Hi"}]})
         assert result["output"] == "Hello there!"
 
-    def test_strips_prompt_echo(self, local_llm):
-        prompt = "<|im_start|>user\nTest<|im_end|>\n<|im_start|>assistant\n"
+    def test_stops_at_end_token(self, local_llm):
         local_llm.tokenizer.encode.return_value = [1]
-        local_llm.model.generate.return_value = [[1, 2]]
-        local_llm.tokenizer.decode.return_value = prompt + "Response<|im_end|>"
+        _mock_generator(
+            local_llm._og,
+            local_llm.tokenizer,
+            token_ids=[2, 3],
+            decoded_texts=["Response", "<|im_end|>"],
+        )
 
         result = local_llm({"query": [{"role": "user", "content": "Test"}]})
         assert result["output"] == "Response"
@@ -87,14 +108,12 @@ class TestCallStreaming:
     def test_returns_generator(self, local_llm):
         local_llm.tokenizer.encode.return_value = [1]
 
-        mock_generator = MagicMock()
-        mock_generator.is_done.side_effect = [False, False, True]
-        mock_generator.get_next_tokens.side_effect = [[1], [2]]
-        local_llm._og.Generator.return_value = mock_generator
-
-        mock_stream = MagicMock()
-        mock_stream.decode.side_effect = ["Hello", " world"]
-        local_llm.tokenizer.create_stream.return_value = mock_stream
+        _mock_generator(
+            local_llm._og,
+            local_llm.tokenizer,
+            token_ids=[1, 2],
+            decoded_texts=["Hello", " world"],
+        )
 
         result = local_llm(
             {"query": [{"role": "user", "content": "Hi"}]}, stream=True
@@ -107,10 +126,13 @@ class TestCallStreaming:
 class TestCallWithTools:
     def test_tools_parsed_from_output(self, local_llm):
         tool_call_text = '<tool_call>{"name": "route_to_nav", "arguments": {}}</tool_call>'
-        prompt = "<|im_start|>user\nGo<|im_end|>\n<|im_start|>assistant\n"
         local_llm.tokenizer.encode.return_value = [1]
-        local_llm.model.generate.return_value = [[1, 2]]
-        local_llm.tokenizer.decode.return_value = prompt + tool_call_text + "<|im_end|>"
+        _mock_generator(
+            local_llm._og,
+            local_llm.tokenizer,
+            token_ids=[2],
+            decoded_texts=[tool_call_text],
+        )
 
         tools = [{"type": "function", "function": {"name": "route_to_nav"}}]
         result = local_llm(
