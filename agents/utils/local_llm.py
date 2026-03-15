@@ -21,10 +21,19 @@ class LocalLLM:
             ) from e
 
         self._og = og
-        self.model = og.Model(model_path)
-        self.tokenizer = og.Tokenizer(self.model)
         self.device = device
         self.ncpu = ncpu
+
+        # Use Config to explicitly set the execution provider so that
+        # onnxruntime-genai-cuda doesn't try to load CUDA libs when CPU
+        # is requested.
+        config = og.Config(model_path)
+        config.clear_providers()
+        if device == "cuda":
+            config.append_provider("CUDAExecutionProvider")
+        config.append_provider("CPUExecutionProvider")
+        self.model = og.Model(config)
+        self.tokenizer = og.Tokenizer(self.model)
 
     # TODO: parameterize template and tool call format
     def _apply_chat_template(self, messages: list) -> str:
