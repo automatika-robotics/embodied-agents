@@ -18,7 +18,7 @@ class LocalLLM:
             raise ImportError(
                 "Local LLM model deployment requires onnxruntime-genai. "
                 "Install it with: pip install onnxruntime-genai\n"
-                f"Original error: {e}"
+                "or for nvidia GPUs with: pip install onnxruntime-genai-cuda\n"
             ) from e
 
         self._og = og
