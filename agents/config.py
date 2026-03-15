@@ -422,12 +422,14 @@ class TextToSpeechConfig(ModelComponentConfig):
 
     This class defines the configuration options for a Text-To-Speech component.
 
-    :param enable_local_model: Whether to enable a local TTS model via the ``kokoro-onnx`` package (Kokoro-82M), allowing the component to run without a remote model client. Requires the ``kokoro-onnx`` and ``soundfile`` pip packages. Default is False.
+    :param enable_local_model: Whether to enable a local TTS model via ``sherpa-onnx`` (Kokoro English by default), allowing the component to run without a remote model client. Requires the ``sherpa-onnx`` pip package. Default is False.
     :type enable_local_model: bool
     :param device_local_model: Device to run the local model on, either "cpu" or "cuda" (default: "cuda"). This parameter is only effective when ``enable_local_model`` is True.
     :type device_local_model: str
     :param ncpu_local_model: Number of CPU cores to allocate to the local model when using CPU (default: 1). This parameter is only effective when ``enable_local_model`` is True.
     :type ncpu_local_model: int
+    :param local_model_path: HuggingFace repository ID for a sherpa-onnx compatible TTS model (default: ``csukuangfj/kokoro-en-v0_19``). For available models see https://k2-fsa.github.io/sherpa/onnx/pretrained_models/index.html. This parameter is only effective when ``enable_local_model`` is True.
+    :type local_model_path: Optional[str]
     :param play_on_device: Whether to play the audio on available audio device (default: False).
     :type play_on_device: bool
     :param device: Optional device id (int) for playing the audio. Only effective if play_on_device is True (default: None).
@@ -464,6 +466,7 @@ class TextToSpeechConfig(ModelComponentConfig):
     enable_local_model: bool = field(default=False)
     device_local_model: Literal["cpu", "cuda"] = field(default="cuda")
     ncpu_local_model: int = field(default=1)
+    local_model_path: Optional[str] = field(default="csukuangfj/kokoro-en-v0_19")
     play_on_device: bool = field(default=False)
     device: Optional[int] = field(default=None)
     stream_to_ip: Optional[str] = field(default=None)
@@ -525,12 +528,14 @@ class SpeechToTextConfig(ModelComponentConfig):
     --
     Local Model
     --
-    :param enable_local_model: Whether to enable a local STT model via the ``moonshine-onnx`` package (Moonshine Base, 62M params), allowing the component to run without a remote model client. Requires the ``moonshine-onnx`` pip package. Default is False.
+    :param enable_local_model: Whether to enable a local STT model via ``sherpa-onnx`` (Whisper tiny.en by default), allowing the component to run without a remote model client. Requires the ``sherpa-onnx`` pip package. Default is False.
     :type enable_local_model: bool
     :param device_local_model: Device to run the local model on, either "cpu" or "cuda" (default: "cuda"). This parameter is only effective when ``enable_local_model`` is True.
     :type device_local_model: str
     :param ncpu_local_model: Number of CPU cores to allocate to the local model when using CPU (default: 1). This parameter is only effective when ``enable_local_model`` is True.
     :type ncpu_local_model: int
+    :param local_model_path: HuggingFace repository ID for a sherpa-onnx compatible Whisper STT model (default: ``csukuangfj/sherpa-onnx-whisper-tiny.en``). For available models see https://k2-fsa.github.io/sherpa/onnx/pretrained_models/index.html. This parameter is only effective when ``enable_local_model`` is True.
+    :type local_model_path: Optional[str]
 
     --
     Transcription
@@ -670,6 +675,9 @@ class SpeechToTextConfig(ModelComponentConfig):
     enable_local_model: bool = field(default=False)
     device_local_model: Literal["cpu", "cuda"] = field(default="cuda")
     ncpu_local_model: int = field(default=1)
+    local_model_path: Optional[str] = field(
+        default="csukuangfj/sherpa-onnx-whisper-tiny.en"
+    )
     initial_prompt: Optional[str] = field(default=None)
     language: Optional[str] = field(
         default="en",

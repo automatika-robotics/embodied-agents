@@ -216,9 +216,10 @@ class SpeechToText(ModelComponent):
             return  # already deployed
         from ..utils.local_stt import LocalSTT
 
-        # TODO: Multiple models
         self.local_model = LocalSTT(
-            model_path=load_model_repo("local_stt", "UsefulSensors/moonshine-base"),
+            model_path=load_model_repo(
+                "local_stt", self.config.local_model_path
+            ),
             device=self.config.device_local_model,
             ncpu=self.config.ncpu_local_model,
         )

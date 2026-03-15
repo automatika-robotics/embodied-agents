@@ -144,9 +144,10 @@ class TextToSpeech(ModelComponent):
             return  # already deployed
         from ..utils.local_tts import LocalTTS
 
-        # TODO: Multiple models
         self.local_model = LocalTTS(
-            model_path=load_model_repo("local_tts", "hexgrad/Kokoro-82M"),
+            model_path=load_model_repo(
+                "local_tts", self.config.local_model_path
+            ),
             device=self.config.device_local_model,
             ncpu=self.config.ncpu_local_model,
         )
