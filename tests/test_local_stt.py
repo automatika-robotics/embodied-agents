@@ -25,39 +25,42 @@ def local_stt(mock_sherpa):
     return stt
 
 
+def _setup_mock_stream(local_stt, text):
+    """Configure the mock recognizer to return a stream with the given text."""
+    mock_stream = MagicMock()
+    mock_stream.result.text = text
+    local_stt._recognizer.create_stream.return_value = mock_stream
+    return mock_stream
+
+
 class TestLocalSTTCall:
     def test_with_bytes(self, local_stt):
         # Create int16 audio bytes
         audio = np.array([0, 100, -100, 32767], dtype=np.int16)
         audio_bytes = audio.tobytes()
-        mock_result = MagicMock()
-        mock_result.text = "hello world"
-        local_stt._recognizer.recognize.return_value = mock_result
+        mock_stream = _setup_mock_stream(local_stt, "hello world")
 
         result = local_stt({"query": audio_bytes})
         assert result["output"] == "hello world"
-        local_stt._recognizer.recognize.assert_called_once()
+        mock_stream.accept_waveform.assert_called_once()
+        local_stt._recognizer.decode_stream.assert_called_once_with(mock_stream)
 
     def test_with_numpy(self, local_stt):
         audio = np.array([0.1, 0.2, -0.1], dtype=np.float32)
-        mock_result = MagicMock()
-        mock_result.text = "test"
-        local_stt._recognizer.recognize.return_value = mock_result
+        _setup_mock_stream(local_stt, "test")
 
         result = local_stt({"query": audio})
         assert result["output"] == "test"
 
     def test_multidimensional_flattened(self, local_stt):
         audio = np.array([[0.1, 0.2], [0.3, 0.4]], dtype=np.float32)
-        mock_result = MagicMock()
-        mock_result.text = "flat"
-        local_stt._recognizer.recognize.return_value = mock_result
+        mock_stream = _setup_mock_stream(local_stt, "flat")
 
         result = local_stt({"query": audio})
         assert result["output"] == "flat"
         # Verify the array was flattened
-        call_arg = local_stt._recognizer.recognize.call_args[0][0]
-        assert call_arg.ndim == 1
+        call_args = mock_stream.accept_waveform.call_args[0]
+        assert call_args[1].ndim == 1
 
     def test_unsupported_type(self, local_stt):
         result = local_stt({"query": 12345})

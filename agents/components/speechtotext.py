@@ -222,6 +222,7 @@ class SpeechToText(ModelComponent):
             ),
             device=self.config.device_local_model,
             ncpu=self.config.ncpu_local_model,
+            sample_rate=self.config._sample_rate
         )
         # Local STT does not support streaming
         if self.config.stream:

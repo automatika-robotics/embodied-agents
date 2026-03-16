@@ -18,7 +18,7 @@ class LocalSTT:
     :param ncpu: Number of CPU threads
     """
 
-    def __init__(self, model_path: str, device: str = "cuda", ncpu: int = 1):
+    def __init__(self, model_path: str, device: str = "cuda", ncpu: int = 1, sample_rate=16000):
         try:
             import sherpa_onnx
         except ImportError as e:
@@ -29,6 +29,7 @@ class LocalSTT:
 
         self.device = device
         self.ncpu = ncpu
+        self._sample_rate = sample_rate
 
         # Auto-detect model files — prefer int8 variants for edge
         encoders = sorted(glob(f"{model_path}/*encoder*.onnx"))
@@ -75,6 +76,8 @@ class LocalSTT:
         if audio_np.ndim > 1:
             audio_np = audio_np.flatten()
 
-        result = self._recognizer.recognize(audio_np)
+        stream = self._recognizer.create_stream()
+        stream.accept_waveform(self._sample_rate, audio_np)
+        self._recognizer.decode_stream(stream)
 
-        return {"output": result.text.strip()}
+        return {"output": stream.result.text.strip()}
