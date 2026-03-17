@@ -103,16 +103,6 @@ launcher.add_pkg(components=[llm])
 launcher.bringup()
 ```
 
-| Component | Backend | Default Model |
-|-----------|---------|---------------|
-| **LLM** | [llama-cpp-python](https://github.com/abetlen/llama-cpp-python) | Qwen3-0.6B (GGUF) |
-| **VLM** | [llama-cpp-python](https://github.com/abetlen/llama-cpp-python) | Moondream2 (GGUF) |
-| **Vision** | [onnxruntime](https://github.com/microsoft/onnxruntime) | DEIM (CVPR 2025) |
-| **Speech-to-Text** | [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) | Whisper tiny.en |
-| **Text-to-Speech** | [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) | Kokoro English |
-
-No PyTorch. No Transformers. Runs on NVIDIA Jetson and edge devices.
-
 ---
 
 ## Complex Component Graphs
