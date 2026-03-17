@@ -1,69 +1,35 @@
 ---
-title: EmbodiedAgents Documentation
+title: EmbodiedAgents Developer Documentation
 ---
 
-```{include} intro.md
+:::{admonition} Looking for usage documentation?
+:class: tip
 
+Tutorials, installation guides, and usage documentation have moved to the
+**[EMOS Documentation](https://emos.automatikarobotics.com)** — the unified
+docs for the EMOS ecosystem.
+:::
+
+# EmbodiedAgents Developer Docs
+
+EmbodiedAgents is the intelligence layer of the [EMOS](https://github.com/automatika-robotics/emos) ecosystem. It provides AI component abstractions, model client integrations, and semantic memory for building physical AI agents on ROS 2.
+
+This site contains **developer documentation** for contributors extending the framework with new components, clients, models, or message types.
+
+```{toctree}
+:maxdepth: 2
+:caption: Developer Guide
+
+development/architecture
+development/custom_component
+development/custom_client
+development/custom_model
+development/messages
 ```
 
 ```{toctree}
-:maxdepth: 1
-:caption: Get Started
-:hidden:
-
-installation
-quickstart
-```
-
-```{toctree}
-:maxdepth: 1
-:caption: Basic Concepts
-:hidden:
-
-basics/components
-basics/clients
-basics/models
-```
-
-```{toctree}
-:maxdepth: 1
-:caption: Foundation Recipes
-:hidden:
-
-examples/foundation/index
-examples/foundation/conversational
-examples/foundation/prompt_engineering
-examples/foundation/semantic_map
-examples/foundation/goto
-examples/foundation/tool_calling
-examples/foundation/semantic_router
-examples/foundation/complete
-```
-
-```{toctree}
-:maxdepth: 1
-:caption: Embodied Planning and Control
-:hidden:
-examples/planning_control/index
-examples/planning_control/planning_model
-examples/planning_control/vla
-examples/planning_control/vla_with_event
-```
-
-```{toctree}
-:maxdepth: 1
-:caption: Events & Actions
-:hidden:
-examples/events/index
-examples/events/multiprocessing
-examples/events/fallback
-examples/events/event_driven_description
-```
-
-```{toctree}
-:maxdepth: 1
-:caption: Complete Reference
-:hidden:
+:maxdepth: 2
+:caption: API Reference
 
 apidocs/index
 ```
