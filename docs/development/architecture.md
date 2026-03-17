@@ -159,3 +159,54 @@ Model (data class)  -->  ModelClient (connection logic)  -->  ModelComponent (RO
 - **ModelComponent**: Holds a `ModelClient` instance, calls it during `_execution_step()`, and manages the ROS lifecycle around it.
 
 This separation means the same model can be served by different clients (Ollama, RoboML, GenericHTTP), and the same client can be used across different component types.
+
+## Local Model Deployment
+
+Components that subclass `ModelComponent` can optionally run without a remote model client by enabling a built-in local model. This is controlled via `enable_local_model=True` in the component's config.
+
+### How It Works
+
+When `enable_local_model` is set, the component's `custom_on_configure()` calls `_deploy_local_model()`, which instantiates a lightweight local inference wrapper. The `_call_inference()` dispatcher in `ModelComponent` automatically routes to the local model when no `model_client` is set:
+
+```
+ModelComponent._call_inference()
+  ├── model_client (RoboML, Ollama, GenericHTTP, ...)
+  └── local_model  (LocalLLM, LocalVLM, LocalSTT, LocalTTS)
+```
+
+### Runtime Backends
+
+Each component type uses a runtime optimized for edge deployment:
+
+| Component | Backend | Package | Default Model |
+|-----------|---------|---------|---------------|
+| LLM | llama.cpp | `llama-cpp-python` | Qwen3-0.6B (GGUF) |
+| MLLM/VLM | llama.cpp + MoondreamChatHandler | `llama-cpp-python` | Moondream2 (GGUF) |
+| Vision | ONNX Runtime | `onnxruntime` | DEIM (CVPR 2025) |
+| SpeechToText | sherpa-onnx (Whisper) | `sherpa-onnx` | Whisper tiny.en |
+| TextToSpeech | sherpa-onnx (Kokoro) | `sherpa-onnx` | Kokoro English |
+
+These backends require no PyTorch, no Transformers, and no heavy ML frameworks -- they are designed for robots and edge devices including NVIDIA Jetson.
+
+### Local Model Wrappers
+
+The local model wrappers live in `agents/utils/` and follow a simple callable interface:
+
+- `LocalLLM(model_path, device, ncpu)` -- wraps `llama-cpp-python`, returns `{"output": str}` or `{"output": generator}` for streaming, with optional `"tool_calls"`
+- `LocalVLM(model_path, device, ncpu)` -- wraps `llama-cpp-python` with `MoondreamChatHandler`, accepts images as RGB numpy arrays
+- `LocalVisionModel(model_path, device, ncpu)` -- wraps `onnxruntime` for object detection, returns bounding boxes, labels, and scores
+- `LocalSTT(model_path, device, ncpu)` -- wraps `sherpa-onnx` `OfflineRecognizer`, accepts audio bytes or numpy arrays
+- `LocalTTS(model_path, device, ncpu)` -- wraps `sherpa-onnx` `OfflineTts`, returns WAV bytes
+
+### Customizing Local Models
+
+Each config exposes a `local_model_path` field that accepts a HuggingFace repository ID or a local file path. Users can swap in any compatible model by setting this field:
+
+```python
+config = LLMConfig(
+    enable_local_model=True,
+    local_model_path="bartowski/Llama-3.2-1B-Instruct-GGUF",  # any GGUF model
+)
+```
+
+For available STT and TTS models, see the [sherpa-onnx pretrained models catalog](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/index.html).

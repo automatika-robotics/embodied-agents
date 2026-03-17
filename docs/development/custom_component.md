@@ -13,6 +13,8 @@ Choose your base class based on whether your component needs a model client:
 
 Most custom components will subclass `ModelComponent`.
 
+Think of components as **capabilities**. Each built-in component represents a distinct capability: Vision sees, SpeechToText hears, TextToSpeech speaks, LLM reasons, VLM understands images. A good custom component adds a new capability that isn't already covered.
+
 ## Defining Allowed Inputs and Outputs
 
 Every component must declare what topic types it accepts. These are set as instance attributes before the `super().__init__()` call:
@@ -20,14 +22,13 @@ Every component must declare what topic types it accepts. These are set as insta
 ```python
 from agents.ros import SupportedType, String, Image, Audio
 
-class MySummarizer(ModelComponent):
+class DepthEstimator(ModelComponent):
     def __init__(self, ...):
         self.allowed_inputs = {
-            "Required": [String],          # Must have at least one String input
-            "Optional": [Image],           # May optionally accept Image inputs
+            "Required": [Image],           # Must have at least one Image input
         }
         self.allowed_outputs = {
-            "Required": [String],          # Must have at least one String output
+            "Required": [Image],           # Outputs a depth map as an Image
         }
         super().__init__(...)
 ```
@@ -46,7 +47,7 @@ This is the core logic of your component. For `ModelComponent` subclasses, you m
 ```python
 from abc import abstractmethod
 
-class MySummarizer(ModelComponent):
+class DepthEstimator(ModelComponent):
 
     @abstractmethod
     def _execution_step(self, **kwargs):
@@ -81,18 +82,17 @@ from agents.config import ModelComponentConfig
 from agents.ros import base_validators
 
 @define(kw_only=True)
-class SummarizerConfig(ModelComponentConfig):
-    """Configuration for the Summarizer component."""
+class DepthEstimatorConfig(ModelComponentConfig):
+    """Configuration for the Depth Estimator component."""
 
-    max_summary_length: int = field(default=200, validator=base_validators.gt(0))
-    style: str = field(default="concise")
-    temperature: float = field(default=0.5, validator=base_validators.gt(0.0))
-    max_new_tokens: int = field(default=300, validator=base_validators.gt(0))
+    input_height: int = field(default=518, validator=base_validators.gt(0))
+    input_width: int = field(default=518, validator=base_validators.gt(0))
+    max_depth: float = field(default=20.0, validator=base_validators.gt(0.0))
 
     def _get_inference_params(self):
         return {
-            "temperature": self.temperature,
-            "max_new_tokens": self.max_new_tokens,
+            "input_height": self.input_height,
+            "input_width": self.input_width,
         }
 ```
 
@@ -103,29 +103,44 @@ Key points:
 - Implement `_get_inference_params()` to return the dict passed to the model at inference time.
 - Use `base_validators` for field validation (`gt`, `in_range`, `in_`).
 
+### Adding Local Model Support
+
+If your custom component should support local inference (without a remote model client), add the standard local model fields to your config:
+
+```python
+@define(kw_only=True)
+class MyConfig(ModelComponentConfig):
+    enable_local_model: bool = field(default=False)
+    device_local_model: Literal["cpu", "cuda"] = field(default="cuda")
+    ncpu_local_model: int = field(default=1)
+    local_model_path: Optional[str] = field(default="your/default-model")
+```
+
+Then implement `_deploy_local_model()` in your component to instantiate the appropriate local wrapper. See `agents/components/llm.py` for a reference implementation.
+
 ## Wiring the Trigger
 
 The trigger determines when your component's `_execution_step()` fires. Set it in the constructor:
 
 ```python
 # Trigger on a specific input topic
-summarizer = MySummarizer(
-    inputs=[text_in, context_in],
-    outputs=[summary_out],
+depth = DepthEstimator(
+    inputs=[camera],
+    outputs=[depth_map],
     model_client=my_client,
-    trigger=text_in,       # fires when text_in receives a message
+    trigger=camera,        # fires when a new frame arrives
 )
 
 # Trigger on a timer (2 Hz)
-summarizer = MySummarizer(
+depth = DepthEstimator(
     ...,
     trigger=2.0,           # fires twice per second
 )
 
 # Trigger on an external event
 from agents.ros import Event
-my_event = Event(name="summarize_now")
-summarizer = MySummarizer(
+my_event = Event(name="estimate_depth")
+depth = DepthEstimator(
     ...,
     trigger=my_event,
 )
@@ -133,14 +148,15 @@ summarizer = MySummarizer(
 
 When a `Topic` is used as trigger, it must be one of the component's inputs. Internally, the topic's callback is moved from `self.callbacks` to `self.trig_callbacks`, and `_execution_step()` is wired as a post-callback.
 
-## Complete Skeleton: A "Summarizer" Component
+## Complete Skeleton: A Depth Estimation Component
 
-Below is a complete, working skeleton for a component that takes a text input, sends it to an LLM for summarization, and publishes the result.
+Below is a complete, working skeleton for a component that takes a camera image, sends it to a depth estimation model, and publishes the depth map. This represents a distinct perception capability -- monocular depth estimation -- that is not covered by the built-in Vision (detection), VLM (visual Q&A), or other components.
 
 ```python
 from typing import Any, Dict, List, Optional, Sequence, Type, Union
 from types import NoneType
 
+import numpy as np
 from attrs import define, field
 from agents.components.model_component import ModelComponent
 from agents.clients.model_base import ModelClient
@@ -148,8 +164,7 @@ from agents.config import ModelComponentConfig
 from agents.ros import (
     Topic,
     FixedInput,
-    String,
-    StreamingString,
+    Image,
     SupportedType,
     Event,
     base_validators,
@@ -158,47 +173,46 @@ from agents.ros import (
 
 # --- Config ---
 @define(kw_only=True)
-class SummarizerConfig(ModelComponentConfig):
-    """Configuration for the Summarizer component."""
+class DepthEstimatorConfig(ModelComponentConfig):
+    """Configuration for the Depth Estimator component."""
 
-    max_summary_length: int = field(default=200, validator=base_validators.gt(0))
-    temperature: float = field(default=0.5, validator=base_validators.gt(0.0))
-    max_new_tokens: int = field(default=300, validator=base_validators.gt(0))
+    input_height: int = field(default=518, validator=base_validators.gt(0))
+    input_width: int = field(default=518, validator=base_validators.gt(0))
+    max_depth: float = field(default=20.0, validator=base_validators.gt(0.0))
 
     def _get_inference_params(self) -> Dict:
         return {
-            "temperature": self.temperature,
-            "max_new_tokens": self.max_new_tokens,
+            "input_height": self.input_height,
+            "input_width": self.input_width,
         }
 
 
 # --- Component ---
-class Summarizer(ModelComponent):
-    """A component that summarizes incoming text using an LLM."""
+class DepthEstimator(ModelComponent):
+    """A component that estimates depth from monocular camera images.
+
+    This capability enables spatial understanding for navigation,
+    obstacle avoidance, and manipulation tasks.
+    """
 
     def __init__(
         self,
         inputs: Optional[Sequence[Union[Topic, FixedInput]]] = None,
         outputs: Optional[Sequence[Topic]] = None,
         model_client: Optional[ModelClient] = None,
-        config: Optional[SummarizerConfig] = None,
+        config: Optional[DepthEstimatorConfig] = None,
         trigger: Union[Topic, List[Topic], float, Event, NoneType] = 1.0,
-        component_name: str = "summarizer",
+        component_name: str = "depth_estimator",
         **kwargs,
     ):
         # Declare allowed I/O before super().__init__
         self.allowed_inputs = {
-            "Required": [String],
+            "Required": [Image],
         }
-        self.allowed_outputs = {
-            "Required": [String],
-        }
-
-        # Which output types this component can publish natively
-        self.handled_outputs: List[Type[SupportedType]] = [String, StreamingString]
+        self.handled_outputs: List[Type[SupportedType]] = [Image]
 
         if not config:
-            config = SummarizerConfig()
+            config = DepthEstimatorConfig()
 
         super().__init__(
             inputs=inputs,
@@ -211,29 +225,29 @@ class Summarizer(ModelComponent):
         )
 
     def _create_input(self, *args, **kwargs) -> Optional[Dict[str, Any]]:
-        """Assemble inference input from the latest callback data."""
-        # Read from trigger or regular callbacks
-        text = None
+        """Assemble inference input from the latest camera frame."""
+        image = None
+
+        # Read from trigger callback
         for cb in self.trig_callbacks.values():
-            text = cb.get_output()
+            image = cb.get_output()
 
-        if text is None:
+        # Fall back to regular callbacks
+        if image is None:
             for cb in self.callbacks.values():
-                text = cb.get_output()
+                image = cb.get_output()
 
-        if text is None:
-            self.get_logger().warning("No input text received yet")
+        if image is None:
+            self.get_logger().warning("No image received yet")
             return None
 
-        prompt = f"Summarize the following text in under {self.config.max_summary_length} words:\n\n{text}"
-
         return {
-            "query": prompt,
-            "images": [],
+            "images": [image],
+            **self.inference_params,
         }
 
     def _execution_step(self, **kwargs):
-        """Main processing loop."""
+        """Main processing loop: receive image, estimate depth, publish."""
         inference_input = self._create_input()
         if inference_input is None:
             return
@@ -245,12 +259,14 @@ class Summarizer(ModelComponent):
         self._publish(result)
 
     def _warmup(self, *args, **kwargs):
-        """Send a dummy request to warm up the model."""
-        warmup_input = {"query": "Hello", "images": []}
-        self._call_inference(warmup_input)
+        """Send a dummy image to warm up the model."""
+        dummy = np.zeros(
+            (self.config.input_height, self.config.input_width, 3), dtype=np.uint8
+        )
+        self._call_inference({"images": [dummy], **self.inference_params})
 
     def _handle_websocket_streaming(self) -> Optional[Any]:
-        """Handle streaming responses (not used in this example)."""
+        """Not used -- depth estimation is not a streaming task."""
         pass
 ```
 
@@ -261,21 +277,21 @@ from agents.clients.ollama import OllamaClient
 from agents.models import OllamaModel
 from agents.ros import Topic, Launcher
 
-text_in = Topic(name="long_text", msg_type="String")
-summary_out = Topic(name="summary", msg_type="String")
+camera = Topic(name="camera", msg_type="Image")
+depth_map = Topic(name="depth", msg_type="Image")
 
-model = OllamaModel(name="summarizer_llm", checkpoint="llama3.2:3b")
+model = OllamaModel(name="depth_model", checkpoint="depth-anything-v2")
 client = OllamaClient(model)
 
-summarizer = Summarizer(
-    inputs=[text_in],
-    outputs=[summary_out],
+depth = DepthEstimator(
+    inputs=[camera],
+    outputs=[depth_map],
     model_client=client,
-    trigger=text_in,
-    config=SummarizerConfig(max_summary_length=100, temperature=0.3),
+    trigger=camera,
+    config=DepthEstimatorConfig(max_depth=10.0),
 )
 
 launcher = Launcher()
-launcher.add_pkg(components=[summarizer])
+launcher.add_pkg(components=[depth])
 launcher.bringup()
 ```
