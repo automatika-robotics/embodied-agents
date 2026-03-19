@@ -1,7 +1,7 @@
 """Tests for LLM component — requires rclpy."""
 
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from agents.config import LLMConfig
 from agents.ros import Topic

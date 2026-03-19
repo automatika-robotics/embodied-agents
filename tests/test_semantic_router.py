@@ -7,7 +7,6 @@ from agents.config import SemanticRouterConfig, LLMConfig
 from agents.ros import Topic, Route
 from agents.components.semantic_router import SemanticRouter, RouterMode
 from agents.clients.model_base import ModelClient
-from tests.conftest import mock_component_internals
 
 
 @pytest.fixture

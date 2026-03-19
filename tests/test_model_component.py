@@ -1,7 +1,7 @@
 """Tests for ModelComponent._call_inference dispatch — requires rclpy."""
 
 import pytest
-from unittest.mock import MagicMock, PropertyMock
+from unittest.mock import MagicMock
 
 from agents.config import LLMConfig
 from agents.ros import Topic

@@ -5,7 +5,7 @@ import numpy as np
 from unittest.mock import MagicMock
 
 from agents.config import MLLMConfig
-from agents.ros import Topic, Image, String
+from agents.ros import Topic, Image
 from agents.components.mllm import MLLM
 from tests.conftest import mock_component_internals
 
