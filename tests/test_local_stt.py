@@ -20,6 +20,7 @@ def local_stt(mock_sherpa):
 
     stt = LocalSTT.__new__(LocalSTT)
     stt._recognizer = MagicMock()
+    stt._sample_rate = 16000
     stt.device = "cpu"
     stt.ncpu = 1
     return stt
