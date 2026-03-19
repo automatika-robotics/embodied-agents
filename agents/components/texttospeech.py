@@ -11,7 +11,7 @@ from ..clients.model_base import ModelClient
 from ..clients import RoboMLWSClient, RoboMLRESPClient
 from ..config import TextToSpeechConfig
 from ..ros import Audio, String, Topic, StreamingString, component_action
-from ..utils import validate_func_args
+from ..utils import validate_func_args, load_model_repo
 from .model_component import ModelComponent
 from .component_base import ComponentRunType
 
@@ -27,14 +27,14 @@ class TextToSpeech(ModelComponent):
         This should be a list of Topic objects, Audio type is handled automatically.
     :type outputs: list[Topic]
     :param model_client: The model client for the TTS.
-        This should be an instance of ModelClient.
-    :type model_client: ModelClient
+        This should be an instance of ModelClient. Optional if ``enable_local_model`` is set to True in the config.
+    :type model_client: Optional[ModelClient]
     :param config: The configuration for the TTS.
         This should be an instance of TextToSpeechConfig. If not provided, it defaults to TextToSpeechConfig()
     :type config: Optional[TextToSpeechConfig]
     :param trigger: The trigger value or topic for the TTS.
         This can be a single Topic object or a list of Topic objects.
-    :type trigger: Union[Topic, list[Topic]
+    :type trigger: Union[Topic, list[Topic]]
     :param component_name: The name of the TTS component. This should be a string.
     :type component_name: str
 
@@ -52,6 +52,18 @@ class TextToSpeech(ModelComponent):
         component_name='tts_component'
     )
     ```
+
+    Example usage with local model:
+    ```python
+    text_topic = Topic(name="text", msg_type="String")
+    config = TextToSpeechConfig(enable_local_model=True, play_on_device=True)
+    tts_component = TextToSpeech(
+        inputs=[text_topic],
+        config=config,
+        trigger=text_topic,
+        component_name='local_tts'
+    )
+    ```
     """
 
     @validate_func_args
@@ -60,7 +72,7 @@ class TextToSpeech(ModelComponent):
         *,
         inputs: List[Topic],
         outputs: Optional[List[Topic]] = None,
-        model_client: ModelClient,
+        model_client: Optional[ModelClient] = None,
         config: Optional[TextToSpeechConfig] = None,
         trigger: Union[Topic, List[Topic]],
         component_name: str,
@@ -74,6 +86,12 @@ class TextToSpeech(ModelComponent):
             raise TypeError(
                 "TextToSpeech component cannot be started as a timed component"
             )
+
+        if not model_client and not self.config.enable_local_model:
+            raise TypeError(
+                "TextToSpeech component requires a model_client or enable_local_model=True in TextToSpeechConfig."
+            )
+
         self.model_client = model_client
 
         super().__init__(
@@ -87,6 +105,9 @@ class TextToSpeech(ModelComponent):
         )
 
     def custom_on_configure(self):
+        # deploy local TTS if enabled
+        if not self.model_client and self.config.enable_local_model:
+            self._deploy_local_model()
         # Configure component
         super().custom_on_configure()
 
@@ -116,6 +137,24 @@ class TextToSpeech(ModelComponent):
 
         # Deactivate component
         super().custom_on_deactivate()
+
+    def _deploy_local_model(self):
+        """Deploy local TTS model on demand."""
+        if self.local_model is not None:
+            return  # already deployed
+        from ..utils.local_tts import LocalTTS
+
+        self.local_model = LocalTTS(
+            model_path=load_model_repo(
+                "local_tts", self.config.local_model_path
+            ),
+            device=self.config.device_local_model,
+            ncpu=self.config.ncpu_local_model,
+        )
+        # Local TTS does not support streaming
+        if self.config.stream:
+            self.config.stream = False
+            self.inference_params = self.config.get_inference_params()
 
     def __stream_callback(
         self, _: bytes, frames: int, time_info: Dict, status: int
@@ -556,10 +595,16 @@ class TextToSpeech(ModelComponent):
         }
 
         # Run inference once to warm up and once to measure time
-        self.model_client.inference(inference_input)
+        if self.model_client:
+            self.model_client.inference(inference_input)
+        elif hasattr(self, "local_model"):
+            self.local_model(inference_input)
 
         start_time = time.time()
-        self.model_client.inference(inference_input)
+        if self.model_client:
+            self.model_client.inference(inference_input)
+        elif hasattr(self, "local_model"):
+            self.local_model(inference_input)
         elapsed_time = time.time() - start_time
 
         self.get_logger().warning(f"Approximate Inference time: {elapsed_time} seconds")

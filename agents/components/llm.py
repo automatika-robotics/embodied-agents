@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 from typing import Any, Optional, Union, Callable, List, Dict, MutableMapping
 import msgpack
@@ -37,8 +38,8 @@ class LLM(ModelComponent):
         This should be a list of Topic objects. String type is handled automatically.
     :type outputs: list[Topic]
     :param model_client: The model client for the LLM component.
-        This should be an instance of ModelClient.
-    :type model_client: ModelClient
+        This should be an instance of ModelClient. Optional if ``enable_local_model`` is set to True in the config.
+    :type model_client: Optional[ModelClient]
     :param config: The configuration for the LLM component.
         This should be an instance of LLMConfig. If not provided, defaults to LLMConfig().
     :type config: LLMConfig
@@ -64,6 +65,17 @@ class LLM(ModelComponent):
                         model_client=model_client,
                         config=config,
                         component_name='llama_component')
+    ```
+
+    Example usage with local model:
+    ```python
+    text0 = Topic(name="text0", msg_type="String")
+    text1 = Topic(name="text1", msg_type="String")
+    config = LLMConfig(enable_local_model=True)
+    llm_component = LLM(inputs=[text0],
+                        outputs=[text1],
+                        config=config,
+                        component_name='local_llm')
     ```
     """
 
@@ -93,9 +105,10 @@ class LLM(ModelComponent):
         self.handled_outputs = [String, StreamingString]
 
         if type(self) is LLM and not model_client:
-            raise RuntimeError(
-                "LLM component cannot be initialized without a model_client. Please pass a valid model_client."
-            )
+            if not self.config.enable_local_model:
+                raise RuntimeError(
+                    "LLM component requires a model_client or enable_local_model=True in LLMConfig."
+                )
 
         self.model_client = model_client
 
@@ -125,6 +138,15 @@ class LLM(ModelComponent):
         )
 
     def custom_on_configure(self):
+
+        # deploy local LLM if enabled (only for LLM, not subclasses like MLLM)
+        if (
+            not self.model_client
+            and self.config.enable_local_model
+            and type(self) is LLM
+        ):
+            self._deploy_local_model()
+
         # configure the rest
         super().custom_on_configure()
 
@@ -154,6 +176,9 @@ class LLM(ModelComponent):
 
         # initialize response buffers used for streaming
         if self.config.stream:
+            # initialize think block state for streaming
+            self._in_think_block: bool = False
+            # initialize result buffers
             self.result_partial: List = []
             self.result_complete: List = []
             # issue a warning in case StreamingText type is not used in output
@@ -205,6 +230,24 @@ class LLM(ModelComponent):
             "metadatas": metadatas,
         }
         self.db_client.add(db_input)
+
+    def _strip_think_tokens(self, text: str) -> str:
+        """Strip <think>...</think> blocks from model output."""
+        if self.config.strip_think_tokens:
+            return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+        return text
+
+    def _deploy_local_model(self):
+        """Deploy local LLM model on demand."""
+        if self.local_model is not None:
+            return  # already deployed
+        from ..utils.local_llm import LocalLLM
+
+        self.local_model = LocalLLM(
+            model_path=self.config.local_model_path,
+            device=self.config.device_local_model,
+            ncpu=self.config.ncpu_local_model,
+        )
 
     def _handle_rag_query(self, query: str) -> Optional[str]:
         """Internal handler for retrieving documents for RAG.
@@ -320,6 +363,8 @@ class LLM(ModelComponent):
             }
             if self.model_client:
                 return self.model_client.inference(input)
+            elif hasattr(self, "local_model"):
+                return self.local_model(input)
 
         else:
             # return result with its output set to last function response
@@ -403,6 +448,15 @@ class LLM(ModelComponent):
         """
         Processes a single token from a stream based on the break_character config.
         """
+        if self.config.strip_think_tokens:
+            if "<think>" in token:
+                self._in_think_block = True
+                return
+            if "</think>" in token:
+                self._in_think_block = False
+                return
+            if self._in_think_block:
+                return
         if self.config.break_character:
             self.result_partial.append(token)
             if self.config.break_character in token:
@@ -425,6 +479,7 @@ class LLM(ModelComponent):
         Finalizes the stream by publishing any remaining partial results and
         appending the complete message to the message history.
         """
+        self._in_think_block = False
         # Send remaining result after break character or termination if any
         if self.config.break_character:
             if self.result_partial:
@@ -505,6 +560,7 @@ class LLM(ModelComponent):
                 self.__handle_streaming_generator(result)
                 return
 
+            result["output"] = self._strip_think_tokens(result["output"])
             self.messages.append({"role": "assistant", "content": result["output"]})
 
             # handle tool calls
@@ -684,11 +740,15 @@ class LLM(ModelComponent):
         # Run inference once to warm up and once to measure time
         if self.model_client:
             self.model_client.inference(inference_input)
+        elif hasattr(self, "local_model"):
+            self.local_model(inference_input)
 
         inference_input = {"query": [message], **self.config._get_inference_params()}
         start_time = time.time()
         if self.model_client:
             result = self.model_client.inference(inference_input)
+        elif hasattr(self, "local_model"):
+            result = self.local_model(inference_input)
         else:
             result = None
         elapsed_time = time.time() - start_time

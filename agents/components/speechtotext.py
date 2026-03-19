@@ -9,7 +9,13 @@ from ..clients.model_base import ModelClient
 from agents.clients import RoboMLWSClient
 from ..config import SpeechToTextConfig
 from ..ros import Audio, String, Topic
-from ..utils import validate_func_args, VADStatus, WakeWordStatus, load_model
+from ..utils import (
+    validate_func_args,
+    VADStatus,
+    WakeWordStatus,
+    load_model,
+    load_model_repo,
+)
 from .model_component import ModelComponent
 from .component_base import ComponentRunType
 
@@ -25,8 +31,8 @@ class SpeechToText(ModelComponent):
         This should be a list of Topic objects, String type is handled automatically.
     :type outputs: list[Topic]
     :param model_client: The model client for the STT.
-        This should be an instance of ModelClient.
-    :type model_client: ModelClient
+        This should be an instance of ModelClient. Optional if ``enable_local_model`` is set to True in the config.
+    :type model_client: Optional[ModelClient]
     :param config: The configuration for the STT.
         This should be an instance of SpeechToTextConfig. If not provided, defaults to SpeechToTextConfig().
     :type config: Optional[SpeechToTextConfig]
@@ -51,6 +57,20 @@ class SpeechToText(ModelComponent):
         component_name='stt_component'
     )
     ```
+
+    Example usage with local model:
+    ```python
+    audio_topic = Topic(name="audio", msg_type="Audio")
+    text_topic = Topic(name="text", msg_type="String")
+    config = SpeechToTextConfig(enable_local_model=True, enable_vad=True)
+    stt_component = SpeechToText(
+        inputs=[audio_topic],
+        outputs=[text_topic],
+        config=config,
+        trigger=audio_topic,
+        component_name='local_stt'
+    )
+    ```
     """
 
     @validate_func_args
@@ -59,7 +79,7 @@ class SpeechToText(ModelComponent):
         *,
         inputs: List[Topic],
         outputs: List[Topic],
-        model_client: ModelClient,
+        model_client: Optional[ModelClient] = None,
         config: Optional[SpeechToTextConfig] = None,
         trigger: Union[Topic, List[Topic]],
         component_name: str,
@@ -74,7 +94,16 @@ class SpeechToText(ModelComponent):
                 "SpeechToText component cannot be started as a timed component"
             )
 
-        if self.config.stream and not isinstance(model_client, RoboMLWSClient):
+        if not model_client and not self.config.enable_local_model:
+            raise TypeError(
+                "SpeechToText component requires a model_client or enable_local_model=True in SpeechToTextConfig."
+            )
+
+        if (
+            self.config.stream
+            and model_client
+            and not isinstance(model_client, RoboMLWSClient)
+        ):
             raise TypeError(
                 "SpeechToText component can only stream audio to the server when using RoboMLWebSocketClient. Please set stream to False in config or use a different client."
             )
@@ -90,6 +119,14 @@ class SpeechToText(ModelComponent):
             component_name,
             **kwargs,
         )
+
+    def custom_on_configure(self):
+        """Custom configuration"""
+        # deploy local STT if enabled
+        if not self.model_client and self.config.enable_local_model:
+            self._deploy_local_model()
+
+        super().custom_on_configure()
 
     def custom_on_activate(self):
         """Custom activation"""
@@ -172,6 +209,24 @@ class SpeechToText(ModelComponent):
 
         # Deactivate component
         super().custom_on_deactivate()
+
+    def _deploy_local_model(self):
+        """Deploy local STT model on demand."""
+        if self.local_model is not None:
+            return  # already deployed
+        from ..utils.local_stt import LocalSTT
+
+        self.local_model = LocalSTT(
+            model_path=load_model_repo(
+                "local_stt", self.config.local_model_path
+            ),
+            device=self.config.device_local_model,
+            ncpu=self.config.ncpu_local_model,
+            sample_rate=self.config._sample_rate
+        )
+        # Local STT does not support streaming
+        if self.config.stream:
+            self.config.stream = False
 
     def __stream_callback(
         self, indata: bytes, frames: int, _, status
@@ -392,10 +447,18 @@ class SpeechToText(ModelComponent):
         inference_input = {"query": file_bytes, **self.inference_params}
 
         # Run inference once to warm up and once to measure time
-        self.model_client.inference(inference_input)
+        if self.model_client:
+            self.model_client.inference(inference_input)
+        elif hasattr(self, "local_model"):
+            self.local_model(inference_input)
 
         start_time = time.time()
-        result = self.model_client.inference(inference_input)
+        if self.model_client:
+            result = self.model_client.inference(inference_input)
+        elif hasattr(self, "local_model"):
+            result = self.local_model(inference_input)
+        else:
+            result = None
         elapsed_time = time.time() - start_time
 
         if result:

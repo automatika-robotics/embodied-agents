@@ -265,9 +265,10 @@ def encode_img_base64(img: np.ndarray) -> str:
     :type img: np.ndarray
     :rtype: str
     """
-    encode_params = [int(cv2.IMWRITE_PNG_COMPRESSION), 9]
-    _, buffer = cv2.imencode(".png", img, encode_params)
-    return base64.b64encode(buffer).decode("utf-8")
+    # OpenCV expects BGR for encoding
+    bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+    _, buf = cv2.imencode(".png", bgr)
+    return base64.b64encode(buf).decode("utf-8")
 
 
 class VADStatus(Enum):
@@ -331,6 +332,70 @@ def load_model(model_name: str, model_path: str) -> str:
 
     progress_bar.close()
     return str(model_full_path)
+
+
+def load_model_repo(
+    model_name: str,
+    repo_id: str,
+    allow_patterns: Optional[str] = None,
+) -> str:
+    """Download a multi-file HuggingFace model repository.
+
+    :param model_name: Local cache name for the model
+    :type model_name: str
+    :param repo_id: HuggingFace repository ID (e.g. 'onnx-community/Qwen3-0.6B-ONNX')
+    :type repo_id: str
+    :param allow_patterns: Optional glob pattern to filter which files to download
+        (e.g. 'cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/*'). When set,
+        matched files are flattened into the model directory root so that
+        ``genai_config.json`` and model files are directly accessible.
+    :type allow_patterns: Optional[str]
+    :returns: Path to the downloaded model directory
+    :rtype: str
+    """
+    import shutil
+    from pathlib import Path
+    from platformdirs import user_cache_dir
+
+    cachedir = user_cache_dir("ros_agents")
+    model_dir = Path(cachedir) / "models" / model_name
+    model_dir.mkdir(parents=True, exist_ok=True)
+
+    # If already downloaded, return cached path
+    if any(model_dir.iterdir()):
+        return str(model_dir)
+
+    try:
+        from huggingface_hub import snapshot_download
+    except ModuleNotFoundError as e:
+        raise ModuleNotFoundError(
+            "Downloading HuggingFace model repos requires huggingface-hub. "
+            "Install it with: pip install huggingface-hub"
+        ) from e
+
+    if allow_patterns:
+        # Download to a temporary staging directory, then flatten the
+        # matching subdirectory into model_dir so relevant files
+        # genai_config.json end up at the root level
+        staging_dir = model_dir.parent / f".{model_name}_staging"
+        staging_dir.mkdir(parents=True, exist_ok=True)
+        snapshot_download(
+            repo_id=repo_id,
+            local_dir=str(staging_dir),
+            allow_patterns=allow_patterns,
+        )
+        # Find the deepest directory that contains the downloaded files
+        # and move its contents to model_dir
+        pattern_prefix = allow_patterns.rstrip("/*")
+        src = staging_dir / pattern_prefix
+        if src.is_dir():
+            for item in src.iterdir():
+                shutil.move(str(item), str(model_dir / item.name))
+        shutil.rmtree(staging_dir, ignore_errors=True)
+    else:
+        snapshot_download(repo_id=repo_id, local_dir=str(model_dir))
+
+    return str(model_dir)
 
 
 def flatten(xs):

@@ -34,8 +34,8 @@ class MLLM(LLM):
         This should be a list of Topic objects. String, Detections2D and PointsOfInterest2D types is handled automatically.
     :type outputs: list[Topic]
     :param model_client: The model client for the MLLM component.
-        This should be an instance of ModelClient.
-    :type model_client: ModelClient
+        This should be an instance of ModelClient. Optional if ``enable_local_model`` is set to True in the config.
+    :type model_client: Optional[ModelClient]
     :param config: Optional configuration for the MLLM component.
         This should be an instance of MLLMConfig. If not provided, defaults to MLLMConfig().
     :type config: MLLMConfig
@@ -60,6 +60,18 @@ class MLLM(LLM):
                           config=config,
                           component_name='mllm_component')
     ```
+
+    Example usage with local model:
+    ```python
+    text0 = Topic(name="text0", msg_type="String")
+    image0 = Topic(name="image0", msg_type="Image")
+    text1 = Topic(name="text1", msg_type="String")
+    config = MLLMConfig(enable_local_model=True)
+    mllm_component = MLLM(inputs=[text0, image0],
+                          outputs=[text1],
+                          config=config,
+                          component_name='local_vlm')
+    ```
     """
 
     @validate_func_args
@@ -68,7 +80,7 @@ class MLLM(LLM):
         *,
         inputs: List[Union[Topic, FixedInput]],
         outputs: List[Topic],
-        model_client: ModelClient,
+        model_client: Optional[ModelClient] = None,
         config: Optional[MLLMConfig] = None,
         db_client: Optional[DBClient] = None,
         trigger: Union[Topic, List[Topic], float, Event] = 1.0,
@@ -81,6 +93,11 @@ class MLLM(LLM):
         }
 
         config = config or MLLMConfig()
+
+        if not model_client and not config.enable_local_model:
+            raise RuntimeError(
+                "MLLM/VLM component requires a model_client or enable_local_model=True in MLLMConfig."
+            )
 
         super().__init__(
             inputs=inputs,
@@ -104,6 +121,10 @@ class MLLM(LLM):
         self._images: List[Union[np.ndarray, ROSImage, ROSCompressedImage]] = []
 
     def custom_on_configure(self):
+        # deploy local VLM if enabled
+        if not self.model_client and self.config.enable_local_model:
+            self._deploy_local_model()
+
         # configure the rest
         super().custom_on_configure()
 
@@ -125,6 +146,18 @@ class MLLM(LLM):
                     self._detections_publishers.append(topic.name)
                 else:
                     pass
+
+    def _deploy_local_model(self):
+        """Deploy local VLM model on demand."""
+        if self.local_model is not None:
+            return  # already deployed
+        from ..utils.local_vlm import LocalVLM
+
+        self.local_model = LocalVLM(
+            model_path=self.config.local_model_path,
+            device=self.config.device_local_model,
+            ncpu=self.config.ncpu_local_model,
+        )
 
     def _create_input(self, *_, **kwargs) -> Optional[Dict[str, Any]]:
         """Create inference input for MLLM models
@@ -216,6 +249,7 @@ class MLLM(LLM):
     def _publish_task_specific_outputs(self, result: MutableMapping) -> None:
         """Publish outputs based on task type"""
         if self._task == "general":
+            result["output"] = self._strip_think_tokens(result["output"])
             self.messages.append({"role": "assistant", "content": result["output"]})
             for pub_name in self._string_publishers:
                 self.publishers_dict[pub_name].publish(
@@ -306,6 +340,8 @@ class MLLM(LLM):
         # Run inference once to warm up and once to measure time
         if self.model_client:
             self.model_client.inference(inference_input)
+        elif hasattr(self, "local_model"):
+            self.local_model(inference_input)
 
         inference_input = {
             "query": [message],
@@ -315,6 +351,8 @@ class MLLM(LLM):
         start_time = time.time()
         if self.model_client:
             result = self.model_client.inference(inference_input)
+        elif hasattr(self, "local_model"):
+            result = self.local_model(inference_input)
         else:
             result = None
         elapsed_time = time.time() - start_time

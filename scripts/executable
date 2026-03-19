@@ -357,10 +357,6 @@ def main():
     # Init the component
     # Semantic Router Component
     if component_type == all_components.SemanticRouter.__name__:
-        if not model_client and not db_client:
-            raise RuntimeError(
-                "The router component expects at least one client (model or vectorDB)"
-            )
         component = comp_class(
             inputs=inputs,
             routes=routes,

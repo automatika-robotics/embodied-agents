@@ -138,16 +138,22 @@ class SemanticRouter(LLM):
                 component_config = LLMConfig(
                     stream=False, enable_rag=False, chat_history=False
                 )
-        else:
-            if not db_client:
-                raise ValueError(
-                    "A semantic router must be initiated with a DB Client, if operating in vector (embedding) mode or a model client with an LLM model, if operating in LLM (agentic) mode."
-                )
+        elif db_client:
             self.routing_mode = RouterMode.VECTOR
             component_config: Union[SemanticRouterConfig, LLMConfig] = (
                 config
                 if isinstance(config, SemanticRouterConfig)
                 else SemanticRouterConfig(router_name="default_router")
+            )
+        elif isinstance(config, LLMConfig) and config.enable_local_model:
+            self.routing_mode = RouterMode.LLM
+            component_config = config
+            component_config.stream = False
+            component_config.enable_rag = False
+            component_config.chat_history = False
+        else:
+            raise ValueError(
+                "A semantic router must be initiated with a DB Client (vector mode), a model client with an LLM model or an LLMConfig with enable_local_model=True (agentic mode)."
             )
 
         # Create the parent, db client would be created in the parent

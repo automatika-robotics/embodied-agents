@@ -30,6 +30,9 @@ class LocalVisionModel:
         model_path: str,
         ncpu: int = 1,
         device: str = "cpu",
+        input_height: int = 640,
+        input_width: int = 640,
+        dataset_labels: Optional[Dict] = None,
     ):
         # Initialize the ONNX model
         sessionOptions = ort.SessionOptions()
@@ -40,6 +43,9 @@ class LocalVisionModel:
         self.model = ort.InferenceSession(
             model_path, sess_options=sessionOptions, providers=providers
         )
+        self.input_height = input_height
+        self.input_width = input_width
+        self.dataset_labels = dataset_labels or {}
         self.original_w: int = 0
         self.original_h: int = 0
 
@@ -96,16 +102,19 @@ class LocalVisionModel:
     def __call__(
         self,
         inference_input: Dict,
-        img_height: int,
-        img_width: int,
-        dataset_labels: Dict,
     ) -> Optional[Dict]:
         """
-        Inference for vision model
+        Inference for vision model.
+
+        :param inference_input: Dictionary containing images and inference parameters.
+        :param stream: Ignored. Vision does not support streaming. Present for
+            signature compatibility with ``_call_inference``.
         """
         try:
             # Create the size array using NumPy, matching the expected int64 dtype
-            orig_size_np = np.array([[img_height, img_width]], dtype=np.int64)
+            orig_size_np = np.array(
+                [[self.input_height, self.input_width]], dtype=np.int64
+            )
 
             # NOTE: Handles only one image in the input
             input_image = inference_input["images"][0]
@@ -113,7 +122,7 @@ class LocalVisionModel:
 
             # Preprocess the image and retrieve the scaling parameters
             processed_image, ratio, pad_left, pad_top = self.__resize_with_aspect_ratio(
-                input_image, img_height, img_width
+                input_image, self.input_height, self.input_width
             )
 
             # Normalize the image and add a batch dimension
@@ -151,7 +160,7 @@ class LocalVisionModel:
                     if inference_input["get_dataset_labels"]:
                         # get text labels from model dataset info
                         labels = np.vectorize(
-                            lambda x: dataset_labels[str(x)],
+                            lambda x: self.dataset_labels[str(x)],
                         )(labels)
 
                 result = {

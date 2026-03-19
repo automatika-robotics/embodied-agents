@@ -24,7 +24,6 @@ extensions = [
     "sphinx_copybutton",  # install with `pip install sphinx-copybutton`
     "autodoc2",  # install with `pip install sphinx-autodoc2`
     "myst_parser",  # install with `pip install myst-parser`
-    "sphinx_sitemap",  # install with `pip install sphinx-sitemap`
     "sphinx_design",  # install with `pip install sphinx-design`
 ]
 
@@ -76,20 +75,16 @@ myst_enable_extensions = [
     "substitution",
     "tasklist",
 ]
-myst_html_meta = {
-    "google-site-verification": "cQVj-BaADcGVOGB7GOvfbkgJjxni10C2fYWCZ03jOeo"
-}
 myst_heading_anchors = 7  # to remove cross reference errors with md
 
-html_baseurl = "https://agents.automatikarobotics.com/"
 language = "en"
 html_theme = "shibuya"  # install with `pip install shibuya`
 html_static_path = ["_static"]
 html_css_files = ["custom.css"]
 html_favicon = "_static/favicon.png"
-sitemap_url_scheme = "{link}"
 
 html_theme_options = {
+    "announcement": 'Usage docs have moved to <a href="https://emos.automatikarobotics.com">EMOS Documentation</a>. This site only contains developer docs.',
     "light_logo": "_static/EMBODIED_AGENTS_LIGHT.png",
     "dark_logo": "_static/EMBODIED_AGENTS_DARK.png",
     "accent_color": "indigo",
@@ -101,37 +96,19 @@ html_theme_options = {
     "open_in_claude": True,
     # Navigation Links (Top bar)
     "nav_links": [
+        {"title": "EMOS Docs", "url": "https://emos.automatikarobotics.com/"},
         {"title": "Automatika Robotics", "url": "https://automatikarobotics.com/"},
     ],
 }
 
 # --- LLMS.TXT CONFIGURATION ---
-# Defines the order of manual documentation for the curriculum
+# Defines the order of developer documentation for the curriculum
 LLMS_TXT_SELECTION = [
-    "intro.md",
-    "installation.md",
-    "quickstart.md",
-    # Basics - The Core API
-    "basics/components.md",
-    "basics/clients.md",
-    "basics/models.md",
-    # Examples - Increasing complexity
-    "examples/foundation/index.md",
-    "examples/foundation/conversational.md",
-    "examples/foundation/prompt_engineering.md",
-    "examples/foundation/semantic_router.md",
-    "examples/foundation/goto.md",
-    "examples/foundation/semantic_map.md",
-    "examples/foundation/tool_calling.md",
-    "examples/foundation/complete.md",
-    "examples/planning_control/index.md",
-    "examples/planning_control/planning_model.md",
-    "examples/planning_control/vla.md",
-    "examples/planning_control/vla_with_event.md",
-    "examples/events/index.md",
-    "examples/events/multiprocessing.md",
-    "examples/events/fallback.md",
-    "examples/events/event_driven_description.md",
+    "development/architecture.md",
+    "development/custom_component.md",
+    "development/custom_client.md",
+    "development/custom_model.md",
+    "development/messages.md",
 ]
 
 
@@ -146,7 +123,7 @@ def format_for_llm(filename: str, content: str) -> str:
 
 
 def generate_llms_txt(app, exception):
-    """Generates llms.txt combining manual docs and autodoc2 API docs."""
+    """Generates llms.txt combining developer docs."""
     if exception is not None:
         return  # Do not generate if build failed
 
@@ -159,22 +136,24 @@ def generate_llms_txt(app, exception):
     # Add Preamble
     preamble = """You are an expert robotics software engineer and developer assistant for **EmbodiedAgents**, a production-grade Physical AI framework built on ROS2 by Automatika Robotics.
 
-You have been provided with the official EmbodiedAgents documentation, which includes basic concepts, API details, and example recipes. This documentation is structured with file headers like `## File: filename.md`.
+You have been provided with the official EmbodiedAgents developer documentation, which covers the internal architecture, extension patterns, and custom type system. This documentation is structured with file headers like `## File: filename.md`.
 
-Your primary task is to answer user questions, explain concepts, and write code strictly based on the provided documentation context.
+For usage documentation, tutorials, and example recipes, refer to the EMOS documentation at https://emos.automatikarobotics.com/.
+
+Your primary task is to answer developer questions about extending EmbodiedAgents: creating custom components, model clients, model wrappers, and ROS message types.
 
 Follow these rules rigorously:
 1. **Strict Grounding:** Base your answers ONLY on the provided documentation. Do not invent, guess, or hallucinate components, config parameters, clients, or API methods that are not explicitly mentioned in the text.
 2. **Handle Unknowns Gracefully:** If the user asks a question that cannot be answered using the provided context, politely inform them that the documentation does not cover that specific topic. Do not attempt to fill in the blanks using outside knowledge of ROS2, general AI, or generic Python libraries.
-3. **Write Idiomatic Code:** When providing code examples, strictly follow the patterns shown in the recipes. Ensure accurate imports (e.g., `from agents.components import ...`, `from agents.ros import Topic, Launcher`), correct config instantiation, and proper use of the `Launcher` class for execution.
-4. **Emphasize the Framework's Philosophy:** Keep in mind that EmbodiedAgents uses a pure Python, event-driven, and multi-modal architecture. Emphasize modularity, self-referential design (Gödel machines), and production-readiness (fallback mechanisms, multiprocessing) where relevant.
-5. **Cite Your Sources:** When explaining a concept or providing a solution, briefly mention the file or recipe (e.g., "According to the `basics/components.md` guide..." or "As seen in the `vla.md` recipe...") so the user knows where to read more.
+3. **Write Idiomatic Code:** When providing code examples, strictly follow the patterns shown in the documentation. Ensure accurate imports (e.g., `from agents.components import ...`, `from agents.ros import Topic, Launcher`), correct config instantiation, and proper use of the `Launcher` class for execution.
+4. **Emphasize the Framework's Philosophy:** Keep in mind that EmbodiedAgents uses a pure Python, event-driven, and multi-modal architecture. Emphasize modularity, self-referential design, and production-readiness (fallback mechanisms, multiprocessing) where relevant.
+5. **Cite Your Sources:** When explaining a concept or providing a solution, briefly mention the file (e.g., "According to `development/architecture.md`...") so the user knows where to read more.
 
 Think step-by-step before answering. Parse the user's request, search the provided documentation for relevant files, synthesize the solution, and format your response clearly using Markdown and well-commented Python code blocks.\n\n"""
     full_text.append(preamble)
 
-    # Process Manual Docs (Curated List)
-    print(f"[llms.txt] Processing {len(LLMS_TXT_SELECTION)} manual files...")
+    # Process Developer Docs (Curated List)
+    print(f"[llms.txt] Processing {len(LLMS_TXT_SELECTION)} developer doc files...")
     for relative_path in LLMS_TXT_SELECTION:
         file_path = src_dir / relative_path
         if file_path.exists():
@@ -192,20 +171,6 @@ Think step-by-step before answering. Parse the user's request, search the provid
         print(f"[llms.txt] Error writing file: {e}")
 
 
-def create_robots_txt(app, exception):
-    """Create robots.txt file to take advantage of sitemap crawl"""
-    if exception is None:
-        dst_dir = app.outdir  # Typically 'build/html/'
-        robots_path = os.path.join(dst_dir, "robots.txt")
-        content = f"""User-agent: *
-
-Sitemap: {html_baseurl}sitemap.xml
-"""
-        with open(robots_path, "w") as f:
-            f.write(content)
-
-
 def setup(app):
     """Plugin to post build and copy markdowns as well"""
-    app.connect("build-finished", create_robots_txt)
     app.connect("build-finished", generate_llms_txt)

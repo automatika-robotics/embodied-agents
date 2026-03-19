@@ -5,15 +5,25 @@ import shutil
 
 import cv2
 import pytest
-from agents.models import Idefics2, OllamaModel
-from agents.vectordbs import ChromaDB
-from agents.clients.roboml import (
-    HTTPModelClient,
-    HTTPDBClient,
-    RESPDBClient,
-    RESPModelClient,
+
+_IMPORTS_AVAILABLE = True
+try:
+    from agents.models import Idefics2, OllamaModel
+    from agents.vectordbs import ChromaDB
+    from agents.clients.roboml import (
+        HTTPModelClient,
+        HTTPDBClient,
+        RESPDBClient,
+        RESPModelClient,
+    )
+    from agents.clients.ollama import OllamaClient
+except ImportError:
+    _IMPORTS_AVAILABLE = False
+
+pytestmark = pytest.mark.skipif(
+    not _IMPORTS_AVAILABLE,
+    reason="Required packages for client integration tests not available",
 )
-from agents.clients.ollama import OllamaClient
 
 HOST = "http://localhost"
 RAY_PORT = 8000
@@ -85,6 +95,7 @@ def data():
     }
 
 
+@pytest.mark.local_only
 class TestRobomlHTTPClient:
     """
     Test roboml http client
@@ -177,6 +188,7 @@ class TestRobomlHTTPClient:
         http_clients["db"].deinitialize()
 
 
+@pytest.mark.local_only
 class TestRobomlRESPClient:
     """
     Test roboml resp client
@@ -269,6 +281,7 @@ class TestRobomlRESPClient:
         resp_clients["db"].deinitialize()
 
 
+@pytest.mark.local_only
 class TestOllamaClient:
     """
     Test ollama client

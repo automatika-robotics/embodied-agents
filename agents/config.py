@@ -82,10 +82,25 @@ class LLMConfig(ModelComponentConfig):
     :param response_terminator: A string token marking that the end of a single response from the model. This token is only used in case of a persistent clients, such as a websocket client and when stream is set to True. It is not published. This value cannot be an empty string.
         Default is '<<Response Ended>>'
     :type response_terminator: str
+    :param strip_think_tokens: Whether to strip ``<think>...</think>`` blocks from model output. Reasoning models (e.g. Qwen3, DeepSeek-R1) emit these blocks which are useful for debugging but should typically not be forwarded to downstream components such as TTS or UI. Applies to both streaming and non-streaming output. Default is True.
+    :type strip_think_tokens: bool
+    :param enable_local_model: Whether to enable a local LLM model via llama.cpp, allowing the component to run without a remote model client. Requires the ``llama-cpp-python`` package. Default is False.
+    :type enable_local_model: bool
+    :param device_local_model: Device to run the local model on, either "cpu" or "cuda" (default: "cuda"). This parameter is only effective when ``enable_local_model`` is True.
+    :type device_local_model: str
+    :param ncpu_local_model: Number of CPU cores to allocate to the local model when using CPU (default: 1). This parameter is only effective when ``enable_local_model`` is True.
+    :type ncpu_local_model: int
+    :param local_model_path: HuggingFace repository ID for a GGUF model (default: ``Qwen/Qwen3-0.6B-GGUF``), or a local path to a ``.gguf`` file. This parameter is only effective when ``enable_local_model`` is True.
+    :type local_model_path: Optional[str]
 
     Example of usage:
     ```python
     config = LLMConfig(enable_rag=True, collection_name="my_collection", distance_func="l2")
+    ```
+
+    Example of usage with local model:
+    ```python
+    config = LLMConfig(enable_local_model=True)
     ```
     """
 
@@ -104,6 +119,11 @@ class LLMConfig(ModelComponentConfig):
     stream: bool = field(default=False)
     break_character: str = field(default=".")
     response_terminator: str = field(default="<<Response Ended>>")
+    strip_think_tokens: bool = field(default=True)
+    enable_local_model: bool = field(default=False)
+    device_local_model: Literal["cpu", "cuda"] = field(default="cuda")
+    ncpu_local_model: int = field(default=1)
+    local_model_path: Optional[str] = field(default="Qwen/Qwen3-0.6B-GGUF")
     _system_prompt: Optional[str] = field(default=None, alias="_system_prompt")
     _component_prompt: Optional[Union[str, Path]] = field(
         default=None, alias="_component_prompt"
@@ -175,27 +195,55 @@ class MLLMConfig(LLMConfig):
     :param response_terminator: A string token marking that the end of a single response from the model. This token is only used in case of a persistent clients, such as a websocket client and when stream is set to True. It is not published. This value cannot be an empty string.
         Default is '<<Response Ended>>'
     :type response_terminator: str
+    :param strip_think_tokens: Whether to strip ``<think>...</think>`` blocks from model output. Reasoning models (e.g. Qwen3, DeepSeek-R1) emit these blocks which are useful for debugging but should typically not be forwarded to downstream components such as TTS or UI. Applies to both streaming and non-streaming output. Default is True.
+    :type strip_think_tokens: bool
      :param task: The specific task the VLM should perform. This can help tailor model behavior and is useful when the VLM being used with the component has been trained on specific tasks. For an example of such a model check out RoboBrain2 in models.
         Supported values are: "general", "pointing", "affordance", "trajectory", and "grounding".
         Default is None.
     :type task: Optional[Literal["general", "pointing", "affordance", "trajectory", "grounding"]]
+    :param enable_local_model: Whether to enable a local VLM via llama.cpp (Moondream2), allowing the component to run without a remote model client. Requires the ``llama-cpp-python`` package. Default is False.
+    :type enable_local_model: bool
+    :param device_local_model: Device to run the local model on, either "cpu" or "cuda" (default: "cuda"). This parameter is only effective when ``enable_local_model`` is True.
+    :type device_local_model: str
+    :param ncpu_local_model: Number of CPU cores to allocate to the local model when using CPU (default: 1). This parameter is only effective when ``enable_local_model`` is True.
+    :type ncpu_local_model: int
+    :param local_model_path: HuggingFace repository ID for a GGUF VLM model (default: ``ggml-org/moondream2-20250414-GGUF``). This parameter is only effective when ``enable_local_model`` is True.
+    :type local_model_path: Optional[str]
 
     Example of usage:
     ```python
     config = MLLMConfig(enable_rag=True, collection_name="my_collection", distance_func="l2", task=grounding)
+    ```
+
+    Example of usage with local model:
+    ```python
+    config = MLLMConfig(enable_local_model=True)
     ```
     """
 
     task: Optional[
         Literal["general", "pointing", "affordance", "trajectory", "grounding"]
     ] = field(default=None)
+    local_model_path: Optional[str] = field(default="ggml-org/moondream2-20250414-GGUF")
 
     @task.validator
     def _check_task(self, _, value):
-        """Stream validator"""
+        """Task validator"""
         if value and self.stream:
             raise ValueError(
-                "stream cannot be set to True when a task is set in MLLMConfig"
+                "stream cannot be set to True when a task is set in VLMConfig"
+            )
+        if value and value != "general" and self.enable_local_model:
+            raise ValueError(
+                f"Local VLM model only supports general VQA. "
+                f"Task '{value}' requires a remote model client."
+            )
+
+    def __attrs_post_init__(self):
+        """Validate cross-field constraints for local model"""
+        if self.enable_local_model and self.stream:
+            raise ValueError(
+                "stream cannot be set to True when enable_local_model is True in VLMConfig. Local VLM model does not support streaming."
             )
 
     def _get_inference_params(self) -> Dict:
@@ -374,6 +422,14 @@ class TextToSpeechConfig(ModelComponentConfig):
 
     This class defines the configuration options for a Text-To-Speech component.
 
+    :param enable_local_model: Whether to enable a local TTS model via ``sherpa-onnx`` (Kokoro English by default), allowing the component to run without a remote model client. Requires the ``sherpa-onnx`` pip package. Default is False.
+    :type enable_local_model: bool
+    :param device_local_model: Device to run the local model on, either "cpu" or "cuda" (default: "cuda"). This parameter is only effective when ``enable_local_model`` is True.
+    :type device_local_model: str
+    :param ncpu_local_model: Number of CPU cores to allocate to the local model when using CPU (default: 1). This parameter is only effective when ``enable_local_model`` is True.
+    :type ncpu_local_model: int
+    :param local_model_path: HuggingFace repository ID for a sherpa-onnx compatible TTS model (default: ``csukuangfj/kokoro-en-v0_19``). For available models see https://k2-fsa.github.io/sherpa/onnx/pretrained_models/index.html. This parameter is only effective when ``enable_local_model`` is True.
+    :type local_model_path: Optional[str]
     :param play_on_device: Whether to play the audio on available audio device (default: False).
     :type play_on_device: bool
     :param device: Optional device id (int) for playing the audio. Only effective if play_on_device is True (default: None).
@@ -389,7 +445,7 @@ class TextToSpeechConfig(ModelComponentConfig):
     :param thread_shutdown_timeout: Timeout to shutdown a playback thread, if data is not received for more than a certain number of seconds. Only effective if play_on_device is True (default: 5 seconds).
     :type thread_shutdown_timeout: int
     :param stream: Stram output when used with WebSocketClient. Useful when model output is large and broken into chunks by the server. (default: True).
-    :type thread_shutdown_timeout: int
+    :type stream: bool
 
     Example of usage for local playback:
     ```python
@@ -400,8 +456,17 @@ class TextToSpeechConfig(ModelComponentConfig):
     ```python
     config = TextToSpeechConfig(play_on_device=True, stream_to_ip="192.168.1.100", stream_to_port=12345)
     ```
+
+    Example of usage with local model:
+    ```python
+    config = TextToSpeechConfig(enable_local_model=True, play_on_device=True)
+    ```
     """
 
+    enable_local_model: bool = field(default=False)
+    device_local_model: Literal["cpu", "cuda"] = field(default="cuda")
+    ncpu_local_model: int = field(default=1)
+    local_model_path: Optional[str] = field(default="csukuangfj/kokoro-en-v0_19")
     play_on_device: bool = field(default=False)
     device: Optional[int] = field(default=None)
     stream_to_ip: Optional[str] = field(default=None)
@@ -411,6 +476,15 @@ class TextToSpeechConfig(ModelComponentConfig):
     thread_shutdown_timeout: int = field(default=5)
     stream: bool = field(default=True)
     _get_bytes: bool = field(default=False, alias="_get_bytes")
+
+    @stream.validator
+    def _check_stream(self, _, value):
+        """Stream validator"""
+        if value and self.enable_local_model:
+            raise ValueError(
+                "stream cannot be set to True when enable_local_model is True in TextToSpeechConfig. "
+                "Local TTS model does not support streaming."
+            )
 
     def _get_inference_params(self) -> Dict:
         """get_inference_params.
@@ -451,9 +525,21 @@ class SpeechToTextConfig(ModelComponentConfig):
     This class defines the configuration options for speech transcription, voice activity detection,
     wakeword detection, and audio streaming.
 
-    --------------------
+    --
+    Local Model
+    --
+    :param enable_local_model: Whether to enable a local STT model via ``sherpa-onnx`` (Whisper tiny.en by default), allowing the component to run without a remote model client. Requires the ``sherpa-onnx`` pip package. Default is False.
+    :type enable_local_model: bool
+    :param device_local_model: Device to run the local model on, either "cpu" or "cuda" (default: "cuda"). This parameter is only effective when ``enable_local_model`` is True.
+    :type device_local_model: str
+    :param ncpu_local_model: Number of CPU cores to allocate to the local model when using CPU (default: 1). This parameter is only effective when ``enable_local_model`` is True.
+    :type ncpu_local_model: int
+    :param local_model_path: HuggingFace repository ID for a sherpa-onnx compatible Whisper STT model (default: ``csukuangfj/sherpa-onnx-whisper-tiny.en``). For available models see https://k2-fsa.github.io/sherpa/onnx/pretrained_models/index.html. This parameter is only effective when ``enable_local_model`` is True.
+    :type local_model_path: Optional[str]
+
+    --
     Transcription
-    --------------------
+    --
     :param initial_prompt: Optional initial prompt to guide transcription (e.g. speaker name or topic).
                            Defaults to None.
     :type initial_prompt: str or None
@@ -466,9 +552,9 @@ class SpeechToTextConfig(ModelComponentConfig):
                            Defaults to None.
     :type max_new_tokens: int or None
 
-    --------------------
+    --
     Voice Activity Detection (VAD)
-    --------------------
+    --
     :param enable_vad: Enable VAD to detect when speech is present in audio input.
                        Requires onnxruntime and silero-vad model.
                        Defaults to False.
@@ -507,9 +593,9 @@ class SpeechToTextConfig(ModelComponentConfig):
                      Defaults to 1.
     :type ncpu_vad: int
 
-    --------------------
+    --
     Wakeword Detection
-    --------------------
+    --
     :param enable_wakeword: Enable detection of a wakeword phrase (e.g. 'Hey Jarvis').
                             Requires `enable_vad` to be True.
                             Defaults to False.
@@ -529,9 +615,9 @@ class SpeechToTextConfig(ModelComponentConfig):
                           Defaults to 1.
     :type ncpu_wakeword: int
 
-    --------------------
+    --
     Streaming
-    --------------------
+    --
     :param stream: Send audio as a stream to a persistent client (e.g., websockets).
                    Requires `enable_vad` to be True.
                    Useful for real-time transcription.
@@ -543,9 +629,9 @@ class SpeechToTextConfig(ModelComponentConfig):
                        Defaults to 2000.
     :type min_chunk_size: int
 
-    --------------------
+    --
     Model Paths
-    --------------------
+    --
     :param vad_model_path: Path or URL to VAD ONNX model.
                            Defaults to the Silero VAD model URL.
     :type vad_model_path: str
@@ -564,9 +650,9 @@ class SpeechToTextConfig(ModelComponentConfig):
                                 https://github.com/dscripka/openWakeWord/blob/main/notebooks/automatic_model_training.ipynb
     :type wakeword_model_path: str
 
-    --------------------
+    --
     Example
-    --------------------
+    --
     Example usage:
     ```python
     config = SpeechToTextConfig(
@@ -579,8 +665,19 @@ class SpeechToTextConfig(ModelComponentConfig):
         speech_buffer_max_len=8000,
     )
     ```
+
+    Example of usage with local model:
+    ```python
+    config = SpeechToTextConfig(enable_local_model=True, enable_vad=True)
+    ```
     """
 
+    enable_local_model: bool = field(default=False)
+    device_local_model: Literal["cpu", "cuda"] = field(default="cuda")
+    ncpu_local_model: int = field(default=1)
+    local_model_path: Optional[str] = field(
+        default="csukuangfj/sherpa-onnx-whisper-tiny.en"
+    )
     initial_prompt: Optional[str] = field(default=None)
     language: Optional[str] = field(
         default="en",
@@ -636,6 +733,11 @@ class SpeechToTextConfig(ModelComponentConfig):
         if value and not self.enable_vad:
             raise ValueError(
                 "enable_vad (voice activity detection) must be set to True when stream is set to True"
+            )
+        if value and self.enable_local_model:
+            raise ValueError(
+                "stream cannot be set to True when enable_local_model is True in SpeechToTextConfig. "
+                "Local STT model does not support streaming. Use a WebSocket client for streaming."
             )
 
     def __attrs_post_init__(self):
