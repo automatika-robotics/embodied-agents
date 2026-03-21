@@ -2,6 +2,30 @@
 Changelog for package automatika_embodied_agents
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+* (docs) Adds advanced guides
+* (docs) Adds developer docs
+* (refactor) Adds sherpa-onnx for stt and tts local models
+* (refactor) Adds ggml based local llm and vlm models with llama cpp
+* (feature) Adds config option to strip think tokens
+* (fix) Fixes execution provider setup when executor is set to be cpu
+* (refactor) Standardizes local model handling in vision model
+* (docs) Updates fallback example and adds new local model fallback recipe
+* (feature) Adds fallback_to_local as a model component action for switching to local model on the fly
+* (chore) Adds markers for running tests that require model serving
+* (chore) Adds comprehensive test coverage for components
+* (fix) Fixes bug in model components
+* (fix) Fixes init of local LLM in semantic router for multiprocessing setup
+* (feature) Adds local models for STT and TTS
+* (feature) Enables local llm in semantic router component
+* (feature) Adds moondream as local vlm for VLM component
+* (feature) Adds local llm model for LLM component
+* (fix) Adds extra check in rgbd callback
+* (refactor) Adds warning for timed components when calling take_picture or record_video
+* (docs) Updates vlm based planning recipe
+* Contributors: ahr, mkabtoul
+
 0.5.1 (2026-02-16)
 ------------------
 * (feature) Adds a record_video action to the Vision component
