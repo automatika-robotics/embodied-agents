@@ -2,8 +2,8 @@
 Changelog for package automatika_embodied_agents
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+0.6.0 (2026-03-21)
+------------------
 * (docs) Adds advanced guides
 * (docs) Adds developer docs
 * (refactor) Adds sherpa-onnx for stt and tts local models
