@@ -37,6 +37,7 @@ A Component is the main execution unit in _EmbodiedAgents_ and in essence each c
 """
 
 from .component_base import Component
+from .cortex import Cortex
 from .imagestovideo import VideoMessageMaker
 from .llm import LLM
 from .map_encoding import MapEncoding
@@ -50,6 +51,7 @@ from .vla import VLA
 
 __all__ = [
     "Component",
+    "Cortex",
     "ModelComponent",
     "MapEncoding",
     "MLLM",

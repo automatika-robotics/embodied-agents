@@ -10,6 +10,7 @@ __all__ = [
     "LLMConfig",
     "MLLMConfig",
     "VLMConfig",
+    "CortexConfig",
     "VLAConfig",
     "SpeechToTextConfig",
     "TextToSpeechConfig",
@@ -153,6 +154,62 @@ class LLMConfig(ModelComponentConfig):
             "temperature": self.temperature,
             "max_new_tokens": self.max_new_tokens,
             "stream": self.stream,
+        }
+
+
+@define(kw_only=True)
+class CortexConfig(LLMConfig):
+    """
+    Configuration for the Cortex task planning and execution component.
+
+    The Cortex component uses an LLM to decompose high-level tasks into sub-tasks
+    and executes them by dispatching Actions registered on other components.
+    It follows the ReAct (Reason + Act) pattern.
+
+    The ``chat_history`` and ``stream`` fields are enforced by the component
+    (``chat_history=True``, ``stream=False``) and cannot be overridden.
+
+    :param max_iterations: Maximum number of planning loop iterations before the
+        task is considered failed. Default is 10.
+    :type max_iterations: int
+    :param temperature: Temperature used for sampling tokens during generation.
+        Default is 0.8 and must be greater than 0.0.
+    :type temperature: float
+    :param max_new_tokens: The maximum number of new tokens to generate.
+        Default is 500 and must be greater than 0.
+    :type max_new_tokens: int
+    :param strip_think_tokens: Whether to strip ``<think>...</think>`` blocks from model output. Reasoning models (e.g. Qwen3, DeepSeek-R1) emit these blocks which are useful for debugging but should typically not be forwarded to downstream components. Default is True.
+    :type strip_think_tokens: bool
+    :param enable_local_model: Whether to enable a local LLM via llama.cpp, allowing the component to run without a remote model client. Requires the ``llama-cpp-python`` package. Default is False.
+    :type enable_local_model: bool
+    :param device_local_model: Device to run the local model on, either "cpu" or "cuda" (default: "cuda"). This parameter is only effective when ``enable_local_model`` is True.
+    :type device_local_model: str
+    :param ncpu_local_model: Number of CPU cores to allocate to the local model when using CPU (default: 1). This parameter is only effective when ``enable_local_model`` is True.
+    :type ncpu_local_model: int
+    :param local_model_path: HuggingFace repository ID for a GGUF model (default: ``Qwen/Qwen3-0.6B-GGUF``), or a local path to a ``.gguf`` file. This parameter is only effective when ``enable_local_model`` is True.
+    :type local_model_path: Optional[str]
+
+    Example of usage:
+    ```python
+    config = CortexConfig(max_iterations=15, temperature=0.2)
+    ```
+
+    Example of usage with local model:
+    ```python
+    config = CortexConfig(enable_local_model=True, max_iterations=20)
+    ```
+    """
+
+    max_iterations: int = field(default=10, validator=base_validators.gt(0))
+
+    def _get_inference_params(self) -> Dict:
+        """get_inference_params.
+        :rtype: dict
+        """
+        return {
+            "temperature": self.temperature,
+            "max_new_tokens": self.max_new_tokens,
+            "stream": False,
         }
 
 
