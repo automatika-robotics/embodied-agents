@@ -1,5 +1,4 @@
 import json
-import re
 from pathlib import Path
 from typing import Any, Optional, Union, Callable, List, Dict, MutableMapping
 import msgpack
@@ -19,7 +18,7 @@ from ..ros import (
     Detections,
     StreamingString,
 )
-from ..utils import get_prompt_template, validate_func_args
+from ..utils import get_prompt_template, validate_func_args, strip_think_tokens
 from .model_component import ModelComponent
 from .component_base import ComponentRunType
 
@@ -234,7 +233,7 @@ class LLM(ModelComponent):
     def _strip_think_tokens(self, text: str) -> str:
         """Strip <think>...</think> blocks from model output."""
         if self.config.strip_think_tokens:
-            return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+            return strip_think_tokens(text)
         return text
 
     def _deploy_local_model(self):

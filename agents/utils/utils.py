@@ -1,6 +1,7 @@
 import base64
 import json
 import inspect
+import re
 import uuid
 from functools import wraps
 from enum import Enum
@@ -269,6 +270,20 @@ def encode_img_base64(img: np.ndarray) -> str:
     bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
     _, buf = cv2.imencode(".png", bgr)
     return base64.b64encode(buf).decode("utf-8")
+
+
+def strip_think_tokens(text: str) -> str:
+    """Strip ``<think>...</think>`` blocks from model output.
+
+    Reasoning models (Qwen3, DeepSeek-R1, etc.) emit these blocks which are
+    useful for debugging but should not be forwarded to downstream components.
+
+    :param text: Raw model output text
+    :type text: str
+    :returns: Text with think blocks removed
+    :rtype: str
+    """
+    return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
 
 class VADStatus(Enum):
