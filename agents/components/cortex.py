@@ -1,8 +1,10 @@
+from copy import copy
 import json
 from typing import Optional, Union, List, Dict, Set, cast
 
-from attrs import define, field
 from ros_sugar.core.monitor import Monitor
+from ros_sugar.config.base_config import BaseComponentConfig
+from ros_sugar.core.component import BaseComponent
 
 from ..clients.model_base import ModelClient
 from ..config import CortexConfig
@@ -16,45 +18,6 @@ from ..ros import (
 )
 from ..utils import validate_func_args, strip_think_tokens
 from .model_component import ModelComponent
-
-
-@define
-class CortexAction:
-    """Wraps an Action with metadata for LLM tool generation.
-
-    The Cortex component converts these into OpenAI-format tool descriptions
-    so the LLM can select and dispatch actions by name. When selected, the
-    action is dispatched through the EMOS event system -- not called directly.
-
-    :param action: The Action (or list of Actions) to dispatch when the LLM
-        selects this tool.
-    :type action: Union[Action, List[Action]]
-    :param description: Human-readable description of what this action does.
-        This is passed directly to the LLM as the tool description.
-    :type description: str
-
-    Example usage:
-    ```python
-    from agents.ros import Action
-
-    grasp_action = CortexAction(
-        action=Action(method=gripper.grasp),
-        description="Close the gripper to grasp an object",
-    )
-
-    # Multiple actions dispatched together
-    alert_action = CortexAction(
-        action=[
-            Action(method=speaker.say, args=("Alert!",)),
-            Action(method=lights.flash),
-        ],
-        description="Sound an alert and flash the lights",
-    )
-    ```
-    """
-
-    action: Union[Action, List[Action]] = field()
-    description: str = field()
 
 
 class Cortex(ModelComponent, Monitor):
@@ -132,7 +95,7 @@ class Cortex(ModelComponent, Monitor):
         *,
         inputs: List[Topic],
         outputs: List[Topic],
-        actions: List[CortexAction],
+        actions: List[Union[Action, List[Action]]],
         model_client: Optional[ModelClient] = None,
         config: Optional[CortexConfig] = None,
         component_name: str,
@@ -140,9 +103,15 @@ class Cortex(ModelComponent, Monitor):
     ):
         if not actions:
             raise ValueError(
-                "Cortex requires at least one CortexAction. "
+                "Cortex requires at least one Action. "
                 "Provide a list of actions the planner can dispatch."
             )
+        for action in actions:
+            if not action.description:
+                raise ValueError(
+                    "Each Cortex Action must have a description for the planner. "
+                    f"Action '{action.method.__name__}' is missing a description."
+                )
 
         self.config: CortexConfig = config or CortexConfig()
 
@@ -177,31 +146,18 @@ class Cortex(ModelComponent, Monitor):
         # Launcher has populated Monitor-side attributes
         self._system_tools: Set[str] = set()
 
-        # Monitor-side: Launcher populates these when it detects Cortex
-        self._components_to_monitor: List[str] = []
-        self._service_components = None
-        self._action_components = None
-        self._monitor_events_actions = None
-        self._internal_events = None
-        self._components_to_activate_on_start: List[str] = []
-        self._update_parameter_srv_client: Dict = {}
-        self._update_parameters_srv_client: Dict = {}
-        self._topic_change_srv_client: Dict = {}
-        self._configure_from_file_srv_client: Dict = {}
-        self._main_srv_clients: Dict = {}
-        self._main_action_clients: Dict = {}
-
         # Combine user outputs with internal action event topics
         all_outputs = list(outputs) + action_outputs
-
-        # Action server mode
-        self.run_type = ComponentRunType.ACTION_SERVER
 
         if "trigger" in kwargs:
             kwargs.pop("trigger")
 
-        # Initialize via ModelComponent. The MRO will eventually reach
-        # Monitor.__init__ which needs components_names — pass it via kwargs.
+        # Ensure run_type and action_type survive the Monitor gap
+        self.run_type = ComponentRunType.ACTION_SERVER
+
+        # Initialize via ModelComponent
+        # ModelComponent → Component → BaseComponent.
+        # Monitor.__init__ will be called later by the Launcher when it detects this component as the monitor node.
         ModelComponent.__init__(
             self,
             all_outputs,
@@ -210,8 +166,8 @@ class Cortex(ModelComponent, Monitor):
             self.config,
             None,
             component_name,
-            main_action_type=VisionLanguageAction,
             components_names=[],
+            main_action_type=VisionLanguageAction,
             **kwargs,
         )
 
@@ -219,8 +175,39 @@ class Cortex(ModelComponent, Monitor):
         for event, action in self._action_events.items():
             self._add_event_action_pair(event, action)
 
+    def _init_internal_monitor(
+        self,
+        components_names: List[str],
+        events_actions: Optional[Dict[str, List[Action]]] = None,
+        events_to_emit: Optional[List[Event]] = None,
+        config: Optional[BaseComponentConfig] = None,
+        services_components: Optional[List[BaseComponent]] = None,
+        action_servers_components: Optional[List[BaseComponent]] = None,
+        activate_on_start: Optional[List[str]] = None,
+        activation_timeout: Optional[float] = None,
+        activation_attempt_time: float = 1.0,
+        **_
+    ):
+        """Initialize Monitor capabilities for system management. This method will be called internally by the Launcher."""
+        # preserve the config instance
+        my_config = copy(self.config)
+        Monitor.__init__(
+            self,
+            component_name=self.node_name,
+            components_names=components_names,
+            events_actions=events_actions,
+            events_to_emit=events_to_emit,
+            config=config,
+            services_components=services_components,
+            action_servers_components=action_servers_components,
+            activate_on_start=activate_on_start,
+            activation_timeout=activation_timeout,
+            activation_attempt_time=activation_attempt_time,
+        )
+        self.config = my_config
+
     def _setup_action_events(
-        self, actions: List[CortexAction], component_name: str
+        self, actions: List[Action], component_name: str
     ) -> List[Topic]:
         """Create internal event topics and tool descriptions for each action.
 
@@ -230,9 +217,9 @@ class Cortex(ModelComponent, Monitor):
 
         for cortex_action in actions:
             targets = (
-                cortex_action.action
-                if isinstance(cortex_action.action, list)
-                else [cortex_action.action]
+                cortex_action
+                if isinstance(cortex_action, list)
+                else [cortex_action]
             )
             action_targets = cast(List[Action], targets)
             name = action_targets[0].action_name
@@ -246,7 +233,7 @@ class Cortex(ModelComponent, Monitor):
 
             event = Event(event_topic)
             self._action_events[event] = cast(
-                Union[Action, List[Action]], cortex_action.action
+                Union[Action, List[Action]], cortex_action
             )
 
             tool_description = {
