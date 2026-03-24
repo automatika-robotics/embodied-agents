@@ -164,29 +164,44 @@ class CortexConfig(LLMConfig):
 
     The Cortex component uses an LLM to decompose high-level tasks into sub-tasks
     and executes them by dispatching Actions registered on other components.
-    It follows the ReAct (Reason + Act) pattern.
+
+    The task execution follows a two-phase approach:
+    1. **Planning** — A single LLM call with available actions as tools produces a
+       step-by-step plan (returned as multiple tool_calls).
+    2. **Execution** — Each step is executed sequentially, with a brief LLM
+       confirmation call before each step to decide EXECUTE, SKIP, or ABORT.
 
     The ``chat_history`` and ``stream`` fields are enforced by the component
     (``chat_history=True``, ``stream=False``) and cannot be overridden.
 
-    :param max_iterations: Maximum number of planning loop iterations before the
-        task is considered failed. Default is 10.
+    :param max_iterations: Maximum number of steps allowed in a plan. Plans with
+        more steps are truncated. Default is 10.
     :type max_iterations: int
-    :param temperature: Temperature used for sampling tokens during generation.
+    :param confirmation_temperature: Temperature for the per-step confirmation LLM
+        calls. Lower values give more deterministic responses. Default is 0.2.
+    :type confirmation_temperature: float
+    :param confirmation_max_tokens: Maximum tokens for confirmation responses.
+        Kept low since only EXECUTE/SKIP/ABORT is expected. Default is 100.
+    :type confirmation_max_tokens: int
+    :param temperature: Temperature used for the planning LLM call.
         Default is 0.8 and must be greater than 0.0.
     :type temperature: float
-    :param max_new_tokens: The maximum number of new tokens to generate.
+    :param max_new_tokens: The maximum number of new tokens to generate during planning.
         Default is 500 and must be greater than 0.
     :type max_new_tokens: int
-    :param strip_think_tokens: Whether to strip ``<think>...</think>`` blocks from model output. Reasoning models (e.g. Qwen3, DeepSeek-R1) emit these blocks which are useful for debugging but should typically not be forwarded to downstream components. Default is True.
+    :param enable_rag: Enable Retrieval Augmented Generation to provide context
+        during planning. Requires a ``db_client`` to be passed to the Cortex component.
+        Default is False.
+    :type enable_rag: bool
+    :param strip_think_tokens: Whether to strip ``<think>...</think>`` blocks from model output. Default is True.
     :type strip_think_tokens: bool
-    :param enable_local_model: Whether to enable a local LLM via llama.cpp, allowing the component to run without a remote model client. Requires the ``llama-cpp-python`` package. Default is False.
+    :param enable_local_model: Whether to enable a local LLM via llama.cpp. Requires ``llama-cpp-python``. Default is False.
     :type enable_local_model: bool
-    :param device_local_model: Device to run the local model on, either "cpu" or "cuda" (default: "cuda"). This parameter is only effective when ``enable_local_model`` is True.
+    :param device_local_model: Device to run the local model on, either "cpu" or "cuda" (default: "cuda").
     :type device_local_model: str
-    :param ncpu_local_model: Number of CPU cores to allocate to the local model when using CPU (default: 1). This parameter is only effective when ``enable_local_model`` is True.
+    :param ncpu_local_model: Number of CPU cores for the local model (default: 1).
     :type ncpu_local_model: int
-    :param local_model_path: HuggingFace repository ID for a GGUF model (default: ``Qwen/Qwen3-0.6B-GGUF``), or a local path to a ``.gguf`` file. This parameter is only effective when ``enable_local_model`` is True.
+    :param local_model_path: HuggingFace repository ID for a GGUF model (default: ``Qwen/Qwen3-0.6B-GGUF``), or a local path to a ``.gguf`` file.
     :type local_model_path: Optional[str]
 
     Example of usage:
@@ -201,6 +216,10 @@ class CortexConfig(LLMConfig):
     """
 
     max_iterations: int = field(default=10, validator=base_validators.gt(0))
+    confirmation_temperature: float = field(
+        default=0.2, validator=base_validators.gt(0.0)
+    )
+    confirmation_max_tokens: int = field(default=100, validator=base_validators.gt(0))
 
     def _get_inference_params(self) -> Dict:
         """get_inference_params.

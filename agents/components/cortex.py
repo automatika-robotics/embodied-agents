@@ -1,12 +1,9 @@
 from copy import copy
 import json
-from typing import Optional, Union, List, Dict, Set, cast
-
-from ros_sugar.core.monitor import Monitor
-from ros_sugar.config.base_config import BaseComponentConfig
-from ros_sugar.core.component import BaseComponent
+from typing import Optional, List, Dict, Set
 
 from ..clients.model_base import ModelClient
+from ..clients.db_base import DBClient
 from ..config import CortexConfig
 from ..ros import (
     String,
@@ -15,6 +12,9 @@ from ..ros import (
     Event,
     ComponentRunType,
     VisionLanguageAction,
+    Monitor,
+    BaseComponent,
+    BaseComponentConfig
 )
 from ..utils import validate_func_args, strip_think_tokens
 from .model_component import ModelComponent
@@ -30,23 +30,28 @@ class Cortex(ModelComponent, Monitor):
     takes a high-level task, uses an LLM to decompose it into sub-tasks,
     and executes them by dispatching Actions registered on other components.
 
-    It follows the ReAct (Reason + Act) pattern: the LLM reasons about what
-    to do next, selects an action, observes the result, and repeats until the
-    task is complete.
+    Task execution follows a two-phase approach:
+
+    1. **Planning** -- A single LLM call with all available actions as tools
+       produces a step-by-step plan (returned as multiple tool_calls).
+       Optional RAG context from a vector DB is injected during this phase.
+    2. **Execution** -- Each planned step is executed sequentially. Before each
+       step, a brief LLM confirmation call decides: EXECUTE, SKIP, or ABORT,
+       based on the original plan and results so far.
 
     The component runs as a ROS2 action server, receiving task goals and
     providing feedback during execution.
 
-    :param inputs: Optional input topics for context (e.g., sensor data).
-    :type inputs: list[Topic]
+    :param actions: The action palette -- a list of Action objects with
+        descriptions, representing the actions available to the planner.
+    :type actions: list[Action]
     :param outputs: Output topics for publishing task status/results.
     :type outputs: list[Topic]
-    :param actions: The action palette -- a list of CortexAction objects
-        describing the actions available to the planner.
-    :type actions: list[CortexAction]
     :param model_client: The model client for LLM inference.
         Optional if ``enable_local_model`` is set to True in the config.
     :type model_client: Optional[ModelClient]
+    :param db_client: Optional database client for RAG context during planning.
+    :type db_client: Optional[DBClient]
     :param config: Configuration for the Cortex component.
     :type config: Optional[CortexConfig]
     :param component_name: The name of this component.
@@ -55,22 +60,14 @@ class Cortex(ModelComponent, Monitor):
     Example usage:
     ```python
     from agents.components import Cortex
-    from agents.components.cortex import CortexAction
     from agents.config import CortexConfig
     from agents.ros import Action, Topic, Launcher
 
     cortex = Cortex(
-        inputs=[],
         outputs=[Topic(name="status", msg_type="String")],
         actions=[
-            CortexAction(
-                action=Action(method=nav.go_to),
-                description="Navigate to a location",
-            ),
-            CortexAction(
-                action=Action(method=arm.grasp),
-                description="Grasp an object",
-            ),
+            Action(method=nav.go_to, description="Navigate to a location"),
+            Action(method=arm.grasp, description="Grasp an object"),
         ],
         model_client=my_client,
         config=CortexConfig(max_iterations=15),
@@ -79,46 +76,41 @@ class Cortex(ModelComponent, Monitor):
     ```
     """
 
-    _SYSTEM_PROMPT = (
-        "You are a task planning and execution agent on a robot. "
-        "You have access to actions that you can call to accomplish tasks. "
-        "Break down the given task into steps, execute them one at a time by "
-        "calling the appropriate action, observe the result, and continue until "
-        "the task is complete. When the task is finished, respond with a brief "
-        "summary of what was accomplished. Do not call any actions if the task "
-        "is already complete."
+    _PLANNING_PROMPT = (
+        "You are a task planning agent on a robot. "
+        "Given a task, create a plan by calling the appropriate actions in sequence. "
+        "Return ALL actions needed as tool calls in a single response. "
+        "Each tool call is one step. Order them in execution sequence. "
+        "If the task requires no actions, respond with text only."
+    )
+
+    _CONFIRMATION_PROMPT = (
+        "You are monitoring task execution on a robot. "
+        "Given the original plan and results so far, decide if the next step "
+        "should proceed. Respond with exactly one of: EXECUTE, SKIP, or ABORT. "
+        "Optionally follow with a brief reason after a colon."
     )
 
     @validate_func_args
     def __init__(
         self,
         *,
-        inputs: List[Topic],
+        actions: List[Action],
         outputs: List[Topic],
-        actions: List[Union[Action, List[Action]]],
         model_client: Optional[ModelClient] = None,
+        db_client: Optional[DBClient] = None,
         config: Optional[CortexConfig] = None,
         component_name: str,
         **kwargs,
     ):
-        if not actions:
-            raise ValueError(
-                "Cortex requires at least one Action. "
-                "Provide a list of actions the planner can dispatch."
-            )
-        for action in actions:
-            if not action.description:
-                raise ValueError(
-                    "Each Cortex Action must have a description for the planner. "
-                    f"Action '{action.method.__name__}' is missing a description."
-                )
+        self._validate_actions(actions)
 
         self.config: CortexConfig = config or CortexConfig()
 
-        # Enforce config for ReAct loop
+        # Enforce config for planning loop
         self.config.chat_history = True
         self.config.stream = False
-        self.config._system_prompt = self._SYSTEM_PROMPT
+        self.config._system_prompt = self._PLANNING_PROMPT
 
         self.allowed_inputs = {
             "Required": [],
@@ -133,34 +125,47 @@ class Cortex(ModelComponent, Monitor):
             )
 
         self.model_client = model_client
+        self.db_client = db_client if db_client else None
 
-        # Initialize messages buffer with system prompt
-        self.messages: List[Dict] = [{"role": "system", "content": self._SYSTEM_PROMPT}]
+        # Initialize messages buffer
+        self.messages: List[Dict] = [
+            {"role": "system", "content": self._PLANNING_PROMPT}
+        ]
 
         # Behavioral actions: dispatched via event system
         self._action_event_topics: Dict[str, Topic] = {}
-        self._action_events: Dict[Event, Union[Action, List[Action]]] = {}
+        self._action_events: Dict[Event, Action] = {}
         action_outputs = self._setup_action_events(actions, component_name)
 
-        # System management tools: registered during activation when the
-        # Launcher has populated Monitor-side attributes
+        # System management tools: registered during activation
         self._system_tools: Set[str] = set()
+
+        # Monitor-side: Launcher populates these when it detects Cortex
+        self._components_to_monitor: List[str] = []
+        self._service_components = None
+        self._action_components = None
+        self._monitor_events_actions = None
+        self._internal_events = None
+        self._components_to_activate_on_start: List[str] = []
+        self._update_parameter_srv_client: Dict = {}
+        self._update_parameters_srv_client: Dict = {}
+        self._topic_change_srv_client: Dict = {}
+        self._configure_from_file_srv_client: Dict = {}
+        self._main_srv_clients: Dict = {}
+        self._main_action_clients: Dict = {}
 
         # Combine user outputs with internal action event topics
         all_outputs = list(outputs) + action_outputs
 
+        # Action server mode
+        self.run_type = ComponentRunType.ACTION_SERVER
+
         if "trigger" in kwargs:
             kwargs.pop("trigger")
 
-        # Ensure run_type and action_type survive the Monitor gap
-        self.run_type = ComponentRunType.ACTION_SERVER
-
-        # Initialize via ModelComponent
-        # ModelComponent → Component → BaseComponent.
-        # Monitor.__init__ will be called later by the Launcher when it detects this component as the monitor node.
         ModelComponent.__init__(
             self,
-            all_outputs,
+            None,
             all_outputs,
             model_client,
             self.config,
@@ -171,9 +176,21 @@ class Cortex(ModelComponent, Monitor):
             **kwargs,
         )
 
-        # Wire event→action pairs after super().__init__
+        # Wire event→action pairs
         for event, action in self._action_events.items():
             self._add_event_action_pair(event, action)
+
+    @staticmethod
+    def _validate_actions(actions: List[Action]):
+        """Validate that all passed actions have descriptions."""
+        if not actions:
+            raise ValueError("Cortex must have at least one Action to execute.")
+        for action in actions:
+            if not action.description:
+                raise ValueError(
+                    "Each Cortex Action must have a description for the planner. "
+                    f"Action '{action.action_name}' is missing a description."
+                )
 
     def _init_internal_monitor(
         self,
@@ -186,10 +203,9 @@ class Cortex(ModelComponent, Monitor):
         activate_on_start: Optional[List[str]] = None,
         activation_timeout: Optional[float] = None,
         activation_attempt_time: float = 1.0,
-        **_
+        **_,
     ):
-        """Initialize Monitor capabilities for system management. This method will be called internally by the Launcher."""
-        # preserve the config instance
+        """Initialize Monitor capabilities. Called by the Launcher."""
         my_config = copy(self.config)
         Monitor.__init__(
             self,
@@ -209,20 +225,11 @@ class Cortex(ModelComponent, Monitor):
     def _setup_action_events(
         self, actions: List[Action], component_name: str
     ) -> List[Topic]:
-        """Create internal event topics and tool descriptions for each action.
-
-        :returns: List of internal event topics (to be added as outputs)
-        """
+        """Create internal event topics and tool descriptions for each action."""
         event_topics = []
 
         for cortex_action in actions:
-            targets = (
-                cortex_action
-                if isinstance(cortex_action, list)
-                else [cortex_action]
-            )
-            action_targets = cast(List[Action], targets)
-            name = action_targets[0].action_name
+            name = cortex_action.action_name
 
             event_topic = Topic(
                 name=f"internal_cortex_event/{component_name}/{name}",
@@ -232,9 +239,7 @@ class Cortex(ModelComponent, Monitor):
             self._action_event_topics[name] = event_topic
 
             event = Event(event_topic)
-            self._action_events[event] = cast(
-                Union[Action, List[Action]], cortex_action
-            )
+            self._action_events[event] = cortex_action
 
             tool_description = {
                 "type": "function",
@@ -260,15 +265,22 @@ class Cortex(ModelComponent, Monitor):
     def custom_on_configure(self):
         if not self.model_client and self.config.enable_local_model:
             self._deploy_local_model()
+        if self.db_client:
+            self.db_client.check_connection()
+            self.db_client.initialize()
         super().custom_on_configure()
 
     def custom_on_activate(self):
         super().custom_on_activate()
-
-        # Activate Monitor capabilities if Launcher has populated them
         if self._components_to_monitor:
             Monitor.activate(self)
             self._register_system_tools()
+
+    def custom_on_deactivate(self):
+        if self.db_client:
+            self.db_client.check_connection()
+            self.db_client.deinitialize()
+        super().custom_on_deactivate()
 
     def _deploy_local_model(self):
         """Deploy local LLM model on demand."""
@@ -283,18 +295,208 @@ class Cortex(ModelComponent, Monitor):
         )
 
     # =========================================================================
+    # RAG
+    # =========================================================================
+
+    def _handle_rag_query(self, query: str) -> Optional[str]:
+        """Retrieve documents from vector DB for RAG context during planning."""
+        if not self.db_client:
+            return None
+        db_input = {
+            "collection_name": self.config.collection_name,
+            "query": query,
+            "n_results": self.config.n_results,
+        }
+        result = self.db_client.query(db_input)
+        if result:
+            return (
+                "\n".join(
+                    f"{str(meta)}, {doc}"
+                    for meta, doc in zip(
+                        result["output"]["metadatas"],
+                        result["output"]["documents"],
+                        strict=True,
+                    )
+                )
+                if self.config.add_metadata
+                else "\n".join(doc for doc in result["output"]["documents"])
+            )
+        return None
+
+    def add_documents(
+        self, ids: List[str], metadatas: List[Dict], documents: List[str]
+    ) -> None:
+        """Add documents to vector DB for RAG context during planning."""
+        if not self.db_client:
+            raise AttributeError("db_client needs to be set for add_documents to work")
+        db_input = {
+            "collection_name": self.config.collection_name,
+            "distance_func": self.config.distance_func,
+            "ids": ids,
+            "documents": documents,
+            "metadatas": metadatas,
+        }
+        self.db_client.add(db_input)
+
+    # =========================================================================
+    # Phase 1: Planning
+    # =========================================================================
+
+    def _plan_task(self, task: str) -> Optional[List[Dict]]:
+        """Single LLM call with tools to produce a step-by-step plan.
+
+        :param task: The high-level task description
+        :returns: List of tool_call dicts (the plan), or None if no actions needed
+        """
+        # Optional RAG context
+        user_content = task
+        if self.config.enable_rag and self.db_client:
+            rag_context = self._handle_rag_query(task)
+            if rag_context:
+                user_content = f"Context:\n{rag_context}\n\nTask: {task}"
+
+        planning_messages = [
+            {"role": "system", "content": self._PLANNING_PROMPT},
+            {"role": "user", "content": user_content},
+        ]
+
+        inference_input = {
+            "query": planning_messages,
+            **self.config._get_inference_params(),
+        }
+        if self.config._tool_descriptions:
+            inference_input["tools"] = self.config._tool_descriptions
+
+        result = self._call_inference(inference_input)
+        if not result:
+            self.get_logger().error("Inference failed during planning phase.")
+            return None
+
+        output = result.get("output") or ""
+        if self.config.strip_think_tokens:
+            output = strip_think_tokens(output)
+
+        # Store for use if no tool calls (text-only response)
+        self._planning_output = output
+
+        if not result.get("tool_calls"):
+            return None
+
+        plan = result["tool_calls"]
+
+        # Truncate if plan exceeds max_iterations
+        if len(plan) > self.config.max_iterations:
+            self.get_logger().warning(
+                f"Plan has {len(plan)} steps, truncating to "
+                f"{self.config.max_iterations}."
+            )
+            plan = plan[: self.config.max_iterations]
+
+        return plan
+
+    # =========================================================================
+    # Phase 2: Execution with confirmation
+    # =========================================================================
+
+    def _confirm_step(
+        self,
+        plan: List[Dict],
+        executed_results: List[Dict],
+        step_index: int,
+    ) -> str:
+        """Ask the LLM whether the next planned step should be executed.
+
+        :param plan: Full list of planned tool_calls
+        :param executed_results: Results of already-executed steps
+        :param step_index: Index of the next step to confirm
+        :returns: "EXECUTE", "SKIP", or "ABORT"
+        """
+        # Build plan summary with status annotations
+        plan_lines = []
+        for i, step in enumerate(plan):
+            name = step["function"]["name"]
+            args = step["function"].get("arguments", {})
+            args_str = f" ({args})" if args else ""
+
+            if i < len(executed_results):
+                status = f" [DONE: {executed_results[i]['result']}]"
+            elif i == step_index:
+                status = " [NEXT]"
+            else:
+                status = " [PENDING]"
+            plan_lines.append(f"  {i + 1}. {name}{args_str}{status}")
+
+        next_step = plan[step_index]
+        fn_name = next_step["function"]["name"]
+        fn_args = next_step["function"].get("arguments", {})
+
+        user_message = (
+            "Original plan:\n"
+            + "\n".join(plan_lines)
+            + f"\n\nNext action: {fn_name}"
+            + (f" with arguments {fn_args}" if fn_args else "")
+            + "\n\nRespond EXECUTE, SKIP, or ABORT."
+        )
+
+        inference_input = {
+            "query": [
+                {"role": "system", "content": self._CONFIRMATION_PROMPT},
+                {"role": "user", "content": user_message},
+            ],
+            "temperature": self.config.confirmation_temperature,
+            "max_new_tokens": self.config.confirmation_max_tokens,
+            "stream": False,
+        }
+
+        result = self._call_inference(inference_input)
+        if not result:
+            self.get_logger().warning(
+                "Confirmation inference failed; defaulting to EXECUTE."
+            )
+            return "EXECUTE"
+
+        output = (result.get("output") or "").strip()
+        if self.config.strip_think_tokens:
+            output = strip_think_tokens(output).strip()
+
+        upper = output.upper()
+        if upper.startswith("ABORT"):
+            return "ABORT"
+        elif upper.startswith("SKIP"):
+            return "SKIP"
+        return "EXECUTE"
+
+    def _execute_action_step(self, step: Dict) -> str:
+        """Execute a single planned step via the appropriate dispatch mechanism."""
+        fn_name = step["function"]["name"]
+        fn_args = step["function"].get("arguments", {})
+
+        if fn_name in self._action_event_topics:
+            return self._dispatch_action(fn_name)
+        elif fn_name in self._system_tools:
+            parsed_args = (
+                {
+                    key: (json.loads(str(arg)) if isinstance(arg, str) else arg)
+                    for key, arg in fn_args.items()
+                }
+                if fn_args
+                else {}
+            )
+            return self._execute_system_tool(fn_name, parsed_args)
+        else:
+            all_tools = list(self._action_event_topics.keys()) + list(
+                self._system_tools
+            )
+            return f"Error: Unknown tool '{fn_name}'. Available: {all_tools}"
+
+    # =========================================================================
     # System management tools (via Monitor)
     # =========================================================================
 
     def _register_system_tools(self):
-        """Register system management capabilities as LLM tools.
-
-        Called during activation after Monitor.activate() has created
-        service clients for all managed components.
-        """
+        """Register system management capabilities as LLM tools."""
         component_names_str = ", ".join(self._components_to_monitor)
 
-        # update_parameter: change a config param on any component
         self._system_tools.add("update_parameter")
         self.config._tool_descriptions.append({
             "type": "function",
@@ -326,7 +528,6 @@ class Cortex(ModelComponent, Monitor):
         })
         self.config._tool_response_flags["update_parameter"] = True
 
-        # send_goal_to_component: send task to a component's action server
         if self._main_action_clients:
             action_server_names = ", ".join(self._main_action_clients.keys())
             self._system_tools.add("send_goal_to_component")
@@ -347,7 +548,7 @@ class Cortex(ModelComponent, Monitor):
                             },
                             "task": {
                                 "type": "string",
-                                "description": "Task description to send as the goal",
+                                "description": "Task description to send",
                             },
                         },
                         "required": ["component", "task"],
@@ -374,7 +575,7 @@ class Cortex(ModelComponent, Monitor):
     def _sys_update_parameter(
         self, component: str, param_name: str, new_value: str
     ) -> str:
-        """Update a parameter on a managed component via ChangeParameter service."""
+        """Update a parameter on a managed component."""
         client = self._update_parameter_srv_client.get(component)
         if not client:
             return (
@@ -422,17 +623,20 @@ class Cortex(ModelComponent, Monitor):
                 f"Error: Action '{name}' does not exist. Available actions: {available}"
             )
         try:
-            self.publishers_dict[event_topic.name].publish(f"cortex_dispatch:{name}")
+            self.publishers_dict[event_topic.name].publish(name)
             return f"Action '{name}' dispatched."
         except Exception as e:
             return f"Error dispatching action '{name}': {e}"
 
     # =========================================================================
-    # ReAct planning loop
+    # Main action server callback
     # =========================================================================
 
     def main_action_callback(self, goal_handle):
-        """Action server callback. Runs the ReAct planning loop for a task.
+        """Action server callback. Runs two-phase planning and execution.
+
+        Phase 1: Single LLM call produces a plan (multiple tool_calls).
+        Phase 2: Each step is confirmed then executed sequentially.
 
         :param goal_handle: Incoming action goal
         :type goal_handle: VisionLanguageAction.Goal
@@ -446,110 +650,145 @@ class Cortex(ModelComponent, Monitor):
         result_msg = VisionLanguageAction.Result()
         result_msg.success = False
 
-        # Reset conversation for this task
-        self.messages = [
-            {"role": "system", "content": self._SYSTEM_PROMPT},
-            {"role": "user", "content": task},
-        ]
+        # Phase 1: Planning
+        plan = self._plan_task(task)
 
-        all_tools = list(self._action_event_topics.keys()) + list(self._system_tools)
+        # Send feedback
+        feedback_msg.timestep = 0
+        feedback_msg.completed = False
+        feedback_msg.feedback = "Creating a plan ..."
+        goal_handle.publish_feedback(feedback_msg)
+        self.get_logger().info("Creating a plan ...")
 
-        for iteration in range(self.config.max_iterations):
+        if plan is None:
+            text_output = getattr(self, "_planning_output", "") or ""
+            if text_output:
+                self._publish({"output": text_output})
+                result_msg.success = True
+                feedback_msg.timestep = 0
+                feedback_msg.completed = True
+                feedback_msg.feedback = f"No actions needed. {text_output}"
+                goal_handle.publish_feedback(feedback_msg)
+                with self._main_goal_lock:
+                    goal_handle.succeed()
+            else:
+                feedback_msg.timestep = 0
+                feedback_msg.completed = True
+                feedback_msg.feedback = "Planning failed: no response from model."
+                goal_handle.publish_feedback(feedback_msg)
+                with self._main_goal_lock:
+                    goal_handle.abort()
+            return result_msg
+
+        # Publish planning feedback
+        plan_description = ", ".join(step["function"]["name"] for step in plan)
+        feedback_msg.timestep = 0
+        feedback_msg.completed = False
+        feedback_msg.feedback = (
+            f"Plan created with {len(plan)} steps: {plan_description}"
+        )
+        goal_handle.publish_feedback(feedback_msg)
+        self.get_logger().info(f"Plan: {plan_description}")
+
+        # Phase 2: Execution
+        executed_results: List[Dict] = []
+        aborted = False
+
+        for i, step in enumerate(plan):
             if goal_handle.is_cancel_requested:
                 self.get_logger().info("Task cancelled by client.")
                 with self._main_goal_lock:
                     goal_handle.canceled()
                 return result_msg
 
-            inference_input = {
-                "query": self.messages,
-                **self.config._get_inference_params(),
-            }
-            if self.config._tool_descriptions:
-                inference_input["tools"] = self.config._tool_descriptions
+            fn_name = step["function"]["name"]
 
-            result = self._call_inference(inference_input)
-            if not result:
-                self.get_logger().error("Inference failed during planning loop.")
+            # Confirm step with LLM
+            decision = self._confirm_step(plan, executed_results, i)
+            self.get_logger().info(
+                f"[Step {i + 1}/{len(plan)}] {fn_name} -> {decision}"
+            )
+
+            if decision == "ABORT":
+                feedback_msg.timestep = i + 1
+                feedback_msg.completed = False
+                feedback_msg.feedback = f"Plan aborted at step {i + 1} ({fn_name})."
+                goal_handle.publish_feedback(feedback_msg)
+                aborted = True
                 break
 
-            output = result.get("output") or ""
-            if self.config.strip_think_tokens:
-                output = strip_think_tokens(output)
-
-            # No tool calls — task is complete
-            if not result.get("tool_calls"):
-                self.messages.append({"role": "assistant", "content": output})
-                self._publish({"output": output})
-
-                result_msg.success = True
-                feedback_msg.timestep = iteration
-                feedback_msg.completed = True
-                feedback_msg.feedback = f"Task completed. {output}"
+            if decision == "SKIP":
+                executed_results.append({
+                    "step": i,
+                    "action": fn_name,
+                    "result": "SKIPPED",
+                })
+                feedback_msg.timestep = i + 1
+                feedback_msg.completed = False
+                feedback_msg.feedback = f"Step {i + 1} ({fn_name}): skipped."
                 goal_handle.publish_feedback(feedback_msg)
+                continue
 
-                self.get_logger().info(f"Task completed in {iteration + 1} iterations.")
-                with self._main_goal_lock:
-                    goal_handle.succeed()
-                return result_msg
+            # EXECUTE action step
+            step_result = self._execute_action_step(step)
+            executed_results.append({
+                "step": i,
+                "action": fn_name,
+                "result": step_result,
+            })
 
-            # Has tool calls — dispatch via appropriate mechanism
-            self.messages.append({"role": "assistant", "content": output})
-
-            feedback_parts = []
-            for tool_call in result["tool_calls"]:
-                fn_name = tool_call["function"]["name"]
-                fn_args = tool_call["function"].get("arguments", {})
-
-                if fn_name in self._action_event_topics:
-                    tool_result = self._dispatch_action(fn_name)
-                elif fn_name in self._system_tools:
-                    parsed_args = (
-                        {
-                            key: (json.loads(str(arg)) if isinstance(arg, str) else arg)
-                            for key, arg in fn_args.items()
-                        }
-                        if fn_args
-                        else {}
-                    )
-                    tool_result = self._execute_system_tool(fn_name, parsed_args)
-                else:
-                    tool_result = (
-                        f"Error: Unknown tool '{fn_name}'. Available: {all_tools}"
-                    )
-
-                self.messages.append({"role": "tool", "content": tool_result})
-                feedback_parts.append(f"{fn_name}: {tool_result}")
-                self.get_logger().info(f"[Iteration {iteration + 1}] {tool_result}")
-
-            feedback_msg.timestep = iteration
+            feedback_msg.timestep = i + 1
             feedback_msg.completed = False
-            feedback_msg.feedback = " | ".join(feedback_parts)
+            feedback_msg.feedback = f"Step {i + 1} ({fn_name}): {step_result}"
+            goal_handle.publish_feedback(feedback_msg)
+            self.get_logger().info(f"[Step {i + 1}] {step_result}")
+
+        # Final result handling
+        summary = "; ".join(f"{r['action']}: {r['result']}" for r in executed_results)
+
+        if aborted:
+            self._publish({"output": f"Plan aborted. Completed: {summary}"})
+            with self._main_goal_lock:
+                goal_handle.abort()
+        else:
+            self._publish({"output": f"Plan completed. {summary}"})
+            result_msg.success = True
+
+            feedback_msg.timestep = len(plan)
+            feedback_msg.completed = True
+            feedback_msg.feedback = f"All {len(plan)} steps completed."
             goal_handle.publish_feedback(feedback_msg)
 
-        # Max iterations reached
-        self.get_logger().warning(
-            f"Task did not complete within {self.config.max_iterations} iterations."
-        )
-        with self._main_goal_lock:
-            goal_handle.abort()
+            self.get_logger().info(
+                f"Task completed: {len(executed_results)} steps executed."
+            )
+            with self._main_goal_lock:
+                goal_handle.succeed()
+
         return result_msg
 
+    # =========================================================================
+    # Unused/overridden methods (action server mode)
+    # =========================================================================
+
+    def _create_input(self, *args, **kwargs) -> Optional[Dict]:
+        """Not used -- Cortex builds inputs in _plan_task and _confirm_step."""
+        return None
+
     def _execution_step(self, *args, **kwargs):
-        """Not used — Cortex runs as an action server."""
+        """Not used -- Cortex runs as an action server."""
         pass
 
     def _warmup(self):
         """Warm up and verify model connectivity."""
-        inference_input = {
+        self._call_inference({
             "query": [
-                {"role": "system", "content": self._SYSTEM_PROMPT},
+                {"role": "system", "content": self._PLANNING_PROMPT},
                 {"role": "user", "content": "Hello"},
             ],
             **self.config._get_inference_params(),
-        }
-        self._call_inference(inference_input)
+        })
 
     def _handle_websocket_streaming(self):
-        """Not used — streaming is disabled for Cortex."""
+        """Not used -- streaming is disabled for Cortex."""
         pass

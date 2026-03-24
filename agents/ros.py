@@ -29,16 +29,15 @@ from ros_sugar.config import (
     BaseAttrs,
     base_validators,
 )
-from ros_sugar.core import BaseComponent
+from ros_sugar.core import BaseComponent, Monitor
 from ros_sugar.core.component import MutuallyExclusiveCallbackGroup
 from ros_sugar import UI_EXTENSIONS
 from ros_sugar.utils import component_action, component_fallback
 from ros_sugar.io.utils import run_external_processor
-from ros_sugar.core import Event
-from ros_sugar.core import Action
+from ros_sugar.core import Event, Action
 from ros_sugar import actions
 
-from ros_sugar import Launcher
+from .launcher import Launcher
 
 # AGENTS TYPES
 from automatika_embodied_agents.msg import (
@@ -95,6 +94,7 @@ __all__ = [
     "BaseComponentConfig",
     "ComponentRunType",
     "Launcher",
+    "Monitor",
     "MapLayer",
     "Route",
     "MutuallyExclusiveCallbackGroup",

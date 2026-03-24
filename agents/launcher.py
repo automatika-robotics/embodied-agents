@@ -3,7 +3,6 @@ from ros_sugar.core.component import BaseComponent
 from ros_sugar.core.monitor import Monitor
 from ros_sugar.launch.launch_actions import ComponentLaunchAction
 from typing import List, Optional
-from .components.cortex import Cortex
 
 
 class Launcher(BaseLauncher):
@@ -19,8 +18,9 @@ class Launcher(BaseLauncher):
         action_components: List[BaseComponent],
         all_components_to_activate_on_start: List[str],
     ) -> None:
-        """Override to replace the classic Monitor by the Cortex component if it is configured in the recipe. The Cortex component will then be responsible to monitor the components and trigger events/actions based on the recipe configuration, but also to provide a centralized place to have an overview of the state of the agent and its components.
-        """
+        """Override to replace the classic Monitor by the Cortex component if it is configured in the recipe. The Cortex component will then be responsible to monitor the components and trigger events/actions based on the recipe configuration, but also to provide a centralized place to have an overview of the state of the agent and its components."""
+        from .components.cortex import Cortex
+
         cortex_monitor: Optional[Cortex] = None
         for component in self._components:
             if isinstance(component, Cortex):
