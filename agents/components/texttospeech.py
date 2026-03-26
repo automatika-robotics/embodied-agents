@@ -487,7 +487,14 @@ class TextToSpeech(ModelComponent):
                 )
                 self._playback_thread.start()
 
-    @component_action
+    @component_action(description={
+        "type": "function",
+        "function": {
+            "name": "stop_playback",
+            "description": "Stop audio playback and clear any pending audio.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    })
     def stop_playback(self, wait_for_thread: bool = True):
         """
         Stops the playback thread and clears any pending audio.
@@ -508,7 +515,23 @@ class TextToSpeech(ModelComponent):
             self._playback_thread.join()
             self.get_logger().debug("Thread terminated.")
 
-    @component_action
+    @component_action(description={
+        "type": "function",
+        "function": {
+            "name": "say",
+            "description": "Convert text to speech and play it on the robot's speaker to say something out loud.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "The text to be spoken aloud.",
+                    },
+                },
+                "required": ["text"],
+            },
+        },
+    })
     def say(self, text: str):
         """
             Say the input text.
