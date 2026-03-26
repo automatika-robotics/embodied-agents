@@ -139,6 +139,8 @@ class Cortex(ModelComponent, Monitor):
 
         # System management tools: registered during activation
         self._system_tools: Set[str] = set()
+        # Component action callables: populated by inspect_component
+        self._component_action_callables: Dict[str, object] = {}
 
         # Monitor-side: Launcher populates these when it detects Cortex
         self._components_to_monitor: List[str] = []
@@ -195,6 +197,7 @@ class Cortex(ModelComponent, Monitor):
     def _init_internal_monitor(
         self,
         components_names: List[str],
+        components: Optional[List[BaseComponent]] = None,
         events_actions: Optional[Dict[str, List[Action]]] = None,
         events_to_emit: Optional[List[Event]] = None,
         config: Optional[BaseComponentConfig] = None,
@@ -206,6 +209,12 @@ class Cortex(ModelComponent, Monitor):
         **_,
     ):
         """Initialize Monitor capabilities. Called by the Launcher."""
+        # Store component references for introspection by inspect_component
+        self._managed_components: Dict[str, BaseComponent] = {}
+        if components:
+            for comp in components:
+                self._managed_components[comp.node_name] = comp
+
         my_config = copy(self.config)
         Monitor.__init__(
             self,
@@ -494,9 +503,42 @@ class Cortex(ModelComponent, Monitor):
     # =========================================================================
 
     def _register_system_tools(self):
-        """Register system management capabilities as LLM tools."""
+        """Register system management capabilities and component actions as LLM tools.
+
+        Called during activation after Monitor.activate() has created service
+        clients. Discovers all @component_action and @component_fallback methods
+        on managed components and registers them as callable tools.
+        """
         component_names_str = ", ".join(self._components_to_monitor)
 
+        # inspect_component: returns text context about a component
+        self._system_tools.add("inspect_component")
+        self.config._tool_descriptions.append({
+            "type": "function",
+            "function": {
+                "name": "inspect_component",
+                "description": (
+                    "Get detailed information about a component: its input/output "
+                    "topics, available actions, and additional model clients. "
+                    "Use this to discover topic names or understand a component "
+                    "before calling its actions. "
+                    f"Available components: {component_names_str}"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "component": {
+                            "type": "string",
+                            "description": "Component name to inspect.",
+                        },
+                    },
+                    "required": ["component"],
+                },
+            },
+        })
+        self.config._tool_response_flags["inspect_component"] = True
+
+        # update_parameter
         self._system_tools.add("update_parameter")
         self.config._tool_descriptions.append({
             "type": "function",
@@ -528,6 +570,7 @@ class Cortex(ModelComponent, Monitor):
         })
         self.config._tool_response_flags["update_parameter"] = True
 
+        # send_goal_to_component
         if self._main_action_clients:
             action_server_names = ", ".join(self._main_action_clients.keys())
             self._system_tools.add("send_goal_to_component")
@@ -557,9 +600,67 @@ class Cortex(ModelComponent, Monitor):
             })
             self.config._tool_response_flags["send_goal_to_component"] = True
 
+        # Discover and register component actions from all managed components
+        self._register_component_actions()
+
+    def _register_component_actions(self):
+        """Discover @component_action/@component_fallback methods on all
+        managed components and register them as callable LLM tools.
+
+        Tool names are namespaced as ``{component_name}.{method_name}``.
+        """
+        for comp_name, comp in self._managed_components.items():
+            for attr_name in dir(comp):
+                try:
+                    class_attr = getattr(type(comp), attr_name, None)
+                    if not class_attr or not hasattr(class_attr, "_action_description"):
+                        continue
+                    desc_raw = class_attr._action_description
+                    if not desc_raw:
+                        continue
+
+                    tool_name = f"{comp_name}.{attr_name}"
+                    if tool_name in self._system_tools:
+                        continue
+
+                    # Build tool description from OpenAI-format JSON or docstring
+                    try:
+                        parsed = json.loads(desc_raw)
+                        tool_desc = {
+                            "type": "function",
+                            "function": {
+                                **parsed["function"],
+                                "name": tool_name,
+                            },
+                        }
+                    except (json.JSONDecodeError, TypeError, KeyError):
+                        tool_desc = {
+                            "type": "function",
+                            "function": {
+                                "name": tool_name,
+                                "description": desc_raw[:200],
+                                "parameters": {
+                                    "type": "object",
+                                    "properties": {},
+                                    "required": [],
+                                },
+                            },
+                        }
+
+                    self._system_tools.add(tool_name)
+                    self.config._tool_descriptions.append(tool_desc)
+                    self.config._tool_response_flags[tool_name] = True
+                    self._component_action_callables[tool_name] = getattr(
+                        comp, attr_name
+                    )
+                except Exception:
+                    continue
+
     def _execute_system_tool(self, tool_name: str, args: Dict) -> str:
-        """Execute a system management tool via inherited Monitor methods."""
-        if tool_name == "update_parameter":
+        """Execute a system management tool or a component action."""
+        if tool_name == "inspect_component":
+            return self._inspect_component(args.get("component", ""))
+        elif tool_name == "update_parameter":
             return self._sys_update_parameter(
                 args.get("component", ""),
                 args.get("param_name", ""),
@@ -570,7 +671,80 @@ class Cortex(ModelComponent, Monitor):
                 args.get("component", ""),
                 args.get("task", ""),
             )
+        elif tool_name in self._component_action_callables:
+            return self._call_component_action(tool_name, args)
         return f"Error: Unknown system tool '{tool_name}'."
+
+    def _call_component_action(self, tool_name: str, args: Dict) -> str:
+        """Call a component action method directly."""
+        method = self._component_action_callables[tool_name]
+        try:
+            result = method(**args) if args else method()
+            return f"{tool_name}: {result}"
+        except Exception as e:
+            return f"Error calling {tool_name}: {e}"
+
+    def _inspect_component(self, component_name: str) -> str:
+        """Return a text description of a component's structure.
+
+        Provides input/output topics, registered actions (already available
+        as tools), and additional model clients. This is context for the LLM
+        to use the component's tools correctly (e.g., to discover topic names).
+        """
+        comp = self._managed_components.get(component_name)
+        if not comp:
+            available = list(self._managed_components.keys())
+            return (
+                f"Error: Component '{component_name}' not found. "
+                f"Available: {available}"
+            )
+
+        lines = [f"Component: {component_name}", f"Type: {type(comp).__name__}"]
+
+        # Input topics
+        if hasattr(comp, "in_topics") and comp.in_topics:
+            lines.append("Input topics:")
+            for t in comp.in_topics:
+                msg_name = t.msg_type.__name__ if hasattr(t.msg_type, "__name__") else t.msg_type
+                lines.append(f"  - {t.name} ({msg_name})")
+        else:
+            lines.append("Input topics: none")
+
+        # Output topics
+        if hasattr(comp, "out_topics") and comp.out_topics:
+            lines.append("Output topics:")
+            for t in comp.out_topics:
+                msg_name = t.msg_type.__name__ if hasattr(t.msg_type, "__name__") else t.msg_type
+                lines.append(f"  - {t.name} ({msg_name})")
+        else:
+            lines.append("Output topics: none")
+
+        # List already-registered actions for this component
+        prefix = f"{component_name}."
+        comp_tools = [
+            name for name in self._component_action_callables if name.startswith(prefix)
+        ]
+        if comp_tools:
+            lines.append("Actions (available as tools):")
+            for tool_name in comp_tools:
+                # Find the tool description
+                for td in self.config._tool_descriptions:
+                    if td["function"]["name"] == tool_name:
+                        fn = td["function"]
+                        params = fn.get("parameters", {}).get("properties", {})
+                        param_str = ", ".join(
+                            f"{k}: {v.get('type', '?')}" for k, v in params.items()
+                        )
+                        lines.append(f"  - {tool_name}({param_str}): {fn.get('description', '')}")
+                        break
+        else:
+            lines.append("Actions: none")
+
+        # Additional model clients
+        if hasattr(comp, "_additional_model_clients") and comp._additional_model_clients:
+            lines.append(f"Additional model clients: {list(comp._additional_model_clients.keys())}")
+
+        return "\n".join(lines)
 
     def _sys_update_parameter(
         self, component: str, param_name: str, new_value: str
