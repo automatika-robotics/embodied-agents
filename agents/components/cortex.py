@@ -14,7 +14,7 @@ from ..ros import (
     VisionLanguageAction,
     Monitor,
     BaseComponent,
-    BaseComponentConfig
+    BaseComponentConfig,
 )
 from ..utils import validate_func_args, strip_think_tokens
 from .model_component import ModelComponent
@@ -137,10 +137,9 @@ class Cortex(ModelComponent, Monitor):
         self._action_events: Dict[Event, Action] = {}
         action_outputs = self._setup_action_events(actions, component_name)
 
-        # System management tools: registered during activation
+        # System management and component action tools:
+        # registered during activation
         self._system_tools: Set[str] = set()
-        # Component action callables: populated by inspect_component
-        self._component_action_callables: Dict[str, object] = {}
 
         # Monitor-side: Launcher populates these when it detects Cortex
         self._components_to_monitor: List[str] = []
@@ -215,7 +214,7 @@ class Cortex(ModelComponent, Monitor):
             for comp in components:
                 self._managed_components[comp.node_name] = comp
 
-        my_config = copy(self.config)
+        _config = copy(self.config)
         Monitor.__init__(
             self,
             component_name=self.node_name,
@@ -229,7 +228,7 @@ class Cortex(ModelComponent, Monitor):
             activation_timeout=activation_timeout,
             activation_attempt_time=activation_attempt_time,
         )
-        self.config = my_config
+        self.config = _config
 
     def _setup_action_events(
         self, actions: List[Action], component_name: str
@@ -620,6 +619,8 @@ class Cortex(ModelComponent, Monitor):
                         continue
 
                     tool_name = f"{comp_name}.{attr_name}"
+
+                    # Check if already registered
                     if tool_name in self._system_tools:
                         continue
 
@@ -650,9 +651,6 @@ class Cortex(ModelComponent, Monitor):
                     self._system_tools.add(tool_name)
                     self.config._tool_descriptions.append(tool_desc)
                     self.config._tool_response_flags[tool_name] = True
-                    self._component_action_callables[tool_name] = getattr(
-                        comp, attr_name
-                    )
                 except Exception:
                     continue
 
@@ -671,16 +669,17 @@ class Cortex(ModelComponent, Monitor):
                 args.get("component", ""),
                 args.get("task", ""),
             )
-        elif tool_name in self._component_action_callables:
-            return self._call_component_action(tool_name, args)
-        return f"Error: Unknown system tool '{tool_name}'."
+        # else: the tool is a component action
+        return self._call_component_action(tool_name, args)
 
     def _call_component_action(self, tool_name: str, args: Dict) -> str:
-        """Call a component action method directly."""
-        method = self._component_action_callables[tool_name]
+        """Call a component action method directly, as a service."""
         try:
-            result = method(**args) if args else method()
-            return f"{tool_name}: {result}"
+            comp_name, method_name = tool_name.split(".")
+            response = self.execute_component_method(comp_name, method_name, args)
+            if response.success:
+                return f"{tool_name} executed successfully"
+            return f"{tool_name} failed with error: {response.error_msg}"
         except Exception as e:
             return f"Error calling {tool_name}: {e}"
 
@@ -695,8 +694,7 @@ class Cortex(ModelComponent, Monitor):
         if not comp:
             available = list(self._managed_components.keys())
             return (
-                f"Error: Component '{component_name}' not found. "
-                f"Available: {available}"
+                f"Error: Component '{component_name}' not found. Available: {available}"
             )
 
         lines = [f"Component: {component_name}", f"Type: {type(comp).__name__}"]
@@ -705,7 +703,11 @@ class Cortex(ModelComponent, Monitor):
         if hasattr(comp, "in_topics") and comp.in_topics:
             lines.append("Input topics:")
             for t in comp.in_topics:
-                msg_name = t.msg_type.__name__ if hasattr(t.msg_type, "__name__") else t.msg_type
+                msg_name = (
+                    t.msg_type.__name__
+                    if hasattr(t.msg_type, "__name__")
+                    else t.msg_type
+                )
                 lines.append(f"  - {t.name} ({msg_name})")
         else:
             lines.append("Input topics: none")
@@ -714,7 +716,11 @@ class Cortex(ModelComponent, Monitor):
         if hasattr(comp, "out_topics") and comp.out_topics:
             lines.append("Output topics:")
             for t in comp.out_topics:
-                msg_name = t.msg_type.__name__ if hasattr(t.msg_type, "__name__") else t.msg_type
+                msg_name = (
+                    t.msg_type.__name__
+                    if hasattr(t.msg_type, "__name__")
+                    else t.msg_type
+                )
                 lines.append(f"  - {t.name} ({msg_name})")
         else:
             lines.append("Output topics: none")
@@ -735,14 +741,21 @@ class Cortex(ModelComponent, Monitor):
                         param_str = ", ".join(
                             f"{k}: {v.get('type', '?')}" for k, v in params.items()
                         )
-                        lines.append(f"  - {tool_name}({param_str}): {fn.get('description', '')}")
+                        lines.append(
+                            f"  - {tool_name}({param_str}): {fn.get('description', '')}"
+                        )
                         break
         else:
             lines.append("Actions: none")
 
         # Additional model clients
-        if hasattr(comp, "_additional_model_clients") and comp._additional_model_clients:
-            lines.append(f"Additional model clients: {list(comp._additional_model_clients.keys())}")
+        if (
+            hasattr(comp, "_additional_model_clients")
+            and comp._additional_model_clients
+        ):
+            lines.append(
+                f"Additional model clients: {list(comp._additional_model_clients.keys())}"
+            )
 
         return "\n".join(lines)
 
