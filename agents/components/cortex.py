@@ -721,6 +721,31 @@ class Cortex(ModelComponent, Monitor):
         except Exception as e:
             return f"Error calling {tool_name}: {e}"
 
+    @staticmethod
+    def _summarize_config(comp: BaseComponent) -> List[str]:
+        """Return a list of text lines summarizing a component's config parameters.
+
+        Skips private (underscore-prefixed) fields.
+
+        :param comp: The component whose config to summarize
+        :returns: Lines suitable for appending to an inspect report
+        """
+        if not hasattr(comp, "config") or not hasattr(comp.config, "__attrs_attrs__"):
+            return ["Configuration: unavailable"]
+
+        lines = ["Configuration Parameters:"]
+        for attr_field in comp.config.__attrs_attrs__:
+            if attr_field.name.startswith("_"):
+                continue
+            value = getattr(comp.config, attr_field.name, None)
+            type_name = (
+                attr_field.type.__name__
+                if hasattr(attr_field.type, "__name__")
+                else str(attr_field.type)
+            )
+            lines.append(f"  - {attr_field.name} ({type_name}): {value}")
+        return lines
+
     def _inspect_component(self, component_name: str) -> str:
         """Return a text description of a component's structure.
 
@@ -785,6 +810,9 @@ class Cortex(ModelComponent, Monitor):
                         break
         else:
             lines.append("Actions: none")
+
+        # Configuration parameters
+        lines.extend(self._summarize_config(comp))
 
         # Additional model clients
         if (
