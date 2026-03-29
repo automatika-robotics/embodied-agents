@@ -94,6 +94,9 @@ class VLA(ModelComponent):
             **kwargs,
         )
 
+        # set a meaningful component action name
+        self.main_action_name = f"{self.node_name}/manipulate_with_vla"
+
     def custom_on_activate(self):
         """Custom activation"""
 
