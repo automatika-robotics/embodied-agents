@@ -1,5 +1,6 @@
 from copy import copy
 import json
+import time
 from typing import Optional, List, Dict, Set
 
 from ..clients.model_base import ModelClient
@@ -15,8 +16,11 @@ from ..ros import (
     Monitor,
     BaseComponent,
     BaseComponentConfig,
+    ActionClientHandler,
+    ServiceClientHandler,
 )
 from ..utils import validate_func_args, strip_think_tokens
+from ..utils.actions import goal_type_to_json_properties
 from .model_component import ModelComponent
 
 
@@ -140,6 +144,7 @@ class Cortex(ModelComponent, Monitor):
         # System management and component action tools:
         # registered during activation
         self._system_tools: Set[str] = set()
+        self._action_goal_tools: Dict[str, str] = {}
 
         # Monitor-side: Launcher populates these when it detects Cortex
         self._components_to_monitor: List[str] = []
@@ -152,8 +157,8 @@ class Cortex(ModelComponent, Monitor):
         self._update_parameters_srv_client: Dict = {}
         self._topic_change_srv_client: Dict = {}
         self._configure_from_file_srv_client: Dict = {}
-        self._main_srv_clients: Dict = {}
-        self._main_action_clients: Dict = {}
+        self._main_srv_clients: Dict[str, ServiceClientHandler] = {}
+        self._main_action_clients: Dict[str, ActionClientHandler] = {}
 
         # Combine user outputs with internal action event topics
         all_outputs = list(outputs) + action_outputs
@@ -164,14 +169,17 @@ class Cortex(ModelComponent, Monitor):
         if "trigger" in kwargs:
             kwargs.pop("trigger")
 
+        if "inputs" in kwargs:
+            kwargs.pop("inputs")
+
         ModelComponent.__init__(
             self,
-            None,
-            all_outputs,
-            model_client,
-            self.config,
-            None,
-            component_name,
+            inputs=None,
+            outputs=all_outputs,
+            model_client=model_client,
+            config=self.config,
+            trigger=None,
+            component_name=component_name,
             components_names=[],
             main_action_type=VisionLanguageAction,
             **kwargs,
@@ -569,35 +577,35 @@ class Cortex(ModelComponent, Monitor):
         })
         self.config._tool_response_flags["update_parameter"] = True
 
-        # send_goal_to_component
-        if self._main_action_clients:
-            action_server_names = ", ".join(self._main_action_clients.keys())
-            self._system_tools.add("send_goal_to_component")
+        # Per-component action goal tools
+        # Maps tool name -> component name for dispatch
+        self._action_goal_tools: Dict[str, str] = {}
+        for comp_name, action_client in self._main_action_clients.items():
+            name = action_client.config.name.replace("/", "_")
+            tool_name = f"send_goal_to_{name}"
+            goal_type = self._get_component_action_request_message_type(comp_name)
+            if goal_type is None:
+                continue
+
+            properties, required = goal_type_to_json_properties(goal_type)
+            self._system_tools.add(tool_name)
+            self._action_goal_tools[tool_name] = comp_name
             self.config._tool_descriptions.append({
                 "type": "function",
                 "function": {
-                    "name": "send_goal_to_component",
+                    "name": tool_name,
                     "description": (
-                        "Send a task goal to a component's action server. "
-                        f"Components with action servers: {action_server_names}"
+                        f"Send an action goal to the '{comp_name}' component's "
+                        f"action server ({name})."
                     ),
                     "parameters": {
                         "type": "object",
-                        "properties": {
-                            "component": {
-                                "type": "string",
-                                "description": "Component name",
-                            },
-                            "task": {
-                                "type": "string",
-                                "description": "Task description to send",
-                            },
-                        },
-                        "required": ["component", "task"],
+                        "properties": properties,
+                        "required": required,
                     },
                 },
             })
-            self.config._tool_response_flags["send_goal_to_component"] = True
+            self.config._tool_response_flags[tool_name] = True
 
         # Discover and register component actions from all managed components
         self._register_component_actions()
@@ -654,21 +662,51 @@ class Cortex(ModelComponent, Monitor):
                 except Exception:
                     continue
 
+    def _send_action_goal_from_dict(
+        self, component_name: str, goal_fields: Dict
+    ) -> str:
+        """Construct a Goal message from a dict and send it to a component's
+        action server.
+
+        :param component_name: Target component name
+        :param goal_fields: Dict of goal field values from the LLM
+        :returns: Result string for the execution log
+        """
+        if component_name not in self._main_action_clients:
+            return f"Error: Component '{component_name}' has no action client."
+        action_client = self._main_action_clients[component_name]
+        try:
+            sent = action_client.send_request_from_dict(goal_fields)
+            if sent is None:
+                return (
+                    f"Failed to construct or send action goal to "
+                    f"'{component_name}' from fields: {goal_fields}"
+                )
+            if sent:
+                # NOTE: Currently execution will be blocked until the task (action) is done. To make it asynchronous: Action acceptance could be returned immediately, then Action feedback check could be implemented to update the LLM with the ongoing status of the action without blocking other tasks in parallel.
+
+                # Block until action is done.
+                while not action_client.action_returned:
+                    time.sleep(1 / self.config.loop_rate)
+                return f"Action for {component_name} completed and returned result {action_client.action_result}."
+
+            return f"Action goal was rejected by '{component_name}'."
+        except Exception as e:
+            return f"Error sending action goal to '{component_name}': {e}"
+
     def _execute_system_tool(self, tool_name: str, args: Dict) -> str:
         """Execute a system management tool or a component action."""
         if tool_name == "inspect_component":
             return self._inspect_component(args.get("component", ""))
         elif tool_name == "update_parameter":
-            return self._sys_update_parameter(
+            return self.update_parameter(
                 args.get("component", ""),
                 args.get("param_name", ""),
                 args.get("new_value", ""),
             )
-        elif tool_name == "send_goal_to_component":
-            return self._sys_send_goal(
-                args.get("component", ""),
-                args.get("task", ""),
-            )
+        elif tool_name in self._action_goal_tools:
+            comp_name = self._action_goal_tools[tool_name]
+            return self._send_action_goal_from_dict(comp_name, args)
         # else: the tool is a component action
         return self._call_component_action(tool_name, args)
 
@@ -758,44 +796,6 @@ class Cortex(ModelComponent, Monitor):
             )
 
         return "\n".join(lines)
-
-    def _sys_update_parameter(
-        self, component: str, param_name: str, new_value: str
-    ) -> str:
-        """Update a parameter on a managed component."""
-        client = self._update_parameter_srv_client.get(component)
-        if not client:
-            return (
-                f"Error: Component '{component}' not found. "
-                f"Available: {self._components_to_monitor}"
-            )
-        try:
-            from automatika_ros_sugar.srv import ChangeParameter
-
-            req = ChangeParameter.Request()
-            req.name = param_name
-            req.value = str(new_value)
-            req.keep_alive = True
-            client.send_request(req_msg=req, executor=self.executor)
-            return (
-                f"Parameter '{param_name}' on '{component}' updated to '{new_value}'."
-            )
-        except Exception as e:
-            return f"Error updating parameter: {e}"
-
-    def _sys_send_goal(self, component: str, task: str) -> str:
-        """Send a task goal to a component's action server."""
-        action_client = self._main_action_clients.get(component)
-        if not action_client:
-            available = list(self._main_action_clients.keys())
-            return f"Error: No action server for '{component}'. Available: {available}"
-        try:
-            goal = VisionLanguageAction.Goal()
-            goal.task = task
-            action_client.send_request(goal)
-            return f"Goal '{task}' sent to '{component}'."
-        except Exception as e:
-            return f"Error sending goal to '{component}': {e}"
 
     # =========================================================================
     # Behavioral action dispatch (via event system)

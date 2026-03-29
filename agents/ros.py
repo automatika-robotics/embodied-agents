@@ -36,6 +36,7 @@ from ros_sugar.utils import component_action, component_fallback
 from ros_sugar.io.utils import run_external_processor
 from ros_sugar.core import Event, Action
 from ros_sugar import actions
+from ros_sugar.base_clients import ServiceClientHandler, ActionClientHandler
 
 from .launcher import Launcher
 
@@ -105,6 +106,9 @@ __all__ = [
     "component_action",
     "VisionLanguageAction",
     "run_external_processor",
+    "ServiceClientHandler",
+    "ActionClientHandler",
+
 ]
 
 # =========================================================================

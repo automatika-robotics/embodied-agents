@@ -330,6 +330,70 @@ def cap_actions_with_limits(
     return result
 
 
+_ROS_TYPE_MAP = {
+    "bool": "boolean",
+    "byte": "integer",
+    "char": "integer",
+    "int8": "integer",
+    "int16": "integer",
+    "int32": "integer",
+    "int64": "integer",
+    "uint8": "integer",
+    "uint16": "integer",
+    "uint32": "integer",
+    "uint64": "integer",
+    "float32": "number",
+    "float64": "number",
+    "string": "string",
+    "wstring": "string",
+}
+
+
+def ros_type_to_json_schema(ros_type: str) -> Dict:
+    """Convert a ROS field type string to a JSON schema type dict.
+
+    Handles simple types and arrays of simple types.
+    Nested message types (containing '/') are represented as objects
+    with no further schema detail.
+
+    :param ros_type: ROS type string, e.g. "float64", "string",
+        "int32[3]", "geometry_msgs/Point"
+    :returns: JSON schema dict, e.g. {"type": "number"}
+    """
+    is_array = "[" in ros_type
+    base_type = ros_type.split("[")[0]
+
+    # TODO: Introspect nested message types recursively to produce
+    # a full JSON schema with nested properties.
+    if "/" in base_type:
+        item_schema = {"type": "object"}
+    else:
+        json_type = _ROS_TYPE_MAP.get(base_type, "string")
+        item_schema = {"type": json_type}
+
+    if is_array:
+        return {"type": "array", "items": item_schema}
+    return item_schema
+
+
+def goal_type_to_json_properties(goal_type: type) -> Tuple[Dict, List]:
+    """Introspect a ROS Goal message class and return JSON schema
+    properties and required fields for tool registration.
+
+    :param goal_type: The ROS Goal message class
+    :returns: (properties dict, required list) for the JSON schema
+    """
+    fields = goal_type.get_fields_and_field_types()
+    properties = {}
+    required = []
+    for field_name, ros_type in fields.items():
+        schema = ros_type_to_json_schema(ros_type)
+        schema["description"] = f"ROS type: {ros_type}"
+        properties[field_name] = schema
+        required.append(field_name)
+    return properties, required
+
+
 def parse_urdf_joints(path_or_url: str) -> Dict:
     """
     Parse a URDF file and extract joint limits.
