@@ -699,11 +699,14 @@ class Cortex(ModelComponent, Monitor):
         if tool_name == "inspect_component":
             return self._inspect_component(args.get("component", ""))
         elif tool_name == "update_parameter":
-            return self.update_parameter(
+            response = self.update_parameter(
                 args.get("component", ""),
                 args.get("param_name", ""),
                 args.get("new_value", ""),
             )
+            if response.success:
+                return f"{tool_name} executed successfully"
+            return f"{tool_name} failed with error: {response.error_msg}"
         elif tool_name in self._action_goal_tools:
             comp_name = self._action_goal_tools[tool_name]
             return self._send_action_goal_from_dict(comp_name, args)
