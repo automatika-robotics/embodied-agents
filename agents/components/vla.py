@@ -726,6 +726,14 @@ class VLA(ModelComponent):
 
         return False
 
+    # =========================================================================
+    # Unused/overridden methods (action server mode)
+    # =========================================================================
+
+    def _execution_step(self, *args, **kwargs):
+        """Not used -- VLA runs as an action server."""
+        pass
+
     def _warmup(self):
         """Warm up and stat check"""
         # TODO: implement warmup
