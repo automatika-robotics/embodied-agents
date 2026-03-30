@@ -7,7 +7,6 @@ from ..clients.model_base import ModelClient
 from ..clients.db_base import DBClient
 from ..config import CortexConfig
 from ..ros import (
-    Topic,
     Action,
     Event,
     ComponentRunType,
@@ -226,12 +225,12 @@ class Cortex(ModelComponent, Monitor):
         )
         self.config = _config
 
-    def _setup_internal_action_events(self, actions: List[Action]) -> List[Topic]:
+    def _setup_internal_action_events(self, actions: List[Action]) -> None:
         """Create internal event topics and tool descriptions for each action."""
         for cortex_action in actions:
             name = cortex_action.action_name
             Monitor.add_internal_event_action_pair(
-                self, event_id=name, action=[cortex_action]
+                self, event_id=name, action=cortex_action
             )
 
             tool_description = {

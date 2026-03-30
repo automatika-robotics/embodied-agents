@@ -18,33 +18,33 @@ class Launcher(BaseLauncher):
 
     def _setup_additional_internal_actions(
         self,
-        additional_internal_actions: Dict[str, List[Union[ROSLaunchAction, Action]]],
+        additional_internal_actions: Dict[str, Union[ROSLaunchAction, Action]],
     ) -> None:
         # Add event handling actions
         entities_dict: Dict = {}
 
-        for event_name, action_set in self._ros_events_actions.items():
-            for action in action_set:
-                if isinstance(action, ROSLaunchAction):
-                    entities_dict[event_name].append(action)
+        for event_name, action in additional_internal_actions.items():
+            entities_dict[event_name] = []
+            if isinstance(action, ROSLaunchAction):
+                entities_dict[event_name].append(action)
 
-                # Check action type
-                elif action._is_lifecycle_action:
-                    # Re-parse action for component related actions
-                    entities = self._get_action_launch_entity(action)
-                    if isinstance(entities, list):
-                        entities_dict[event_name].extend(entities)
-                    else:
-                        entities_dict[event_name].append(entities)
-
-                elif isinstance(action, Action) and action.parent_component:
-                    continue  # skip, as it will be added directly in the cortex monitor configuration
-
-                # If the action is not related to a component -> add opaque executable to launch
+            # Check action type
+            elif action._is_lifecycle_action:
+                # Re-parse action for component related actions
+                entities = self._get_action_launch_entity(action)
+                if isinstance(entities, list):
+                    entities_dict[event_name].extend(entities)
                 else:
-                    entities_dict[event_name].append(
-                        action.launch_action(monitor_node=self.monitor_node)
-                    )
+                    entities_dict[event_name].append(entities)
+
+            elif isinstance(action, Action) and action.parent_component:
+                continue  # skip, as it will be added directly in the cortex monitor configuration
+
+            # If the action is not related to a component -> add opaque executable to launch
+            else:
+                entities_dict[event_name].append(
+                    action.launch_action(monitor_node=self.monitor_node)
+                )
 
             # Register a new internal event handler
             internal_events_handler = RegisterEventHandler(
