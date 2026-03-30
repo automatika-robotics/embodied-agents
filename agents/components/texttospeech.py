@@ -548,7 +548,10 @@ class TextToSpeech(ModelComponent):
         :type text: str
         """
         try:
-            self.stop_playback()
+            # Stop current playback if active, so new speech isn't queued
+            # behind stale audio
+            if self._playback_thread and self._playback_thread.is_alive():
+                self.stop_playback()
             self._execution_step(text=text)
             return True
         except Exception:

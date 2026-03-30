@@ -170,27 +170,29 @@ class Vision(ModelComponent):
         # deactivate component
         super().custom_on_deactivate()
 
-    @component_action(description={
-        "type": "function",
-        "function": {
-            "name": "take_picture",
-            "description": "Capture a photo from a camera topic and save it to disk.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "topic_name": {
-                        "type": "string",
-                        "description": "Name of the input topic to capture from. Should be name of one of the topics which are inputs of this component.",
+    @component_action(
+        description={
+            "type": "function",
+            "function": {
+                "name": "take_picture",
+                "description": "Capture a photo from a camera topic and save it to disk.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "topic_name": {
+                            "type": "string",
+                            "description": "Name of the input topic to capture from. Should be name of one of the topics which are inputs of this component.",
+                        },
+                        "save_path": {
+                            "type": "string",
+                            "description": "Directory path where the image will be saved. The default path is ~/emos/pictures, unless specifically asked, don't use another path.",
+                        },
                     },
-                    "save_path": {
-                        "type": "string",
-                        "description": "Directory path where the image will be saved.",
-                    },
+                    "required": ["topic_name"],
                 },
-                "required": ["topic_name"],
             },
-        },
-    })
+        }
+    )
     def take_picture(
         self,
         topic_name: str,
@@ -300,35 +302,37 @@ class Vision(ModelComponent):
             self.get_logger().error(f"Failed to take picture: {e}")
             return False
 
-    @component_action(description={
-        "type": "function",
-        "function": {
-            "name": "record_video",
-            "description": "Record a video from a camera topic for a set duration and save it to disk.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "topic_name": {
-                        "type": "string",
-                        "description": "Name of the input topic to record from. Should be name of one of the topics which are inputs of this component.",
+    @component_action(
+        description={
+            "type": "function",
+            "function": {
+                "name": "record_video",
+                "description": "Record a video from a camera topic for a set duration and save it to disk.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "topic_name": {
+                            "type": "string",
+                            "description": "Name of the input topic to record from. Should be name of one of the topics which are inputs of this component.",
+                        },
+                        "duration": {
+                            "type": "number",
+                            "description": "Duration of the recording in seconds. Default is 5 seconds",
+                        },
+                        "save_path": {
+                            "type": "string",
+                            "description": "Directory path where the video will be saved. The default path is ~/emos/videos, unless specifically asked, don't use another path.",
+                        },
+                        "fps": {
+                            "type": "integer",
+                            "description": "Frames per second for the recording. Default is 30",
+                        },
                     },
-                    "duration": {
-                        "type": "number",
-                        "description": "Duration of the recording in seconds.",
-                    },
-                    "save_path": {
-                        "type": "string",
-                        "description": "Directory path where the video will be saved.",
-                    },
-                    "fps": {
-                        "type": "integer",
-                        "description": "Frames per second for the recording.",
-                    },
+                    "required": ["topic_name"],
                 },
-                "required": ["topic_name"],
             },
-        },
-    })
+        }
+    )
     def record_video(
         self,
         topic_name: str,
