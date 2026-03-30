@@ -145,9 +145,7 @@ class TextToSpeech(ModelComponent):
         from ..utils.local_tts import LocalTTS
 
         self.local_model = LocalTTS(
-            model_path=load_model_repo(
-                "local_tts", self.config.local_model_path
-            ),
+            model_path=load_model_repo("local_tts", self.config.local_model_path),
             device=self.config.device_local_model,
             ncpu=self.config.ncpu_local_model,
         )
@@ -487,15 +485,17 @@ class TextToSpeech(ModelComponent):
                 )
                 self._playback_thread.start()
 
-    @component_action(description={
-        "type": "function",
-        "function": {
-            "name": "stop_playback",
-            "description": "Stop audio playback and clear any pending audio.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    })
-    def stop_playback(self, wait_for_thread: bool = True):
+    @component_action(
+        description={
+            "type": "function",
+            "function": {
+                "name": "stop_playback",
+                "description": "Stop audio playback and clear any pending audio.",
+                "parameters": {"type": "object", "properties": {}, "required": []},
+            },
+        }
+    )
+    def stop_playback(self, wait_for_thread: bool = True) -> bool:
         """
         Stops the playback thread and clears any pending audio.
         Can be used to interrupt the audio playback through an event.
@@ -515,24 +515,28 @@ class TextToSpeech(ModelComponent):
             self._playback_thread.join()
             self.get_logger().debug("Thread terminated.")
 
-    @component_action(description={
-        "type": "function",
-        "function": {
-            "name": "say",
-            "description": "Convert text to speech and play it on the robot's speaker to say something out loud.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "text": {
-                        "type": "string",
-                        "description": "The text to be spoken aloud.",
+        return True
+
+    @component_action(
+        description={
+            "type": "function",
+            "function": {
+                "name": "say",
+                "description": "Convert text to speech and play it on the robot's speaker to say something out loud.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "text": {
+                            "type": "string",
+                            "description": "The text to be spoken aloud.",
+                        },
                     },
+                    "required": ["text"],
                 },
-                "required": ["text"],
             },
-        },
-    })
-    def say(self, text: str):
+        }
+    )
+    def say(self, text: str) -> bool:
         """
             Say the input text.
 
@@ -543,8 +547,15 @@ class TextToSpeech(ModelComponent):
         :param text: The text to be spoken out loud.
         :type text: str
         """
-        self.stop_playback()
-        self._execution_step(text=text)
+        try:
+            # Stop current playback if active, so new speech isn't queued
+            # behind stale audio
+            if self._playback_thread and self._playback_thread.is_alive():
+                self.stop_playback()
+            self._execution_step(text=text)
+            return True
+        except Exception:
+            return False
 
     def _handle_websocket_streaming(self) -> Optional[List]:
         """Handle streaming output from a websocket client"""

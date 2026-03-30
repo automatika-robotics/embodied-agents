@@ -46,15 +46,16 @@ class TestCortexConstruction:
                 component_name="test_cortex_fail",
             )
 
-    def test_no_actions_raises(self, rclpy_init, mock_model_client):
-        with pytest.raises(ValueError):
-            Cortex(
-                outputs=[Topic(name="out", msg_type="String")],
-                actions=[],
-                model_client=mock_model_client,
-                config=CortexConfig(),
-                component_name="test_cortex_no_actions",
-            )
+    def test_empty_actions_allowed(self, rclpy_init, mock_model_client):
+        """Empty actions list is valid — Cortex can still use system tools."""
+        comp = Cortex(
+            outputs=[Topic(name="out", msg_type="String")],
+            actions=[],
+            model_client=mock_model_client,
+            config=CortexConfig(),
+            component_name="test_cortex_no_actions",
+        )
+        assert len(comp._execution_tool_descriptions) == 0
 
     def test_action_without_description_raises(self, rclpy_init, mock_model_client):
         action = _make_mock_action(name="bad_action", description="")
@@ -111,8 +112,8 @@ class TestCortexActions:
             component_name="test_cortex_tools",
         )
 
-        assert len(comp.config._tool_descriptions) == 1
-        tool_desc = comp.config._tool_descriptions[0]
+        assert len(comp._execution_tool_descriptions) == 1
+        tool_desc = comp._execution_tool_descriptions[0]
         assert tool_desc["function"]["name"] == "navigate"
         assert tool_desc["function"]["description"] == "Go somewhere"
 
@@ -145,7 +146,7 @@ class TestCortexActions:
             component_name="test_cortex_multi",
         )
 
-        assert len(comp.config._tool_descriptions) == 3
+        assert len(comp._execution_tool_descriptions) == 3
         assert len(comp._action_event_topics) == 3
 
     def test_dispatch_action_unknown(self, rclpy_init, mock_model_client):
@@ -208,25 +209,97 @@ class TestCortexPlanning:
         assert plan is None
         assert comp._planning_output == "I don't need to do anything."
 
-    def test_plan_truncated_to_max_iterations(self, rclpy_init, mock_model_client):
+    def test_plan_truncated_to_max_execution_steps(self, rclpy_init, mock_model_client):
         mock_model_client.inference.return_value = {
             "output": "",
             "tool_calls": [
-                {"function": {"name": f"step_{i}", "arguments": {}}}
-                for i in range(20)
+                {"function": {"name": f"step_{i}", "arguments": {}}} for i in range(20)
             ],
         }
         comp = Cortex(
             outputs=[Topic(name="out", msg_type="String")],
             actions=[_make_mock_action()],
             model_client=mock_model_client,
-            config=CortexConfig(max_iterations=5),
+            config=CortexConfig(max_execution_steps=5),
             component_name="test_cortex_truncate",
         )
         mock_component_internals(comp)
 
         plan = comp._plan_task("big task")
         assert len(plan) == 5
+
+    def test_plan_with_inspect_then_execute(self, rclpy_init, mock_model_client):
+        """Planning loop: first call inspects, second call returns action tools."""
+        mock_model_client.inference.side_effect = [
+            # Step 1: LLM calls inspect_component (planning tool)
+            {
+                "output": "Let me check the vision component.",
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "inspect_component",
+                            "arguments": {"component": "vision"},
+                        }
+                    },
+                ],
+            },
+            # Step 2: LLM returns action tool calls (execution tools)
+            {
+                "output": "Now I know what to do.",
+                "tool_calls": [
+                    {"function": {"name": "navigate", "arguments": {}}},
+                ],
+            },
+        ]
+        comp = Cortex(
+            outputs=[Topic(name="out", msg_type="String")],
+            actions=[
+                _make_mock_action(name="navigate", description="Go"),
+            ],
+            model_client=mock_model_client,
+            config=CortexConfig(),
+            component_name="test_cortex_plan_loop",
+        )
+        mock_component_internals(comp)
+        # Add inspect_component as a planning tool (normally done during activation)
+        comp._planning_tools.add("inspect_component")
+        comp._managed_components = {}
+
+        plan = comp._plan_task("find an object")
+        assert plan is not None
+        assert len(plan) == 1
+        assert plan[0]["function"]["name"] == "navigate"
+        # LLM was called twice (one inspect, one action)
+        assert mock_model_client.inference.call_count == 2
+
+    def test_plan_exhausts_max_planning_steps(self, rclpy_init, mock_model_client):
+        """Planning loop exits when max_planning_steps is reached."""
+        # LLM always calls inspect_component, never produces action tools
+        mock_model_client.inference.return_value = {
+            "output": "Still researching...",
+            "tool_calls": [
+                {
+                    "function": {
+                        "name": "inspect_component",
+                        "arguments": {"component": "x"},
+                    }
+                },
+            ],
+        }
+        comp = Cortex(
+            outputs=[Topic(name="out", msg_type="String")],
+            actions=[_make_mock_action()],
+            model_client=mock_model_client,
+            config=CortexConfig(max_planning_steps=3),
+            component_name="test_cortex_plan_exhaust",
+        )
+        mock_component_internals(comp)
+        comp._planning_tools.add("inspect_component")
+        comp._managed_components = {}
+
+        plan = comp._plan_task("complex task")
+        assert plan is None
+        assert mock_model_client.inference.call_count == 3
 
 
 class TestCortexConfirmation:
@@ -246,9 +319,7 @@ class TestCortexConfirmation:
         assert decision == "EXECUTE"
 
     def test_confirm_skip(self, rclpy_init, mock_model_client):
-        mock_model_client.inference.return_value = {
-            "output": "SKIP: already done"
-        }
+        mock_model_client.inference.return_value = {"output": "SKIP: already done"}
         comp = Cortex(
             outputs=[Topic(name="out", msg_type="String")],
             actions=[_make_mock_action()],
@@ -263,9 +334,7 @@ class TestCortexConfirmation:
         assert decision == "SKIP"
 
     def test_confirm_abort(self, rclpy_init, mock_model_client):
-        mock_model_client.inference.return_value = {
-            "output": "ABORT: unsafe condition"
-        }
+        mock_model_client.inference.return_value = {"output": "ABORT: unsafe condition"}
         comp = Cortex(
             outputs=[Topic(name="out", msg_type="String")],
             actions=[_make_mock_action()],
@@ -280,9 +349,7 @@ class TestCortexConfirmation:
         assert decision == "ABORT"
 
     def test_confirm_defaults_to_execute(self, rclpy_init, mock_model_client):
-        mock_model_client.inference.return_value = {
-            "output": "Sure, go ahead!"
-        }
+        mock_model_client.inference.return_value = {"output": "Sure, go ahead!"}
         comp = Cortex(
             outputs=[Topic(name="out", msg_type="String")],
             actions=[_make_mock_action()],

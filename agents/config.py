@@ -166,17 +166,26 @@ class CortexConfig(LLMConfig):
     and executes them by dispatching Actions registered on other components.
 
     The task execution follows a two-phase approach:
-    1. **Planning** — A single LLM call with available actions as tools produces a
-       step-by-step plan (returned as multiple tool_calls).
-    2. **Execution** — Each step is executed sequentially, with a brief LLM
-       confirmation call before each step to decide EXECUTE, SKIP, or ABORT.
+
+    1. **Planning** — A multi-step conversational loop where the LLM can call
+       ``inspect_component`` to research available components and their capabilities.
+       Once the LLM has enough context, it returns action tool calls which become
+       the execution plan. RAG context from a vector DB is also available during
+       this phase. Controlled by ``max_planning_steps``.
+    2. **Execution** — Each planned step is executed sequentially. Before each
+       step, a brief LLM confirmation call decides: EXECUTE, SKIP, or ABORT,
+       based on the original plan and results so far. Controlled by
+       ``max_execution_steps``.
 
     The ``chat_history`` and ``stream`` fields are enforced by the component
     (``chat_history=True``, ``stream=False``) and cannot be overridden.
 
-    :param max_iterations: Maximum number of steps allowed in a plan. Plans with
-        more steps are truncated. Default is 10.
-    :type max_iterations: int
+    :param max_planning_steps: Maximum number of LLM calls allowed during the
+        planning phase (e.g. inspect_component calls). Default is 10.
+    :type max_planning_steps: int
+    :param max_execution_steps: Maximum number of action steps allowed in the
+        execution plan. Plans with more steps are truncated. Default is 10.
+    :type max_execution_steps: int
     :param confirmation_temperature: Temperature for the per-step confirmation LLM
         calls. Lower values give more deterministic responses. Default is 0.2.
     :type confirmation_temperature: float
@@ -206,16 +215,17 @@ class CortexConfig(LLMConfig):
 
     Example of usage:
     ```python
-    config = CortexConfig(max_iterations=15, temperature=0.2)
+    config = CortexConfig(max_planning_steps=10, max_execution_steps=15, temperature=0.2)
     ```
 
     Example of usage with local model:
     ```python
-    config = CortexConfig(enable_local_model=True, max_iterations=20)
+    config = CortexConfig(enable_local_model=True, max_execution_steps=20)
     ```
     """
 
-    max_iterations: int = field(default=10, validator=base_validators.gt(0))
+    max_planning_steps: int = field(default=10, validator=base_validators.gt(0))
+    max_execution_steps: int = field(default=10, validator=base_validators.gt(0))
     confirmation_temperature: float = field(
         default=0.2, validator=base_validators.gt(0.0)
     )
@@ -553,21 +563,6 @@ class TextToSpeechConfig(ModelComponentConfig):
     stream: bool = field(default=True)
     _get_bytes: bool = field(default=False, alias="_get_bytes")
 
-    @stream.validator
-    def _check_stream(self, _, value):
-        """Stream validator"""
-        if value and self.enable_local_model:
-            raise ValueError(
-                "stream cannot be set to True when enable_local_model is True in TextToSpeechConfig. "
-                "Local TTS model does not support streaming."
-            )
-
-    def _get_inference_params(self) -> Dict:
-        """get_inference_params.
-        :rtype: dict
-        """
-        return {"get_bytes": self._get_bytes}
-
     @stream_to_ip.validator
     def _check_stream_to_ip(self, _, value):
         """Stream to IP validator"""
@@ -591,6 +586,12 @@ class TextToSpeechConfig(ModelComponentConfig):
             raise ValueError(
                 "stream_to_port is set, but stream_to_ip is not. stream_to_ip must be set."
             )
+
+    def _get_inference_params(self) -> Dict:
+        """get_inference_params.
+        :rtype: dict
+        """
+        return {"get_bytes": self._get_bytes}
 
 
 @define(kw_only=True)

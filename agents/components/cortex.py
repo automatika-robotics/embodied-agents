@@ -7,7 +7,6 @@ from ..clients.model_base import ModelClient
 from ..clients.db_base import DBClient
 from ..config import CortexConfig
 from ..ros import (
-    String,
     Topic,
     Action,
     Event,
@@ -68,13 +67,12 @@ class Cortex(ModelComponent, Monitor):
     from agents.ros import Action, Topic, Launcher
 
     cortex = Cortex(
-        outputs=[Topic(name="status", msg_type="String")],
         actions=[
             Action(method=nav.go_to, description="Navigate to a location"),
             Action(method=arm.grasp, description="Grasp an object"),
         ],
         model_client=my_client,
-        config=CortexConfig(max_iterations=15),
+        config=CortexConfig(max_planning_steps=10, max_execution_steps=15),
         component_name="cortex",
     )
     ```
@@ -82,7 +80,10 @@ class Cortex(ModelComponent, Monitor):
 
     _PLANNING_PROMPT = (
         "You are a task planning agent on a robot. "
-        "Given a task, create a plan by calling the appropriate actions in sequence. "
+        "Given a task, first use inspect_component to research the available "
+        "components and discover their capabilities, topics, and actions. "
+        "Once you have enough information, create a plan by calling the "
+        "appropriate actions in sequence. "
         "Return ALL actions needed as tool calls in a single response. "
         "Each tool call is one step. Order them in execution sequence. "
         "If the task requires no actions, respond with text only."
@@ -100,7 +101,6 @@ class Cortex(ModelComponent, Monitor):
         self,
         *,
         actions: List[Action],
-        outputs: List[Topic],
         model_client: Optional[ModelClient] = None,
         db_client: Optional[DBClient] = None,
         config: Optional[CortexConfig] = None,
@@ -116,12 +116,6 @@ class Cortex(ModelComponent, Monitor):
         self.config.stream = False
         self.config._system_prompt = self._PLANNING_PROMPT
 
-        self.allowed_inputs = {
-            "Required": [],
-            "Optional": [String],
-        }
-        self.handled_outputs = [String]
-
         if not model_client and not self.config.enable_local_model:
             raise RuntimeError(
                 "Cortex component requires a model_client or "
@@ -136,15 +130,20 @@ class Cortex(ModelComponent, Monitor):
             {"role": "system", "content": self._PLANNING_PROMPT}
         ]
 
+        # Tool registries — separated into planning and execution phases.
+        # Planning tools (e.g. inspect_component) gather information.
+        # Execution tools (actions, system tools) are what the plan consists of.
+        self._planning_tools: Set = set()
+        self._planning_tool_descriptions: List[Dict] = []
+        self._execution_tools: Set = set()
+        self._execution_tool_descriptions: List[Dict] = []
+        # Action server goals
+        self._action_goal_tools: Dict[str, str] = {}
+
         # Behavioral actions: dispatched via event system
         self._action_event_topics: Dict[str, Topic] = {}
         self._action_events: Dict[Event, Action] = {}
         action_outputs = self._setup_action_events(actions, component_name)
-
-        # System management and component action tools:
-        # registered during activation
-        self._system_tools: Set[str] = set()
-        self._action_goal_tools: Dict[str, str] = {}
 
         # Monitor-side: Launcher populates these when it detects Cortex
         self._components_to_monitor: List[str] = []
@@ -160,22 +159,17 @@ class Cortex(ModelComponent, Monitor):
         self._main_srv_clients: Dict[str, ServiceClientHandler] = {}
         self._main_action_clients: Dict[str, ActionClientHandler] = {}
 
-        # Combine user outputs with internal action event topics
-        all_outputs = list(outputs) + action_outputs
-
         # Action server mode
         self.run_type = ComponentRunType.ACTION_SERVER
 
-        if "trigger" in kwargs:
-            kwargs.pop("trigger")
-
-        if "inputs" in kwargs:
-            kwargs.pop("inputs")
+        for kwarg in ["inputs", "trigger", "outputs"]:
+            if kwarg in kwargs:
+                kwargs.pop(kwarg)
 
         ModelComponent.__init__(
             self,
             inputs=None,
-            outputs=all_outputs,
+            outputs=action_outputs,
             model_client=model_client,
             config=self.config,
             trigger=None,
@@ -193,7 +187,7 @@ class Cortex(ModelComponent, Monitor):
     def _validate_actions(actions: List[Action]):
         """Validate that all passed actions have descriptions."""
         if not actions:
-            raise ValueError("Cortex must have at least one Action to execute.")
+            return
         for action in actions:
             if not action.description:
                 raise ValueError(
@@ -269,8 +263,8 @@ class Cortex(ModelComponent, Monitor):
                     },
                 },
             }
-            self.config._tool_descriptions.append(tool_description)
-            self.config._tool_response_flags[name] = True
+            self._execution_tools.add(name)
+            self._execution_tool_descriptions.append(tool_description)
 
         return event_topics
 
@@ -291,6 +285,16 @@ class Cortex(ModelComponent, Monitor):
         if self._components_to_monitor:
             Monitor.activate(self)
             self._register_system_tools()
+
+        # Display all the tools registered
+        planning_names = [
+            t["function"]["name"] for t in self._planning_tool_descriptions
+        ]
+        execution_names = [
+            t["function"]["name"] for t in self._execution_tool_descriptions
+        ]
+        self.get_logger().debug(f"Cortex planning tools: {planning_names}")
+        self.get_logger().debug(f"Cortex execution tools: {execution_names}")
 
     def custom_on_deactivate(self):
         if self.db_client:
@@ -355,60 +359,164 @@ class Cortex(ModelComponent, Monitor):
         self.db_client.add(db_input)
 
     # =========================================================================
-    # Phase 1: Planning
+    # Helpers
     # =========================================================================
 
-    def _plan_task(self, task: str) -> Optional[List[Dict]]:
-        """Single LLM call with tools to produce a step-by-step plan.
+    def _parse_tool_args(self, fn_args: Dict) -> Dict:
+        """Parse tool arguments, deserializing JSON strings where needed."""
+        parsed_args = {}
+        for key, arg in fn_args.items():
+            if isinstance(arg, str):
+                arg_str = arg.strip()
+                if not arg_str:
+                    parsed_args[key] = ""
+                    continue
+                try:
+                    parsed_args[key] = json.loads(arg_str)
+                except json.JSONDecodeError:
+                    parsed_args[key] = arg_str
+            else:
+                parsed_args[key] = arg
+        return parsed_args
 
-        :param task: The high-level task description
-        :returns: List of tool_call dicts (the plan), or None if no actions needed
+    # =========================================================================
+    # Phase 1: Planning (multi-step loop)
+    # =========================================================================
+
+    def _build_planning_messages(self, task: str) -> List[Dict]:
+        """Build the initial message list for the planning loop.
+
+        Injects optional RAG context from the vector DB.
         """
-        # Optional RAG context
         user_content = task
         if self.config.enable_rag and self.db_client:
             rag_context = self._handle_rag_query(task)
             if rag_context:
                 user_content = f"Context:\n{rag_context}\n\nTask: {task}"
 
-        planning_messages = [
+        return [
             {"role": "system", "content": self._PLANNING_PROMPT},
             {"role": "user", "content": user_content},
         ]
 
-        inference_input = {
-            "query": planning_messages,
-            **self.config._get_inference_params(),
+    def _process_planning_calls(
+        self,
+        planning_calls: List[Dict],
+        messages: List[Dict],
+        output: str,
+        step: int,
+    ) -> None:
+        """Execute planning tool calls and append results to the message history."""
+        assistant_msg = {
+            "role": "assistant",
+            "content": output,
+            "tool_calls": [
+                {
+                    "id": f"plan_{step}_{i}",
+                    "type": "function",
+                    "function": tc["function"],
+                }
+                for i, tc in enumerate(planning_calls)
+            ],
         }
-        if self.config._tool_descriptions:
-            inference_input["tools"] = self.config._tool_descriptions
+        messages.append(assistant_msg)
 
-        result = self._call_inference(inference_input)
-        if not result:
-            self.get_logger().error("Inference failed during planning phase.")
-            return None
+        for i, tc in enumerate(planning_calls):
+            fn_name = tc["function"]["name"]
+            fn_args = self._parse_tool_args(tc["function"].get("arguments", {}))
+            tool_result = self._execute_planning_tool(fn_name, fn_args)
+            self.get_logger().debug(
+                f"[Planning step {step + 1}] {fn_name} -> {tool_result[:200]}"
+            )
+            messages.append({
+                "role": "tool",
+                "tool_call_id": f"plan_{step}_{i}",
+                "content": tool_result,
+            })
 
-        output = result.get("output") or ""
-        if self.config.strip_think_tokens:
-            output = strip_think_tokens(output)
-
-        # Store for use if no tool calls (text-only response)
-        self._planning_output = output
-
-        if not result.get("tool_calls"):
-            return None
-
-        plan = result["tool_calls"]
-
-        # Truncate if plan exceeds max_iterations
-        if len(plan) > self.config.max_iterations:
+    def _finalize_plan(self, execution_calls: List[Dict]) -> List[Dict]:
+        """Truncate the execution plan to max_execution_steps if needed."""
+        plan = execution_calls
+        if len(plan) > self.config.max_execution_steps:
             self.get_logger().warning(
                 f"Plan has {len(plan)} steps, truncating to "
-                f"{self.config.max_iterations}."
+                f"{self.config.max_execution_steps}."
             )
-            plan = plan[: self.config.max_iterations]
-
+            plan = plan[: self.config.max_execution_steps]
+        self.get_logger().info(f"Got plan: {plan}")
         return plan
+
+    def _plan_task(self, task: str) -> Optional[List[Dict]]:
+        """Multi-step planning loop that researches components before producing a plan.
+
+        The LLM is given both planning tools (``inspect_component``) and
+        execution tools (actions, system tools). Each iteration it may:
+
+        - Call planning tools to gather information (results are fed back).
+        - Call execution tools — these become the plan and end the loop.
+        - Respond with text only — no actions needed, loop ends.
+
+        :param task: The high-level task description
+        :returns: List of tool_call dicts (the plan), or None if no actions needed
+        """
+        all_tools = self._planning_tool_descriptions + self._execution_tool_descriptions
+        messages = self._build_planning_messages(task)
+        output = ""
+
+        for step in range(self.config.max_planning_steps):
+            inference_input = {
+                "query": messages,
+                **self.config._get_inference_params(),
+            }
+            if all_tools:
+                inference_input["tools"] = all_tools
+
+            result = self._call_inference(inference_input)
+            if not result:
+                self.get_logger().error(
+                    f"Inference failed during planning step {step + 1}."
+                )
+                return None
+
+            output = result.get("output") or ""
+            if self.config.strip_think_tokens:
+                output = strip_think_tokens(output)
+
+            tool_calls = result.get("tool_calls")
+            if not tool_calls:
+                self._planning_output = output
+                return None
+
+            # Separate planning tool calls from execution tool calls
+            planning_calls = [
+                tc
+                for tc in tool_calls
+                if tc["function"]["name"] in self._planning_tools
+            ]
+            execution_calls = [
+                tc
+                for tc in tool_calls
+                if tc["function"]["name"] not in self._planning_tools
+            ]
+
+            if planning_calls:
+                self._process_planning_calls(planning_calls, messages, output, step)
+
+            if execution_calls:
+                return self._finalize_plan(execution_calls)
+
+        self.get_logger().warning(
+            f"Planning reached max steps ({self.config.max_planning_steps}) "
+            "without producing an execution plan."
+        )
+        self._planning_output = output
+        return None
+
+    def _execute_planning_tool(self, tool_name: str, args: Dict) -> str:
+        """Execute a planning-phase tool (e.g. inspect_component)."""
+        if tool_name == "inspect_component":
+            return self._inspect_component(args.get("component", ""))
+        return f"Error: Unknown planning tool '{tool_name}'."
 
     # =========================================================================
     # Phase 2: Execution with confirmation
@@ -489,19 +597,12 @@ class Cortex(ModelComponent, Monitor):
 
         if fn_name in self._action_event_topics:
             return self._dispatch_action(fn_name)
-        elif fn_name in self._system_tools:
-            parsed_args = (
-                {
-                    key: (json.loads(str(arg)) if isinstance(arg, str) else arg)
-                    for key, arg in fn_args.items()
-                }
-                if fn_args
-                else {}
-            )
+        elif fn_name in self._execution_tools:
+            parsed_args = self._parse_tool_args(fn_args)
             return self._execute_system_tool(fn_name, parsed_args)
         else:
             all_tools = list(self._action_event_topics.keys()) + list(
-                self._system_tools
+                self._execution_tools
             )
             return f"Error: Unknown tool '{fn_name}'. Available: {all_tools}"
 
@@ -515,12 +616,17 @@ class Cortex(ModelComponent, Monitor):
         Called during activation after Monitor.activate() has created service
         clients. Discovers all @component_action and @component_fallback methods
         on managed components and registers them as callable tools.
+
+        Tools are separated into two categories:
+        - **Planning tools** (``inspect_component``): used during the planning
+          loop to research components before building a plan.
+        - **Execution tools** (``update_parameter``, ``send_goal_to_*``,
+          component actions): used in the execution plan.
         """
         component_names_str = ", ".join(self._components_to_monitor)
 
-        # inspect_component: returns text context about a component
-        self._system_tools.add("inspect_component")
-        self.config._tool_descriptions.append({
+        # inspect_component: planning-only tool
+        inspect_desc = {
             "type": "function",
             "function": {
                 "name": "inspect_component",
@@ -542,12 +648,12 @@ class Cortex(ModelComponent, Monitor):
                     "required": ["component"],
                 },
             },
-        })
-        self.config._tool_response_flags["inspect_component"] = True
+        }
+        self._planning_tools.add("inspect_component")
+        self._planning_tool_descriptions.append(inspect_desc)
 
-        # update_parameter
-        self._system_tools.add("update_parameter")
-        self.config._tool_descriptions.append({
+        # update_parameter: execution tool
+        update_param_desc = {
             "type": "function",
             "function": {
                 "name": "update_parameter",
@@ -574,12 +680,11 @@ class Cortex(ModelComponent, Monitor):
                     "required": ["component", "param_name", "new_value"],
                 },
             },
-        })
-        self.config._tool_response_flags["update_parameter"] = True
+        }
+        self._execution_tools.add("update_parameter")
+        self._execution_tool_descriptions.append(update_param_desc)
 
-        # Per-component action goal tools
-        # Maps tool name -> component name for dispatch
-        self._action_goal_tools: Dict[str, str] = {}
+        # Per-component action goal tools: execution tools
         for comp_name, action_client in self._main_action_clients.items():
             name = action_client.config.name.replace("/", "_")
             tool_name = f"send_goal_to_{name}"
@@ -588,9 +693,9 @@ class Cortex(ModelComponent, Monitor):
                 continue
 
             properties, required = goal_type_to_json_properties(goal_type)
-            self._system_tools.add(tool_name)
+            self._execution_tools.add(tool_name)
             self._action_goal_tools[tool_name] = comp_name
-            self.config._tool_descriptions.append({
+            self._execution_tool_descriptions.append({
                 "type": "function",
                 "function": {
                     "name": tool_name,
@@ -605,7 +710,6 @@ class Cortex(ModelComponent, Monitor):
                     },
                 },
             })
-            self.config._tool_response_flags[tool_name] = True
 
         # Discover and register component actions from all managed components
         self._register_component_actions()
@@ -615,6 +719,7 @@ class Cortex(ModelComponent, Monitor):
         managed components and register them as callable LLM tools.
 
         Tool names are namespaced as ``{component_name}.{method_name}``.
+        These are execution-phase tools.
         """
         for comp_name, comp in self._managed_components.items():
             for attr_name in dir(comp):
@@ -629,7 +734,7 @@ class Cortex(ModelComponent, Monitor):
                     tool_name = f"{comp_name}.{attr_name}"
 
                     # Check if already registered
-                    if tool_name in self._system_tools:
+                    if tool_name in self._execution_tools:
                         continue
 
                     # Build tool description from OpenAI-format JSON or docstring
@@ -656,9 +761,8 @@ class Cortex(ModelComponent, Monitor):
                             },
                         }
 
-                    self._system_tools.add(tool_name)
-                    self.config._tool_descriptions.append(tool_desc)
-                    self.config._tool_response_flags[tool_name] = True
+                    self._execution_tools.add(tool_name)
+                    self._execution_tool_descriptions.append(tool_desc)
                 except Exception:
                     continue
 
@@ -679,7 +783,7 @@ class Cortex(ModelComponent, Monitor):
             sent = action_client.send_request_from_dict(goal_fields)
             if sent is None:
                 return (
-                    f"Failed to construct or send action goal to "
+                    f"Error: Failed to construct or send action goal to "
                     f"'{component_name}' from fields: {goal_fields}"
                 )
             if sent:
@@ -695,34 +799,38 @@ class Cortex(ModelComponent, Monitor):
             return f"Error sending action goal to '{component_name}': {e}"
 
     def _execute_system_tool(self, tool_name: str, args: Dict) -> str:
-        """Execute a system management tool or a component action."""
-        if tool_name == "inspect_component":
-            return self._inspect_component(args.get("component", ""))
-        elif tool_name == "update_parameter":
-            response = self.update_parameter(
-                args.get("component", ""),
-                args.get("param_name", ""),
-                args.get("new_value", ""),
-            )
-            if response.success:
-                return f"{tool_name} executed successfully"
-            return f"{tool_name} failed with error: {response.error_msg}"
-        elif tool_name in self._action_goal_tools:
-            comp_name = self._action_goal_tools[tool_name]
-            return self._send_action_goal_from_dict(comp_name, args)
-        # else: the tool is a component action
-        return self._call_component_action(tool_name, args)
+        """Execute an execution-phase system tool or a component action."""
+        try:
+            if tool_name == "update_parameter":
+                self.get_logger().info(
+                    f"Calling component action {tool_name} with args: {args}"
+                )
+                response = self.update_parameter(
+                    args.get("component", ""),
+                    args.get("param_name", ""),
+                    args.get("new_value", ""),
+                )
+                if response.success:
+                    return f"{tool_name} executed successfully"
+                return f"Error: {tool_name} failed with error: {response.error_msg}"
+            elif tool_name in self._action_goal_tools:
+                comp_name = self._action_goal_tools[tool_name]
+                return self._send_action_goal_from_dict(comp_name, args)
+            # else: the tool is a component action
+            return self._call_component_action(tool_name, args)
+        except Exception as e:
+            return f"Error calling {tool_name}: {e}"
 
     def _call_component_action(self, tool_name: str, args: Dict) -> str:
         """Call a component action method directly, as a service."""
-        try:
-            comp_name, method_name = tool_name.split(".")
-            response = self.execute_component_method(comp_name, method_name, args)
-            if response.success:
-                return f"{tool_name} executed successfully"
-            return f"{tool_name} failed with error: {response.error_msg}"
-        except Exception as e:
-            return f"Error calling {tool_name}: {e}"
+        self.get_logger().info(
+            f"Calling component action {tool_name} with args: {args}"
+        )
+        comp_name, method_name = tool_name.split(".")
+        response = self.execute_component_method(comp_name, method_name, args)
+        if response.success:
+            return f"{tool_name} executed successfully"
+        return f"Error: {tool_name} failed with error: {response.error_msg}"
 
     @staticmethod
     def _summarize_config(comp: BaseComponent) -> List[str]:
@@ -793,14 +901,12 @@ class Cortex(ModelComponent, Monitor):
 
         # List already-registered actions for this component
         prefix = f"{component_name}."
-        comp_tools = [
-            name for name in self._component_action_callables if name.startswith(prefix)
-        ]
+        comp_tools = [name for name in self._execution_tools if name.startswith(prefix)]
         if comp_tools:
             lines.append("Actions (available as tools):")
             for tool_name in comp_tools:
                 # Find the tool description
-                for td in self.config._tool_descriptions:
+                for td in self._execution_tool_descriptions:
                     if td["function"]["name"] == tool_name:
                         fn = td["function"]
                         params = fn.get("parameters", {}).get("properties", {})
@@ -868,20 +974,19 @@ class Cortex(ModelComponent, Monitor):
         result_msg = VisionLanguageAction.Result()
         result_msg.success = False
 
-        # Phase 1: Planning
-        plan = self._plan_task(task)
-
-        # Send feedback
+        # Feedback: starting planning
         feedback_msg.timestep = 0
         feedback_msg.completed = False
-        feedback_msg.feedback = "Creating a plan ..."
+        feedback_msg.feedback = f"Received task. Creating a plan for: {task}"
         goal_handle.publish_feedback(feedback_msg)
         self.get_logger().info("Creating a plan ...")
+
+        # Phase 1: Planning
+        plan = self._plan_task(task)
 
         if plan is None:
             text_output = getattr(self, "_planning_output", "") or ""
             if text_output:
-                self._publish({"output": text_output})
                 result_msg.success = True
                 feedback_msg.timestep = 0
                 feedback_msg.completed = True
@@ -898,7 +1003,7 @@ class Cortex(ModelComponent, Monitor):
                     goal_handle.abort()
             return result_msg
 
-        # Publish planning feedback
+        # Feedback: plan created
         plan_description = ", ".join(step["function"]["name"] for step in plan)
         feedback_msg.timestep = 0
         feedback_msg.completed = False
@@ -920,6 +1025,16 @@ class Cortex(ModelComponent, Monitor):
                 return result_msg
 
             fn_name = step["function"]["name"]
+            fn_args = step["function"].get("arguments", {})
+            args_str = f" with {fn_args}" if fn_args else ""
+
+            # Feedback: about to execute step
+            feedback_msg.timestep = i + 1
+            feedback_msg.completed = False
+            feedback_msg.feedback = (
+                f"Executing step {i + 1}/{len(plan)}: {fn_name}{args_str}"
+            )
+            goal_handle.publish_feedback(feedback_msg)
 
             # Confirm step with LLM
             decision = self._confirm_step(plan, executed_results, i)
@@ -949,27 +1064,37 @@ class Cortex(ModelComponent, Monitor):
 
             # EXECUTE action step
             step_result = self._execute_action_step(step)
+            step_failed = step_result.startswith("Error")
             executed_results.append({
                 "step": i,
                 "action": fn_name,
                 "result": step_result,
+                "failed": step_failed,
             })
 
             feedback_msg.timestep = i + 1
             feedback_msg.completed = False
-            feedback_msg.feedback = f"Step {i + 1} ({fn_name}): {step_result}"
+            feedback_msg.feedback = f"Step {i + 1} ({fn_name}) completed: {step_result}"
             goal_handle.publish_feedback(feedback_msg)
             self.get_logger().info(f"[Step {i + 1}] {step_result}")
 
         # Final result handling
         summary = "; ".join(f"{r['action']}: {r['result']}" for r in executed_results)
+        has_failures = any(r.get("failed") for r in executed_results)
 
         if aborted:
-            self._publish({"output": f"Plan aborted. Completed: {summary}"})
+            with self._main_goal_lock:
+                goal_handle.abort()
+        elif has_failures:
+            feedback_msg.timestep = len(plan)
+            feedback_msg.completed = True
+            feedback_msg.feedback = f"Plan finished with errors. {summary}"
+            goal_handle.publish_feedback(feedback_msg)
+
+            self.get_logger().warning(f"Task finished with errors: {summary}")
             with self._main_goal_lock:
                 goal_handle.abort()
         else:
-            self._publish({"output": f"Plan completed. {summary}"})
             result_msg.success = True
 
             feedback_msg.timestep = len(plan)
