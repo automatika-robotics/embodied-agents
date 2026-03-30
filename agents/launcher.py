@@ -39,7 +39,7 @@ class Launcher(BaseLauncher):
             self.monitor_node = cortex_monitor
             self.monitor_node._init_internal_monitor(
                 components_names=components_names,
-                all_components=self._components,
+                components=self._components,
                 events_actions=self._monitor_events_actions,
                 events_to_emit=self._internal_events,
                 services_components=services_components,
