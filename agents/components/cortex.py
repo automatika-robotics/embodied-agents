@@ -193,7 +193,7 @@ class Cortex(ModelComponent, Monitor):
     def _validate_actions(actions: List[Action]):
         """Validate that all passed actions have descriptions."""
         if not actions:
-            raise ValueError("Cortex must have at least one Action to execute.")
+            return
         for action in actions:
             if not action.description:
                 raise ValueError(
@@ -291,6 +291,11 @@ class Cortex(ModelComponent, Monitor):
         if self._components_to_monitor:
             Monitor.activate(self)
             self._register_system_tools()
+
+        # Display all the tools registered
+        self.get_logger().debug(
+            f"Cortex has registered the following actions: {[t['function']['name'] for t in self.config._tool_descriptions]}"
+        )
 
     def custom_on_deactivate(self):
         if self.db_client:
@@ -408,6 +413,7 @@ class Cortex(ModelComponent, Monitor):
             )
             plan = plan[: self.config.max_iterations]
 
+        self.get_logger().info(f"Got plan: {plan}")
         return plan
 
     # =========================================================================
@@ -490,14 +496,23 @@ class Cortex(ModelComponent, Monitor):
         if fn_name in self._action_event_topics:
             return self._dispatch_action(fn_name)
         elif fn_name in self._system_tools:
-            parsed_args = (
-                {
-                    key: (json.loads(str(arg)) if isinstance(arg, str) else arg)
-                    for key, arg in fn_args.items()
-                }
-                if fn_args
-                else {}
-            )
+            parsed_args = {}
+            for key, arg in fn_args.items():
+                self.get_logger().info(f"Processing {key}: {arg} (type: {type(arg)})")
+                # If string, check whether json or not
+                if isinstance(arg, str):
+                    arg_str = arg.strip()
+                    if not arg_str:
+                        parsed_args[key] = ""  # Handle empty strings safely
+                        continue
+                    try:
+                        parsed_args[key] = json.loads(arg_str)
+                    except json.JSONDecodeError:
+                        # If not valid JSON, treat as normal string
+                        parsed_args[key] = arg_str
+                else:
+                    # If already a dict, list, int, boolean, do not parse
+                    parsed_args[key] = arg
             return self._execute_system_tool(fn_name, parsed_args)
         else:
             all_tools = list(self._action_event_topics.keys()) + list(
@@ -579,7 +594,6 @@ class Cortex(ModelComponent, Monitor):
 
         # Per-component action goal tools
         # Maps tool name -> component name for dispatch
-        self._action_goal_tools: Dict[str, str] = {}
         for comp_name, action_client in self._main_action_clients.items():
             name = action_client.config.name.replace("/", "_")
             tool_name = f"send_goal_to_{name}"
@@ -793,9 +807,7 @@ class Cortex(ModelComponent, Monitor):
 
         # List already-registered actions for this component
         prefix = f"{component_name}."
-        comp_tools = [
-            name for name in self._component_action_callables if name.startswith(prefix)
-        ]
+        comp_tools = [name for name in self._system_tools if name.startswith(prefix)]
         if comp_tools:
             lines.append("Actions (available as tools):")
             for tool_name in comp_tools:
