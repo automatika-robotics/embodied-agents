@@ -91,6 +91,10 @@ class Launcher(BaseLauncher):
                 activate_on_start=all_components_to_activate_on_start,
                 activation_timeout=self._components_activation_timeout,
             )
+            # Add any additional internal actions related to the monitor (e.g. events handling actions)
+            self._setup_additional_internal_actions(
+                self.monitor_node._additional_internal_actions
+            )
         else:
             self.monitor_node = Monitor(
                 components_names=components_names,
@@ -108,8 +112,3 @@ class Launcher(BaseLauncher):
             name=self.monitor_node.node_name,
         )
         self._description.add_action(monitor_action)
-
-        # Add any additional internal actions related to the monitor (e.g. events handling actions)
-        self._setup_additional_internal_actions(
-            self.monitor_node._additional_internal_actions
-        )

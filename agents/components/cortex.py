@@ -140,6 +140,8 @@ class Cortex(ModelComponent, Monitor):
         self._action_goal_tools: Dict[str, str] = {}
 
         # Behavioral actions: dispatched via event system
+        self._pure_internal_events = []
+        self._additional_internal_actions = {}
         action_outputs = self._setup_internal_action_events(actions)
 
         # Monitor-side: Launcher populates these when it detects Cortex
@@ -227,9 +229,6 @@ class Cortex(ModelComponent, Monitor):
 
     def _setup_internal_action_events(self, actions: List[Action]) -> None:
         """Create internal event topics and tool descriptions for each action."""
-        if not actions:
-            self.empty_internal_events_actions_pairs()
-            return
         for cortex_action in actions:
             name = cortex_action.action_name
             Monitor.add_internal_event_action_pair(
