@@ -227,6 +227,9 @@ class Cortex(ModelComponent, Monitor):
 
     def _setup_internal_action_events(self, actions: List[Action]) -> None:
         """Create internal event topics and tool descriptions for each action."""
+        if not actions:
+            self.empty_internal_events_actions_pairs()
+            return
         for cortex_action in actions:
             name = cortex_action.action_name
             Monitor.add_internal_event_action_pair(
