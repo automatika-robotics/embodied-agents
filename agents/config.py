@@ -563,21 +563,6 @@ class TextToSpeechConfig(ModelComponentConfig):
     stream: bool = field(default=True)
     _get_bytes: bool = field(default=False, alias="_get_bytes")
 
-    @stream.validator
-    def _check_stream(self, _, value):
-        """Stream validator"""
-        if value and self.enable_local_model:
-            raise ValueError(
-                "stream cannot be set to True when enable_local_model is True in TextToSpeechConfig. "
-                "Local TTS model does not support streaming."
-            )
-
-    def _get_inference_params(self) -> Dict:
-        """get_inference_params.
-        :rtype: dict
-        """
-        return {"get_bytes": self._get_bytes}
-
     @stream_to_ip.validator
     def _check_stream_to_ip(self, _, value):
         """Stream to IP validator"""
@@ -601,6 +586,12 @@ class TextToSpeechConfig(ModelComponentConfig):
             raise ValueError(
                 "stream_to_port is set, but stream_to_ip is not. stream_to_ip must be set."
             )
+
+    def _get_inference_params(self) -> Dict:
+        """get_inference_params.
+        :rtype: dict
+        """
+        return {"get_bytes": self._get_bytes}
 
 
 @define(kw_only=True)
