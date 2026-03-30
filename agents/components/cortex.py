@@ -7,7 +7,6 @@ from ..clients.model_base import ModelClient
 from ..clients.db_base import DBClient
 from ..config import CortexConfig
 from ..ros import (
-    String,
     Topic,
     Action,
     Event,
@@ -68,7 +67,6 @@ class Cortex(ModelComponent, Monitor):
     from agents.ros import Action, Topic, Launcher
 
     cortex = Cortex(
-        outputs=[Topic(name="status", msg_type="String")],
         actions=[
             Action(method=nav.go_to, description="Navigate to a location"),
             Action(method=arm.grasp, description="Grasp an object"),
@@ -103,7 +101,6 @@ class Cortex(ModelComponent, Monitor):
         self,
         *,
         actions: List[Action],
-        outputs: List[Topic],
         model_client: Optional[ModelClient] = None,
         db_client: Optional[DBClient] = None,
         config: Optional[CortexConfig] = None,
@@ -118,12 +115,6 @@ class Cortex(ModelComponent, Monitor):
         self.config.chat_history = True
         self.config.stream = False
         self.config._system_prompt = self._PLANNING_PROMPT
-
-        self.allowed_inputs = {
-            "Required": [],
-            "Optional": [String],
-        }
-        self.handled_outputs = [String]
 
         if not model_client and not self.config.enable_local_model:
             raise RuntimeError(
@@ -168,22 +159,17 @@ class Cortex(ModelComponent, Monitor):
         self._main_srv_clients: Dict[str, ServiceClientHandler] = {}
         self._main_action_clients: Dict[str, ActionClientHandler] = {}
 
-        # Combine user outputs with internal action event topics
-        all_outputs = list(outputs) + action_outputs
-
         # Action server mode
         self.run_type = ComponentRunType.ACTION_SERVER
 
-        if "trigger" in kwargs:
-            kwargs.pop("trigger")
-
-        if "inputs" in kwargs:
-            kwargs.pop("inputs")
+        for kwarg in ["inputs", "trigger", "outputs"]:
+            if kwarg in kwargs:
+                kwargs.pop(kwarg)
 
         ModelComponent.__init__(
             self,
             inputs=None,
-            outputs=all_outputs,
+            outputs=action_outputs,
             model_client=model_client,
             config=self.config,
             trigger=None,
@@ -1001,7 +987,6 @@ class Cortex(ModelComponent, Monitor):
         if plan is None:
             text_output = getattr(self, "_planning_output", "") or ""
             if text_output:
-                self._publish({"output": text_output})
                 result_msg.success = True
                 feedback_msg.timestep = 0
                 feedback_msg.completed = True
@@ -1098,12 +1083,9 @@ class Cortex(ModelComponent, Monitor):
         has_failures = any(r.get("failed") for r in executed_results)
 
         if aborted:
-            self._publish({"output": f"Plan aborted. Completed: {summary}"})
             with self._main_goal_lock:
                 goal_handle.abort()
         elif has_failures:
-            self._publish({"output": f"Plan finished with errors. {summary}"})
-
             feedback_msg.timestep = len(plan)
             feedback_msg.completed = True
             feedback_msg.feedback = f"Plan finished with errors. {summary}"
@@ -1113,7 +1095,6 @@ class Cortex(ModelComponent, Monitor):
             with self._main_goal_lock:
                 goal_handle.abort()
         else:
-            self._publish({"output": f"Plan completed. {summary}"})
             result_msg.success = True
 
             feedback_msg.timestep = len(plan)
