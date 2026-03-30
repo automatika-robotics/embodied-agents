@@ -141,9 +141,7 @@ class Cortex(ModelComponent, Monitor):
         self._action_goal_tools: Dict[str, str] = {}
 
         # Behavioral actions: dispatched via event system
-        self._action_event_topics: Dict[str, Topic] = {}
-        self._action_events: Dict[Event, Action] = {}
-        action_outputs = self._setup_action_events(actions, component_name)
+        action_outputs = self._setup_internal_action_events(actions)
 
         # Monitor-side: Launcher populates these when it detects Cortex
         self._components_to_monitor: List[str] = []
@@ -178,10 +176,6 @@ class Cortex(ModelComponent, Monitor):
             main_action_type=VisionLanguageAction,
             **kwargs,
         )
-
-        # Wire event→action pairs
-        for event, action in self._action_events.items():
-            self._add_event_action_pair(event, action)
 
     @staticmethod
     def _validate_actions(actions: List[Action]):
@@ -232,24 +226,13 @@ class Cortex(ModelComponent, Monitor):
         )
         self.config = _config
 
-    def _setup_action_events(
-        self, actions: List[Action], component_name: str
-    ) -> List[Topic]:
+    def _setup_internal_action_events(self, actions: List[Action]) -> List[Topic]:
         """Create internal event topics and tool descriptions for each action."""
-        event_topics = []
-
         for cortex_action in actions:
             name = cortex_action.action_name
-
-            event_topic = Topic(
-                name=f"internal_cortex_event/{component_name}/{name}",
-                msg_type="String",
+            Monitor.add_internal_event_action_pair(
+                self, event_id=name, action=[cortex_action]
             )
-            event_topics.append(event_topic)
-            self._action_event_topics[name] = event_topic
-
-            event = Event(event_topic)
-            self._action_events[event] = cortex_action
 
             tool_description = {
                 "type": "function",
@@ -265,8 +248,6 @@ class Cortex(ModelComponent, Monitor):
             }
             self._execution_tools.add(name)
             self._execution_tool_descriptions.append(tool_description)
-
-        return event_topics
 
     # =========================================================================
     # Lifecycle
@@ -595,13 +576,13 @@ class Cortex(ModelComponent, Monitor):
         fn_name = step["function"]["name"]
         fn_args = step["function"].get("arguments", {})
 
-        if fn_name in self._action_event_topics:
+        if fn_name in self.emit_internal_event_methods:
             return self._dispatch_action(fn_name)
         elif fn_name in self._execution_tools:
             parsed_args = self._parse_tool_args(fn_args)
             return self._execute_system_tool(fn_name, parsed_args)
         else:
-            all_tools = list(self._action_event_topics.keys()) + list(
+            all_tools = list(self.emit_internal_event_methods.keys()) + list(
                 self._execution_tools
             )
             return f"Error: Unknown tool '{fn_name}'. Available: {all_tools}"
@@ -940,14 +921,14 @@ class Cortex(ModelComponent, Monitor):
 
     def _dispatch_action(self, name: str) -> str:
         """Dispatch an action by publishing to its internal event topic."""
-        event_topic = self._action_event_topics.get(name)
-        if not event_topic:
-            available = list(self._action_event_topics.keys())
+        dispatch_method = self.emit_internal_event_methods.get(name, None)
+        if not dispatch_method:
+            available = list(self.emit_internal_event_methods.keys())
             return (
                 f"Error: Action '{name}' does not exist. Available actions: {available}"
             )
         try:
-            self.publishers_dict[event_topic.name].publish(name)
+            dispatch_method()
             return f"Action '{name}' dispatched."
         except Exception as e:
             return f"Error dispatching action '{name}': {e}"
