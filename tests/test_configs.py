@@ -111,9 +111,11 @@ class TestSTTConfig:
         with pytest.raises(ValueError):
             SpeechToTextConfig(stream=True)
 
-    def test_stream_with_local_raises(self):
-        with pytest.raises(ValueError):
-            SpeechToTextConfig(stream=True, enable_vad=True, enable_local_model=True)
+    def test_stream_with_local_ok(self):
+        """Local model + stream is accepted at config time; stream is
+        disabled at runtime by _deploy_local_model."""
+        c = SpeechToTextConfig(stream=True, enable_vad=True, enable_local_model=True)
+        assert c.stream is True  # will be overridden at deploy time
 
     def test_vad_threshold_range(self):
         with pytest.raises(ValueError):

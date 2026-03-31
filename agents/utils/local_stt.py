@@ -18,7 +18,15 @@ class LocalSTT:
     :param ncpu: Number of CPU threads
     """
 
-    def __init__(self, model_path: str, device: str = "cuda", ncpu: int = 1, sample_rate=16000):
+    def __init__(
+        self,
+        model_path: str,
+        device: str = "cuda",
+        ncpu: int = 1,
+        sample_rate: int = 16000,
+        language: str = "en",
+        tail_paddings: int = 1500,
+    ):
         try:
             import sherpa_onnx
         except ImportError as e:
@@ -50,6 +58,9 @@ class LocalSTT:
             encoder=encoder,
             decoder=decoder,
             tokens=tokens,
+            language=language,
+            task="transcribe",
+            tail_paddings=tail_paddings,
             num_threads=ncpu,
             provider="cuda" if device == "cuda" else "cpu",
         )
