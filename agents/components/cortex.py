@@ -832,31 +832,6 @@ class Cortex(ModelComponent, Monitor):
             return f"{tool_name} executed successfully"
         return f"Error: {tool_name} failed with error: {response.error_msg}"
 
-    @staticmethod
-    def _summarize_config(comp: BaseComponent) -> List[str]:
-        """Return a list of text lines summarizing a component's config parameters.
-
-        Skips private (underscore-prefixed) fields.
-
-        :param comp: The component whose config to summarize
-        :returns: Lines suitable for appending to an inspect report
-        """
-        if not hasattr(comp, "config") or not hasattr(comp.config, "__attrs_attrs__"):
-            return ["Configuration: unavailable"]
-
-        lines = ["Configuration Parameters:"]
-        for attr_field in comp.config.__attrs_attrs__:
-            if attr_field.name.startswith("_"):
-                continue
-            value = getattr(comp.config, attr_field.name, None)
-            type_name = (
-                attr_field.type.__name__
-                if hasattr(attr_field.type, "__name__")
-                else str(attr_field.type)
-            )
-            lines.append(f"  - {attr_field.name} ({type_name}): {value}")
-        return lines
-
     def _inspect_component(self, component_name: str) -> str:
         """Return a text description of a component's structure.
 
@@ -871,33 +846,7 @@ class Cortex(ModelComponent, Monitor):
                 f"Error: Component '{component_name}' not found. Available: {available}"
             )
 
-        lines = [f"Component: {component_name}", f"Type: {type(comp).__name__}"]
-
-        # Input topics
-        if hasattr(comp, "in_topics") and comp.in_topics:
-            lines.append("Input topics:")
-            for t in comp.in_topics:
-                msg_name = (
-                    t.msg_type.__name__
-                    if hasattr(t.msg_type, "__name__")
-                    else t.msg_type
-                )
-                lines.append(f"  - {t.name} ({msg_name})")
-        else:
-            lines.append("Input topics: none")
-
-        # Output topics
-        if hasattr(comp, "out_topics") and comp.out_topics:
-            lines.append("Output topics:")
-            for t in comp.out_topics:
-                msg_name = (
-                    t.msg_type.__name__
-                    if hasattr(t.msg_type, "__name__")
-                    else t.msg_type
-                )
-                lines.append(f"  - {t.name} ({msg_name})")
-        else:
-            lines.append("Output topics: none")
+        lines = comp.inspect_component()
 
         # List already-registered actions for this component
         prefix = f"{component_name}."
@@ -919,9 +868,6 @@ class Cortex(ModelComponent, Monitor):
                         break
         else:
             lines.append("Actions: none")
-
-        # Configuration parameters
-        lines.extend(self._summarize_config(comp))
 
         # Additional model clients
         if (
