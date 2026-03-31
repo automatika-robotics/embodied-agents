@@ -811,11 +811,6 @@ class SpeechToTextConfig(ModelComponentConfig):
             raise ValueError(
                 "enable_vad (voice activity detection) must be set to True when stream is set to True"
             )
-        if value and self.enable_local_model:
-            raise ValueError(
-                "stream cannot be set to True when enable_local_model is True in SpeechToTextConfig. "
-                "Local STT model does not support streaming. Use a WebSocket client for streaming."
-            )
 
     def __attrs_post_init__(self):
         """Set values of undefined privates"""
