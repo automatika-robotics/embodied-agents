@@ -699,15 +699,30 @@ class Cortex(ModelComponent, Monitor):
         # Discover and register component actions from all managed components
         self._register_component_actions()
 
+    # Lifecycle management methods that should not be exposed as LLM tools.
+    # These are handled by the Monitor / Launcher
+    _LIFECYCLE_METHODS = frozenset({
+        "start",
+        "stop",
+        "restart",
+        "reconfigure",
+        "set_param",
+        "set_params",
+        "broadcast_status",
+    })
+
     def _register_component_actions(self):
         """Discover @component_action/@component_fallback methods on all
         managed components and register them as callable LLM tools.
 
         Tool names are namespaced as ``{component_name}.{method_name}``.
-        These are execution-phase tools.
+        These are execution-phase tools. Lifecycle management methods
+        (start, stop, restart, etc.) are excluded.
         """
         for comp_name, comp in self._managed_components.items():
             for attr_name in dir(comp):
+                if attr_name in self._LIFECYCLE_METHODS:
+                    continue
                 try:
                     class_attr = getattr(type(comp), attr_name, None)
                     if not class_attr or not hasattr(class_attr, "_action_description"):
