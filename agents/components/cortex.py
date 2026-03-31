@@ -1,5 +1,6 @@
 from copy import copy
 import json
+import os
 import time
 from typing import Optional, List, Dict, Set
 
@@ -172,7 +173,7 @@ class Cortex(ModelComponent, Monitor):
             model_client=model_client,
             config=self.config,
             trigger=None,
-            component_name=component_name,
+            component_name=f"{component_name}_{os.getpid()}",
             components_names=[],
             main_action_type=VisionLanguageAction,
             **kwargs,
