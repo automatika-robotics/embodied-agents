@@ -41,6 +41,7 @@ class JointsData:
         Defaults to 0.0.
     :type delay: float
     """
+
     joints_names: List[str] = field()
     positions: np.ndarray = field(
         default=np.array([], dtype=np.float64), validator=_size_validator
@@ -332,7 +333,9 @@ def cap_actions_with_limits(
 
 _ROS_TYPE_MAP = {
     "bool": "boolean",
+    "boolean": "boolean",
     "byte": "integer",
+    "octet": "integer",
     "char": "integer",
     "int8": "integer",
     "int16": "integer",
@@ -342,55 +345,69 @@ _ROS_TYPE_MAP = {
     "uint16": "integer",
     "uint32": "integer",
     "uint64": "integer",
+    "float": "number",
     "float32": "number",
     "float64": "number",
+    "double": "number",
     "string": "string",
     "wstring": "string",
 }
 
 
-def ros_type_to_json_schema(ros_type: str) -> Dict:
-    """Convert a ROS field type string to a JSON schema type dict.
+def _fields_dict_to_json_schema(fields_dict: Dict) -> Dict:
+    """Convert a parsed ROS fields dict to JSON schema properties.
 
-    Handles simple types and arrays of simple types.
-    Nested message types (containing '/') are represented as objects
-    with no further schema detail.
+    Takes the output of ``get_ros_msg_fields_dict`` where values are
+    either type strings (``"double"``), sequence strings
+    (``"sequence<string>"``), or nested dicts, and produces an OpenAI
+    tool-compatible JSON schema.
 
-    :param ros_type: ROS type string, e.g. "float64", "string",
-        "int32[3]", "geometry_msgs/Point"
-    :returns: JSON schema dict, e.g. {"type": "number"}
+    :param fields_dict: Output of ``get_ros_msg_fields_dict``
+    :returns: JSON schema ``properties`` dict
     """
-    is_array = "[" in ros_type
-    base_type = ros_type.split("[")[0]
-
-    # TODO: Introspect nested message types recursively to produce
-    # a full JSON schema with nested properties.
-    if "/" in base_type:
-        item_schema = {"type": "object"}
-    else:
-        json_type = _ROS_TYPE_MAP.get(base_type, "string")
-        item_schema = {"type": json_type}
-
-    if is_array:
-        return {"type": "array", "items": item_schema}
-    return item_schema
+    properties = {}
+    for field_name, field_value in fields_dict.items():
+        if isinstance(field_value, dict):
+            # Nested message — recurse
+            nested_props = _fields_dict_to_json_schema(field_value)
+            properties[field_name] = {
+                "type": "object",
+                "properties": nested_props,
+            }
+        elif isinstance(field_value, str) and field_value.startswith("sequence<"):
+            # Array type — extract inner type
+            inner = field_value[len("sequence<") : -1]
+            inner_json = _ROS_TYPE_MAP.get(inner, "string")
+            properties[field_name] = {
+                "type": "array",
+                "items": {"type": inner_json},
+                "description": f"ROS type: {field_value}",
+            }
+        else:
+            # Primitive type
+            json_type = _ROS_TYPE_MAP.get(field_value, "string")
+            properties[field_name] = {
+                "type": json_type,
+                "description": f"ROS type: {field_value}",
+            }
+    return properties
 
 
 def goal_type_to_json_properties(goal_type: type) -> Tuple[Dict, List]:
     """Introspect a ROS Goal message class and return JSON schema
     properties and required fields for tool registration.
 
+    Uses ``get_ros_msg_fields_dict`` from ros_sugar to recursively parse
+    nested message types into a flat dict, then converts to JSON schema.
+
     :param goal_type: The ROS Goal message class
     :returns: (properties dict, required list) for the JSON schema
     """
-    fields = goal_type.get_fields_and_field_types()
-    properties = {}
-    required = []
-    for field_name, ros_type in fields.items():
-        schema = ros_type_to_json_schema(ros_type)
-        schema["description"] = f"ROS type: {ros_type}"
-        properties[field_name] = schema
-        required.append(field_name)
+    from ..ros import get_ros_msg_fields_dict
+
+    fields_dict = get_ros_msg_fields_dict(goal_type)
+    properties = _fields_dict_to_json_schema(fields_dict)
+    required = list(properties.keys())
     return properties, required
 
 
