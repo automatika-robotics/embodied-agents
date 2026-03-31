@@ -99,7 +99,7 @@ class Cortex(ModelComponent, Monitor):
     def __init__(
         self,
         *,
-        actions: List[Action],
+        actions: Optional[List[Action]] = None,
         model_client: Optional[ModelClient] = None,
         db_client: Optional[DBClient] = None,
         config: Optional[CortexConfig] = None,
@@ -179,7 +179,7 @@ class Cortex(ModelComponent, Monitor):
         )
 
     @staticmethod
-    def _validate_actions(actions: List[Action]):
+    def _validate_actions(actions: Optional[List[Action]]):
         """Validate that all passed actions have descriptions."""
         if not actions:
             return
@@ -227,8 +227,10 @@ class Cortex(ModelComponent, Monitor):
         )
         self.config = _config
 
-    def _setup_internal_action_events(self, actions: List[Action]) -> None:
+    def _setup_internal_action_events(self, actions: Optional[List[Action]]) -> None:
         """Create internal event topics and tool descriptions for each action."""
+        if not actions:
+            return
         for cortex_action in actions:
             name = cortex_action.action_name
             Monitor.add_internal_event_action_pair(
