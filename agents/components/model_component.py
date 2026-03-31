@@ -100,14 +100,16 @@ class ModelComponent(Component):
         """
         self._additional_model_clients = value
 
-    @component_fallback(description={
-        "type": "function",
-        "function": {
-            "name": "fallback_to_local",
-            "description": "Switch from the remote model client to the built-in local model for inference.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    })
+    @component_fallback(
+        description={
+            "type": "function",
+            "function": {
+                "name": "fallback_to_local",
+                "description": "Switch from the remote model client to the built-in local model for inference.",
+                "parameters": {"type": "object", "properties": {}, "required": []},
+            },
+        }
+    )
     def fallback_to_local(self) -> bool:
         """Switch from remote model_client to the built-in local model at runtime.
 
@@ -157,23 +159,25 @@ class ModelComponent(Component):
         self.get_logger().info("Switched to local model for inference.")
         return True
 
-    @component_fallback(description={
-        "type": "function",
-        "function": {
-            "name": "change_model_client",
-            "description": "Hot-swap the active model client with one from the registered additional clients.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "model_client_name": {
-                        "type": "string",
-                        "description": "Key of the desired client in additional_model_clients.",
+    @component_fallback(
+        description={
+            "type": "function",
+            "function": {
+                "name": "change_model_client",
+                "description": "Hot-swap the active model client with one from the registered additional clients.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "model_client_name": {
+                            "type": "string",
+                            "description": "Key of the desired client in additional_model_clients.",
+                        },
                     },
+                    "required": ["model_client_name"],
                 },
-                "required": ["model_client_name"],
             },
-        },
-    })
+        }
+    )
     def change_model_client(self, model_client_name: str) -> bool:
         """
         Hot-swap the active model client at runtime.
@@ -234,6 +238,16 @@ class ModelComponent(Component):
             return False
 
         return True
+
+    def inspect_component(self) -> str:
+        """Return component info including additional model clients."""
+        result = super().inspect_component()
+        if self._additional_model_clients:
+            result += (
+                f"\nAdditional model clients: "
+                f"{list(self._additional_model_clients.keys())}"
+            )
+        return result
 
     def custom_on_configure(self):
         """

@@ -434,8 +434,8 @@ class Cortex(ModelComponent, Monitor):
     def _plan_task(self, task: str) -> Optional[List[Dict]]:
         """Multi-step planning loop that researches components before producing a plan.
 
-        The LLM is given both planning tools (``inspect_component``) and
-        execution tools (actions, system tools). Each iteration it may:
+        The LLM is given both planning tools and execution tools.
+        Each iteration it may:
 
         - Call planning tools to gather information (results are fed back).
         - Call execution tools — these become the plan and end the loop.
@@ -835,9 +835,9 @@ class Cortex(ModelComponent, Monitor):
     def _inspect_component(self, component_name: str) -> str:
         """Return a text description of a component's structure.
 
-        Provides input/output topics, registered actions (already available
-        as tools), and additional model clients. This is context for the LLM
-        to use the component's tools correctly (e.g., to discover topic names).
+        Delegates to the component's own ``inspect_component()`` for base
+        info (inputs, outputs, config, additional model clients), then
+        appends the Cortex-registered execution tools for that component.
         """
         comp = self._managed_components.get(component_name)
         if not comp:
@@ -846,15 +846,14 @@ class Cortex(ModelComponent, Monitor):
                 f"Error: Component '{component_name}' not found. Available: {available}"
             )
 
-        lines = comp.inspect_component()
+        result = comp.inspect_component()
 
-        # List already-registered actions for this component
+        # Append Cortex-registered execution tools for this component
         prefix = f"{component_name}."
         comp_tools = [name for name in self._execution_tools if name.startswith(prefix)]
         if comp_tools:
-            lines.append("Actions (available as tools):")
+            lines = ["Actions (available as tools):"]
             for tool_name in comp_tools:
-                # Find the tool description
                 for td in self._execution_tool_descriptions:
                     if td["function"]["name"] == tool_name:
                         fn = td["function"]
@@ -866,19 +865,11 @@ class Cortex(ModelComponent, Monitor):
                             f"  - {tool_name}({param_str}): {fn.get('description', '')}"
                         )
                         break
+            result += "\n" + "\n".join(lines)
         else:
-            lines.append("Actions: none")
+            result += "\nActions: none"
 
-        # Additional model clients
-        if (
-            hasattr(comp, "_additional_model_clients")
-            and comp._additional_model_clients
-        ):
-            lines.append(
-                f"Additional model clients: {list(comp._additional_model_clients.keys())}"
-            )
-
-        return "\n".join(lines)
+        return result
 
     # =========================================================================
     # Behavioral action dispatch (via event system)
