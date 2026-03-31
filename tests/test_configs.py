@@ -113,9 +113,7 @@ class TestSTTConfig:
 
     def test_stream_with_local_raises(self):
         with pytest.raises(ValueError):
-            SpeechToTextConfig(
-                stream=True, enable_vad=True, enable_local_model=True
-            )
+            SpeechToTextConfig(stream=True, enable_vad=True, enable_local_model=True)
 
     def test_vad_threshold_range(self):
         with pytest.raises(ValueError):
@@ -144,9 +142,12 @@ class TestTTSConfig:
         assert c.play_on_device is False
         assert c.enable_local_model is False
 
-    def test_stream_with_local_raises(self):
-        with pytest.raises(ValueError):
-            TextToSpeechConfig(enable_local_model=True)  # stream=True by default
+    def test_stream_with_local_ok(self):
+        """Local model + stream is accepted at config time; stream is
+        disabled at runtime by _deploy_local_model."""
+        c = TextToSpeechConfig(enable_local_model=True)
+        assert c.enable_local_model is True
+        assert c.stream is True  # will be overridden at deploy time
 
     def test_local_no_stream_ok(self):
         c = TextToSpeechConfig(enable_local_model=True, stream=False)
@@ -159,9 +160,7 @@ class TestTTSConfig:
 
     def test_stream_to_ip_without_port_raises(self):
         with pytest.raises(ValueError):
-            TextToSpeechConfig(
-                stream_to_ip="192.168.1.1", play_on_device=True
-            )
+            TextToSpeechConfig(stream_to_ip="192.168.1.1", play_on_device=True)
 
     def test_stream_to_port_without_ip_raises(self):
         with pytest.raises(ValueError):

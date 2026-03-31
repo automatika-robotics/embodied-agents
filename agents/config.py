@@ -526,7 +526,7 @@ class TextToSpeechConfig(ModelComponentConfig):
     :type stream_to_port: Optional[int]
     :param buffer_size: Size of the buffer for playing audio on device. Only effective if play_on_device is True (default: 20).
     :type buffer_size: int
-    :param block_size: Size of the audio block to be read for playing audio on device. Only effective if play_on_device is True (default: 1024).
+    :param block_size: Size of the audio block to be read for playing audio on device. Only effective if play_on_device is True (default: 4096).
     :type block_size: int
     :param thread_shutdown_timeout: Timeout to shutdown a playback thread, if data is not received for more than a certain number of seconds. Only effective if play_on_device is True (default: 5 seconds).
     :type thread_shutdown_timeout: int
@@ -558,7 +558,7 @@ class TextToSpeechConfig(ModelComponentConfig):
     stream_to_ip: Optional[str] = field(default=None)
     stream_to_port: Optional[int] = field(default=None)
     buffer_size: int = field(default=20)
-    block_size: int = field(default=1024)
+    block_size: int = field(default=4096)
     thread_shutdown_timeout: int = field(default=5)
     stream: bool = field(default=True)
     _get_bytes: bool = field(default=False, alias="_get_bytes")

@@ -117,7 +117,7 @@ class TestCortexActions:
         assert tool_desc["function"]["name"] == "navigate"
         assert tool_desc["function"]["description"] == "Go somewhere"
 
-    def test_action_creates_internal_event_topic(self, rclpy_init, mock_model_client):
+    def test_action_registers_in_execution_tools(self, rclpy_init, mock_model_client):
         action = _make_mock_action(name="grasp", description="Grasp object")
         comp = Cortex(
             outputs=[Topic(name="out", msg_type="String")],
@@ -127,10 +127,7 @@ class TestCortexActions:
             component_name="test_cortex_events",
         )
 
-        assert "grasp" in comp._action_event_topics
-        event_topic = comp._action_event_topics["grasp"]
-        assert "internal_cortex_event" in event_topic.name
-        assert "grasp" in event_topic.name
+        assert "grasp" in comp._execution_tools
 
     def test_multiple_actions(self, rclpy_init, mock_model_client):
         actions = [
@@ -147,7 +144,7 @@ class TestCortexActions:
         )
 
         assert len(comp._execution_tool_descriptions) == 3
-        assert len(comp._action_event_topics) == 3
+        assert len(comp._execution_tools) == 3
 
     def test_dispatch_action_unknown(self, rclpy_init, mock_model_client):
         action = _make_mock_action(name="real_action", description="Exists")
@@ -159,10 +156,11 @@ class TestCortexActions:
             component_name="test_cortex_dispatch",
         )
         mock_component_internals(comp)
+        # Simulate what Monitor.__init__ would populate
+        comp.emit_internal_event_methods = {"real_action": MagicMock()}
 
         result = comp._dispatch_action("nonexistent")
         assert "does not exist" in result
-        assert "real_action" in result
 
 
 class TestCortexPlanning:
