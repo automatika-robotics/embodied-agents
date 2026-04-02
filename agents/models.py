@@ -458,7 +458,7 @@ class TransformersTTS(Model):
 
     :param name: An arbitrary name given to the model.
     :type name: str
-    :param checkpoint: The HuggingFace model ID. Default is "suno/bark-small". Other examples: "facebook/mms-tts-eng" (VITS), "microsoft/speecht5_tts" (SpeechT5).
+    :param checkpoint: The HuggingFace model ID. Default is "facebook/mms-tts-eng" (VITS). Other examples: "suno/bark-small", "microsoft/speecht5_tts" (SpeechT5).
     :type checkpoint: str
     :param voice: Voice preset. For Bark, use presets like "v2/en_speaker_6". For other models, this may be unused. Default is "v2/en_speaker_6".
     :type voice: str, optional
@@ -475,7 +475,7 @@ class TransformersTTS(Model):
     ```
     """
 
-    checkpoint: str = field(default="suno/bark-small")
+    checkpoint: str = field(default="facebook/mms-tts-eng")
     voice: Optional[str] = field(default="v2/en_speaker_6")
     vocoder_checkpoint: Optional[str] = field(default=None)
 
