@@ -17,7 +17,7 @@ from .component_base import ComponentRunType
 
 class TextToSpeech(ModelComponent):
     """
-    This component takes in text input and outputs an audio representation of the text using TTS models (e.g. SpeechT5). The generated audio can be played using any audio playback device available on the agent.
+    This component takes in text input and outputs an audio representation of the text using TTS models (e.g. TransformersTTS). The generated audio can be played using any audio playback device available on the agent.
 
     :param inputs: The input topics for the TTS.
         This should be a list of Topic objects, limited to String type.
@@ -42,7 +42,7 @@ class TextToSpeech(ModelComponent):
     text_topic = Topic(name="text", msg_type="String")
     audio_topic = Topic(name="audio", msg_type="Audio")
     config = TextToSpeechConfig(play_on_device=True)
-    model_client = ModelClient(model=SpeechT5(name="speecht5"))
+    model_client = ModelClient(model=TransformersTTS(name="tts"))
     tts_component = TextToSpeech(
         inputs=[text_topic],
         outputs=[audio_topic],

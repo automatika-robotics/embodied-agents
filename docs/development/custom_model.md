@@ -66,10 +66,8 @@ Model
   ├── GenericTTS
   ├── GenericSTT
   ├── Whisper (adds compute_type)
-  ├── SpeechT5 (adds voice)
-  ├── Bark (adds voice)
-  ├── MeloTTS (adds language, speaker_id)
-  ├── VisionModel (adds tracking, TensorRT options)
+  ├── TransformersTTS (adds voice, vocoder_checkpoint)
+  ├── VisionModel (adds tracking options)
   └── LeRobotPolicy (adds policy_type, features, actions)
 ```
 
