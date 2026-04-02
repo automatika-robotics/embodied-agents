@@ -13,7 +13,7 @@ detections_topic = Topic(name="detections", msg_type="Detections")
 
 # Add an object detection model
 object_detection = VisionModel(
-    name="object_detection", checkpoint="dino-4scale_r50_8xb2-12e_coco"
+    name="object_detection", checkpoint="PekingU/rtdetr_r50vd_coco_o365"
 )
 roboml_detection = RoboMLRESPClient(object_detection)
 

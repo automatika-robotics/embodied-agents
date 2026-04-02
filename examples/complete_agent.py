@@ -31,8 +31,8 @@ object_detection_model = VisionModel(
 detection_client = RoboMLRESPClient(object_detection_model)
 qwen_vl = OllamaModel(name="qwen_vl", checkpoint="qwen2.5vl:latest")
 qwen_client = OllamaClient(qwen_vl)
-llama = OllamaModel(name="qwen", checkpoint="qwen3:0.6b")
-llama_client = OllamaClient(llama)
+qwen = OllamaModel(name="qwen", checkpoint="qwen3:0.6b")
+qwen_client = OllamaClient(qwen)
 chroma = ChromaDB()
 chroma_client = ChromaClient(db=chroma, port=8080)
 
@@ -142,7 +142,7 @@ llm_query = Topic(name="llm_query", msg_type="String")
 llm = LLM(
     inputs=[llm_query],
     outputs=[query_answer],
-    model_client=llama_client,
+    model_client=qwen_client,
     trigger=[llm_query],
     component_name="general_q_and_a",
 )
@@ -162,7 +162,7 @@ goto_config = LLMConfig(
 goto = LLM(
     inputs=[goto_query],
     outputs=[goal_point],
-    model_client=llama_client,
+    model_client=qwen_client,
     config=goto_config,
     db_client=chroma_client,
     trigger=goto_query,
