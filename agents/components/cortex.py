@@ -380,7 +380,7 @@ class Cortex(ModelComponent, Monitor):
         """
         name = action_name.replace("/", "_")
         tool_name = f"send_goal_to_{name}"
-        goal_type = action_type().Goal
+        goal_type = action_type.Goal
         properties, required = goal_type_to_json_properties(goal_type)
         self._execution_tools.add(tool_name)
         self._action_goal_tools[tool_name] = (component_name, action_name, action_type)
@@ -414,7 +414,7 @@ class Cortex(ModelComponent, Monitor):
         """
         name = srv_name.replace("/", "_")
         tool_name = f"send_request_to_{name}"
-        req_type = srv_type().Request
+        req_type = srv_type.Request
         properties, required = goal_type_to_json_properties(req_type)
         self._execution_tools.add(tool_name)
         self._service_request_tools[tool_name] = (component_name, srv_name, srv_type)
@@ -740,11 +740,10 @@ class Cortex(ModelComponent, Monitor):
 
         # Per-component action goal tools: execution tools
         for comp_name, action_client in self._main_action_clients.items():
-            name = action_client.config.name.replace("/", "_")
             self.__register_action_client_as_tool(
                 component_name=comp_name,
-                action_name=name,
-                goal_type=action_client.config.action_type,
+                action_name=action_client.config.name,
+                action_type=action_client.config.action_type,
             )
 
         # Discover and register component actions from all managed components
@@ -828,11 +827,11 @@ class Cortex(ModelComponent, Monitor):
 
             # Register additional Action Servers as tools
             actions_entrypoints = entrypoints.get("actions", {})
-            for action_name, action_type in actions_entrypoints.item():
+            for action_name, action_type in actions_entrypoints.items():
                 self.__register_action_client_as_tool(
                     component_name=comp_name,
                     action_name=action_name,
-                    goal_type=action_type,
+                    action_type=action_type,
                 )
 
     def _send_action_goal_from_dict(
