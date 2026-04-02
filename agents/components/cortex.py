@@ -2,7 +2,7 @@ from copy import copy
 import json
 import os
 import time
-from typing import Optional, List, Dict, Set
+from typing import Optional, List, Dict, Set, Any, Tuple
 
 from ..clients.model_base import ModelClient
 from ..clients.db_base import DBClient
@@ -137,8 +137,10 @@ class Cortex(ModelComponent, Monitor):
         self._planning_tool_descriptions: List[Dict] = []
         self._execution_tools: Set = set()
         self._execution_tool_descriptions: List[Dict] = []
-        # Action server goals
-        self._action_goal_tools: Dict[str, str] = {}
+
+        # Action server goals and Service request tools
+        self._action_goal_tools: Dict[str, Tuple[str, str, Any]] = {}
+        self._service_request_tools: Dict[str, Tuple[str, str, Any]] = {}
 
         # Behavioral actions: dispatched via event system
         self._pure_internal_events = []
@@ -364,6 +366,74 @@ class Cortex(ModelComponent, Monitor):
                 parsed_args[key] = arg
         return parsed_args
 
+    def __register_action_client_as_tool(
+        self, component_name: str, action_name: str, action_type: Any
+    ) -> None:
+        """Helper method to register a component Action Server as a system tool
+
+        :param component_name: Component name
+        :type component_name: str
+        :param action_name: Action server name
+        :type action_name: str
+        :param action_type: Action server type
+        :type action_type: Any
+        """
+        name = action_name.replace("/", "_")
+        tool_name = f"send_goal_to_{name}"
+        goal_type = action_type().Goal
+        properties, required = goal_type_to_json_properties(goal_type)
+        self._execution_tools.add(tool_name)
+        self._action_goal_tools[tool_name] = (component_name, action_name, action_type)
+        self._execution_tool_descriptions.append({
+            "type": "function",
+            "function": {
+                "name": tool_name,
+                "description": (
+                    f"Send an action goal to the '{component_name}' component's "
+                    f"action server ({name})."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": properties,
+                    "required": required,
+                },
+            },
+        })
+
+    def __register_service_client_as_tool(
+        self, component_name: str, srv_name: str, srv_type: Any
+    ) -> None:
+        """Helper method to register a component Service as a system tool
+
+        :param component_name: Component name
+        :type component_name: str
+        :param srv_name: Server name
+        :type srv_name: str
+        :param srv_type: Server type
+        :type srv_type: Any
+        """
+        name = srv_name.replace("/", "_")
+        tool_name = f"send_request_to_{name}"
+        req_type = srv_type().Request
+        properties, required = goal_type_to_json_properties(req_type)
+        self._execution_tools.add(tool_name)
+        self._service_request_tools[tool_name] = (component_name, srv_name, srv_type)
+        self._execution_tool_descriptions.append({
+            "type": "function",
+            "function": {
+                "name": tool_name,
+                "description": (
+                    f"Send a service request to the '{component_name}' component's "
+                    f"server ({name})."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": properties,
+                    "required": required,
+                },
+            },
+        })
+
     # =========================================================================
     # Phase 1: Planning (multi-step loop)
     # =========================================================================
@@ -483,7 +553,6 @@ class Cortex(ModelComponent, Monitor):
                 for tc in tool_calls
                 if tc["function"]["name"] not in self._planning_tools
             ]
-
             if planning_calls:
                 self._process_planning_calls(planning_calls, messages, output, step)
 
@@ -672,29 +741,11 @@ class Cortex(ModelComponent, Monitor):
         # Per-component action goal tools: execution tools
         for comp_name, action_client in self._main_action_clients.items():
             name = action_client.config.name.replace("/", "_")
-            tool_name = f"send_goal_to_{name}"
-            goal_type = self._get_component_action_request_message_type(comp_name)
-            if goal_type is None:
-                continue
-
-            properties, required = goal_type_to_json_properties(goal_type)
-            self._execution_tools.add(tool_name)
-            self._action_goal_tools[tool_name] = comp_name
-            self._execution_tool_descriptions.append({
-                "type": "function",
-                "function": {
-                    "name": tool_name,
-                    "description": (
-                        f"Send an action goal to the '{comp_name}' component's "
-                        f"action server ({name})."
-                    ),
-                    "parameters": {
-                        "type": "object",
-                        "properties": properties,
-                        "required": required,
-                    },
-                },
-            })
+            self.__register_action_client_as_tool(
+                component_name=comp_name,
+                action_name=name,
+                goal_type=action_client.config.action_type,
+            )
 
         # Discover and register component actions from all managed components
         self._register_component_actions()
@@ -720,6 +771,7 @@ class Cortex(ModelComponent, Monitor):
         (start, stop, restart, etc.) are excluded.
         """
         for comp_name, comp in self._managed_components.items():
+            # Register component methods
             for attr_name in dir(comp):
                 if attr_name in self._LIFECYCLE_METHODS:
                     continue
@@ -765,20 +817,42 @@ class Cortex(ModelComponent, Monitor):
                     self._execution_tool_descriptions.append(tool_desc)
                 except Exception:
                     continue
+            # Register component additional entry points (Actions & Services)
+            entrypoints: Dict[str, Dict] = comp.get_ros_entrypoints()
+            # Register additional services as tools
+            srv_entrypoints = entrypoints.get("services", {})
+            for srv_name, srv_type in srv_entrypoints.items():
+                self.__register_service_client_as_tool(
+                    component_name=comp_name, srv_name=srv_name, srv_type=srv_type
+                )
+
+            # Register additional Action Servers as tools
+            actions_entrypoints = entrypoints.get("actions", {})
+            for action_name, action_type in actions_entrypoints.item():
+                self.__register_action_client_as_tool(
+                    component_name=comp_name,
+                    action_name=action_name,
+                    goal_type=action_type,
+                )
 
     def _send_action_goal_from_dict(
-        self, component_name: str, goal_fields: Dict
+        self, component_name: str, action_name: str, action_type: Any, goal_fields: Dict
     ) -> str:
         """Construct a Goal message from a dict and send it to a component's
         action server.
 
         :param component_name: Target component name
-        :param goal_fields: Dict of goal field values from the LLM
-        :returns: Result string for the execution log
+        :type component_name: str
+        :param action_name: Target action server name
+        :type action_name: str
+        :param action_type: Target action server type
+        :type action_type: Any
+        :param goal_fields:  Dict of goal field values from the LLM
+        :type goal_fields: Dict
+        :return: Result string for the execution log
+        :rtype: str
         """
-        if component_name not in self._main_action_clients:
-            return f"Error: Component '{component_name}' has no action client."
-        action_client = self._main_action_clients[component_name]
+        action_client = self._get_action_client(action_name, action_type)
         try:
             sent = action_client.send_request_from_dict(goal_fields)
             if sent is None:
@@ -798,6 +872,36 @@ class Cortex(ModelComponent, Monitor):
         except Exception as e:
             return f"Error sending action goal to '{component_name}': {e}"
 
+    def _send_service_request_from_dict(
+        self, component_name: str, srv_name: str, srv_type: Any, req_fields: Dict
+    ) -> str:
+        """Construct a Request message from a dict and send it to a component's
+        service.
+
+        :param component_name: Target component name
+        :type component_name: str
+        :param srv_name: Target server name
+        :type srv_name: str
+        :param srv_type: Target server type
+        :type srv_type: Any
+        :param req_fields: Dict of request field values from the LLM
+        :type req_fields: Dict
+        :return: Result string for the execution log
+        :rtype: str
+        """
+        srv_client: ServiceClientHandler = self._get_srv_client(srv_name, srv_type)
+        try:
+            result = srv_client.send_request_from_dict(req_fields)
+            if result is None:
+                return (
+                    f"Error: Failed to construct or send service request to "
+                    f"'{component_name}' service '{srv_name}' from fields: {req_fields}"
+                )
+            return f"Service {srv_name} for {component_name} completed and returned result {result}."
+
+        except Exception as e:
+            return f"Error sending service request to '{component_name}' service {srv_name}: {e}"
+
     def _execute_system_tool(self, tool_name: str, args: Dict) -> str:
         """Execute an execution-phase system tool or a component action."""
         try:
@@ -814,8 +918,15 @@ class Cortex(ModelComponent, Monitor):
                     return f"{tool_name} executed successfully"
                 return f"Error: {tool_name} failed with error: {response.error_msg}"
             elif tool_name in self._action_goal_tools:
-                comp_name = self._action_goal_tools[tool_name]
-                return self._send_action_goal_from_dict(comp_name, args)
+                comp_name, action_name, action_type = self._action_goal_tools[tool_name]
+                return self._send_action_goal_from_dict(
+                    comp_name, action_name, action_type, args
+                )
+            elif tool_name in self._service_request_tools:
+                comp_name, srv_name, srv_type = self._service_request_tools[tool_name]
+                return self._send_service_request_from_dict(
+                    comp_name, srv_name, srv_type, args
+                )
             # else: the tool is a component action
             return self._call_component_action(tool_name, args)
         except Exception as e:
