@@ -21,6 +21,7 @@ from ros_sugar.supported_types import (
     ROSCompressedImage,
     add_additional_datatypes,
     get_ros_msg_fields_dict,
+    ros_msg_to_str,
 )
 from ros_sugar.io.topic import QoSConfig, Topic as BaseTopic
 
@@ -110,6 +111,7 @@ __all__ = [
     "ServiceClientHandler",
     "ActionClientHandler",
     "get_ros_msg_fields_dict",
+    "ros_msg_to_str",
 ]
 
 # =========================================================================
