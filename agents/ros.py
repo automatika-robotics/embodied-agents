@@ -266,7 +266,7 @@ class DetectionsMultiSource(SupportedType):
         """
         msg = Detections2DMultiSource()
         detections = []
-        for img, detection in zip(images, output, strict=True):
+        for img, detection in zip(images, output):
             detections.append(Detections.convert(detection, img))
         msg.detections = detections
         return msg
@@ -417,7 +417,7 @@ class TrackingsMultiSource(SupportedType):
         """
         msg = ROSTrackingsMultiSource()
         trackings = []
-        for img, tracking in zip(images, output, strict=True):
+        for img, tracking in zip(images, output):
             trackings.append(Trackings.convert(tracking, img))
         msg.trackings = trackings
         return msg

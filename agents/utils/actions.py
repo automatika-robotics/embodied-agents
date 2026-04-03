@@ -273,7 +273,7 @@ def cap_actions_with_limits(
         return target_actions
 
     for idx, (jname, target) in enumerate(
-        zip(joint_names, target_actions, strict=True)
+        zip(joint_names, target_actions)
     ):
         # If limit missing in dict
         joint_limits = limits_dict.get(jname)

@@ -3,10 +3,8 @@ import inspect
 import json
 import queue
 import threading
-from types import NoneType
 from typing import Any, Optional, Sequence, Union, List, Dict, Type, MutableMapping
 import msgpack
-
 
 from ..clients.model_base import ModelClient
 from ..clients.roboml import RoboMLWSClient
@@ -20,6 +18,9 @@ from ..ros import (
     component_fallback,
 )
 from .component_base import Component
+
+# Python3.8 compatible NoneType
+NoneType = type(None)
 
 
 class ModelComponent(Component):

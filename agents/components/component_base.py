@@ -1,7 +1,6 @@
 import json
 from abc import abstractmethod
 from copy import deepcopy
-from types import NoneType
 from typing import Optional, Sequence, Union, List, Dict, Type
 
 from ..ros import (
@@ -16,6 +15,9 @@ from ..ros import (
 )
 from ..config import BaseComponentConfig
 from ..utils import flatten
+
+# Python3.8 compatible NoneType
+NoneType = type(None)
 
 
 class Component(BaseComponent):
