@@ -893,15 +893,13 @@ class Cortex(ModelComponent, Monitor):
                     f"'{component_name}' from fields: {goal_fields}"
                 )
             if sent:
-                # NOTE: Add Ongoing Action Monitoring to Execution Loop
                 self._active_action_clients[tool_name] = action_client
                 return (
-                    f"Action '{tool_name}' has been dispatched to '{component_name}' and is now running asynchronously. "
-                    f"You do not need to wait for it — progress updates will be provided automatically. "
-                    f"Proceed with the next step in your plan."
+                    f"Action '{tool_name}' has been dispatched to '{component_name}' "
+                    f"and is now running asynchronously."
                 )
 
-            return f"Action goal was rejected by '{component_name}'."
+            return f"Error: Action goal was rejected by '{component_name}'."
         except Exception as e:
             return f"Error sending action goal to '{component_name}': {e}"
 
