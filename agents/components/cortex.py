@@ -17,6 +17,7 @@ from ..ros import (
     BaseComponentConfig,
     ActionClientHandler,
     ServiceClientHandler,
+    ros_msg_to_str,
 )
 from ..utils import validate_func_args, strip_think_tokens
 from ..utils.actions import goal_type_to_json_properties
@@ -609,16 +610,20 @@ class Cortex(ModelComponent, Monitor):
                 status = " [PENDING]"
             plan_lines.append(f"  {i + 1}. {name}{args_str}{status}")
 
-        next_step = plan[step_index]
-        fn_name = next_step["function"]["name"]
-        fn_args = next_step["function"].get("arguments", {})
-
         message = (
             "Original plan:\n"
             + "\n".join(plan_lines)
-            + f"\n\nNext action: {fn_name}"
-            + (f" with arguments {fn_args}" if fn_args else "")
         )
+
+        if step_index < len(plan):
+            next_step = plan[step_index]
+            fn_name = next_step["function"]["name"]
+            fn_args = next_step["function"].get("arguments", {})
+
+            message += (
+                f"\n\nNext action: {fn_name}"
+                + (f" with arguments {fn_args}" if fn_args else "")
+            )
 
         # Include active async action status if any
         active_status = self._monitor_active_clients()
@@ -656,6 +661,7 @@ class Cortex(ModelComponent, Monitor):
         }
 
         result = self._call_inference(inference_input)
+        self.get_logger().debug(f"Got confirm step result = {result}")
         if not result:
             self.get_logger().warning(
                 "Confirmation inference failed; defaulting to EXECUTE."
@@ -887,7 +893,7 @@ class Cortex(ModelComponent, Monitor):
         action_client = self._get_action_client(action_name, action_type)
         try:
             sent = action_client.send_request_from_dict(goal_fields)
-            if sent is None:
+            if not sent:
                 return (
                     f"Error: Failed to construct or send action goal to "
                     f"'{component_name}' from fields: {goal_fields}"
@@ -898,7 +904,6 @@ class Cortex(ModelComponent, Monitor):
                     f"Action '{tool_name}' has been dispatched to '{component_name}' "
                     f"and is now running asynchronously."
                 )
-
             return f"Error: Action goal was rejected by '{component_name}'."
         except Exception as e:
             return f"Error sending action goal to '{component_name}': {e}"
@@ -1056,11 +1061,11 @@ class Cortex(ModelComponent, Monitor):
             updates_dict = action_client.get_ui_elements()
             feedback_lines += f"- {tool_name}: {updates_dict['status']} (running for {updates_dict['duration_secs']}s)"
             if updates_dict["feedback"]:
-                feedback_lines += f" | Latest feedback: {updates_dict['feedback']}"
+                feedback_lines += f" | Latest feedback: {ros_msg_to_str(updates_dict['feedback'])}"
             if updates_dict["feedback_timeout"]:
                 feedback_lines += " [WARNING: No new feedback received — the tool may be stalled or waiting on an external process.]"
             feedback_lines += "\n"
-        feedback_lines = "[End Of Tools Status Update]\n"
+        feedback_lines += "[End Of Tools Status Update]\n"
         # Remove completed actions from the active clients registry
         for tool in completed_actions:
             self._active_action_clients.pop(tool)
@@ -1151,6 +1156,7 @@ class Cortex(ModelComponent, Monitor):
         # Phase 2: Execution
         executed_results: List[Dict] = []
         aborted = False
+        fn_name_pending = ""
 
         for i, step in enumerate(plan):
             if goal_handle.is_cancel_requested:
@@ -1164,14 +1170,6 @@ class Cortex(ModelComponent, Monitor):
             fn_args = step["function"].get("arguments", {})
             args_str = f" with {fn_args}" if fn_args else ""
 
-            # Feedback: about to execute step
-            feedback_msg.timestep = i + 1
-            feedback_msg.completed = False
-            feedback_msg.feedback = (
-                f"Executing step {i + 1}/{len(plan)}: {fn_name}{args_str}"
-            )
-            goal_handle.publish_feedback(feedback_msg)
-
             # Confirm step with LLM
             decision = self._confirm_step(plan, executed_results, i)
             self.get_logger().info(
@@ -1184,14 +1182,12 @@ class Cortex(ModelComponent, Monitor):
                     break
                 feedback_msg.timestep = i + 1
                 feedback_msg.completed = False
-                feedback_msg.feedback = (
-                    f"Step {i + 1} ({fn_name}): waiting for action to complete..."
-                )
+                feedback_msg.feedback = f"Step {i} ({fn_name_pending}): waiting for action to complete..."
                 goal_handle.publish_feedback(feedback_msg)
                 time.sleep(self.config.monitoring_interval)
                 decision = self._confirm_step(plan, executed_results, i)
                 self.get_logger().info(
-                    f"[Step {i + 1}/{len(plan)}] {fn_name} re-check -> {decision}"
+                    f"[Step {i}/{len(plan)}] {fn_name_pending} re-check -> {decision}"
                 )
 
             if decision == "ABORT":
@@ -1215,6 +1211,14 @@ class Cortex(ModelComponent, Monitor):
                 continue
 
             # EXECUTE action step
+            # Feedback: about to execute step
+            feedback_msg.timestep = i + 1
+            feedback_msg.completed = False
+            feedback_msg.feedback = (
+                f"Executing step {i + 1}/{len(plan)}: {fn_name}{args_str}"
+            )
+            goal_handle.publish_feedback(feedback_msg)
+
             step_result = self._execute_action_step(step)
             step_failed = step_result.startswith("Error")
             executed_results.append({
@@ -1223,12 +1227,33 @@ class Cortex(ModelComponent, Monitor):
                 "result": step_result,
                 "failed": step_failed,
             })
+            fn_name_pending = fn_name
 
             feedback_msg.timestep = i + 1
             feedback_msg.completed = False
             feedback_msg.feedback = f"Step {i + 1} ({fn_name}) completed: {step_result}"
             goal_handle.publish_feedback(feedback_msg)
             self.get_logger().info(f"[Step {i + 1}] {step_result}")
+
+        # Check for any active action clients
+        active_status = self._monitor_active_clients()
+        if active_status:
+            i = i + 1
+            decision = self._confirm_step(plan, executed_results, i)
+            while decision == "CONTINUE":
+                if goal_handle.is_cancel_requested:
+                    break
+                feedback_msg.timestep = i + 1
+                feedback_msg.completed = False
+                feedback_msg.feedback = (
+                    f"Step {i + 1} ({fn_name}): waiting for action to complete..."
+                )
+                goal_handle.publish_feedback(feedback_msg)
+                time.sleep(self.config.monitoring_interval)
+                decision = self._confirm_step(plan, executed_results, i)
+                self.get_logger().info(
+                    f"[Step {i + 1}/{len(plan)}] {fn_name} re-check -> {decision}"
+                )
 
         # Final result handling
         summary = "; ".join(f"{r['action']}: {r['result']}" for r in executed_results)
