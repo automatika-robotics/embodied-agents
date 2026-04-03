@@ -91,9 +91,14 @@ class Cortex(ModelComponent, Monitor):
 
     _CONFIRMATION_PROMPT = (
         "You are monitoring task execution on a robot. "
-        "Given the original plan and results so far, decide if the next step "
-        "should proceed. Respond with exactly one of: EXECUTE, SKIP, or ABORT. "
-        "Optionally follow with a brief reason after a colon."
+        "Given the original plan and results so far, decide what to do next. "
+        "Respond with exactly one of:\n"
+        "  EXECUTE - proceed with the next step\n"
+        "  SKIP - skip the next step\n"
+        "  ABORT - abort the entire plan\n"
+        "  CONTINUE - wait for ongoing async actions to complete before proceeding\n"
+        "Use CONTINUE when there are active async actions that should finish "
+        "before moving on. Optionally follow with a brief reason after a colon."
     )
 
     @validate_func_args
@@ -579,20 +584,17 @@ class Cortex(ModelComponent, Monitor):
     # Phase 2: Execution with confirmation
     # =========================================================================
 
-    def _confirm_step(
+    def _build_confirmation_message(
         self,
         plan: List[Dict],
         executed_results: List[Dict],
         step_index: int,
     ) -> str:
-        """Ask the LLM whether the next planned step should be executed.
+        """Build the user message for a confirmation LLM call.
 
-        :param plan: Full list of planned tool_calls
-        :param executed_results: Results of already-executed steps
-        :param step_index: Index of the next step to confirm
-        :returns: "EXECUTE", "SKIP", or "ABORT"
+        Includes the plan with status annotations and active async action
+        status if any actions are currently running.
         """
-        # Build plan summary with status annotations
         plan_lines = []
         for i, step in enumerate(plan):
             name = step["function"]["name"]
@@ -611,12 +613,36 @@ class Cortex(ModelComponent, Monitor):
         fn_name = next_step["function"]["name"]
         fn_args = next_step["function"].get("arguments", {})
 
-        user_message = (
+        message = (
             "Original plan:\n"
             + "\n".join(plan_lines)
             + f"\n\nNext action: {fn_name}"
             + (f" with arguments {fn_args}" if fn_args else "")
-            + "\n\nRespond EXECUTE, SKIP, or ABORT."
+        )
+
+        # Include active async action status if any
+        active_status = self._monitor_active_clients()
+        if active_status:
+            message += f"\n\n{active_status}"
+
+        message += "\n\nRespond EXECUTE, SKIP, ABORT, or CONTINUE."
+        return message
+
+    def _confirm_step(
+        self,
+        plan: List[Dict],
+        executed_results: List[Dict],
+        step_index: int,
+    ) -> str:
+        """Ask the LLM whether the next planned step should be executed.
+
+        :param plan: Full list of planned tool_calls
+        :param executed_results: Results of already-executed steps
+        :param step_index: Index of the next step to confirm
+        :returns: "EXECUTE", "SKIP", "ABORT", or "CONTINUE"
+        """
+        user_message = self._build_confirmation_message(
+            plan, executed_results, step_index
         )
 
         inference_input = {
@@ -641,10 +667,9 @@ class Cortex(ModelComponent, Monitor):
             output = strip_think_tokens(output).strip()
 
         upper = output.upper()
-        if upper.startswith("ABORT"):
-            return "ABORT"
-        elif upper.startswith("SKIP"):
-            return "SKIP"
+        for token in ("ABORT", "SKIP", "CONTINUE", "EXECUTE"):
+            if upper.startswith(token):
+                return token
         return "EXECUTE"
 
     def _execute_action_step(self, step: Dict) -> str:
@@ -1009,7 +1034,7 @@ class Cortex(ModelComponent, Monitor):
             return f"Error dispatching action '{name}': {e}"
 
     # =========================================================================
-    # Main action server callback
+    # Action client helpers
     # =========================================================================
 
     def _monitor_active_clients(self) -> Optional[str]:
@@ -1043,7 +1068,7 @@ class Cortex(ModelComponent, Monitor):
             self._active_action_clients.pop(tool)
         return feedback_lines
 
-    def _cancel_all_active_clients(self) -> Optional[str]:
+    def _cancel_all_active_clients(self):
         """Helper method to cancel all action Action clients
 
         :return: Cancellation error message if errors occurred
@@ -1051,20 +1076,22 @@ class Cortex(ModelComponent, Monitor):
         """
         if not self._active_action_clients:
             # Not active clients to cancel
-            return None
-        failed_cancellation = []
+            return
         successful_cancellation = []
         for tool_name, action_client in self._active_action_clients.items():
             cancelled, _ = action_client.cancel_request()
             if not cancelled:
-                failed_cancellation.append(tool_name)
+                self.get_logger().error(
+                    f"Error: Failed to cancel the following ongoing tool: {tool_name}"
+                )
             else:
                 successful_cancellation.append(tool_name)
         for key in successful_cancellation:
             self._active_action_clients.pop(key)
-        if failed_cancellation:
-            return f"Error: Failed to cancel the following ongoing tools: {failed_cancellation}"
-        return None
+
+    # =========================================================================
+    # Main action server callback
+    # =========================================================================
 
     def main_action_callback(self, goal_handle):
         """Action server callback. Runs two-phase planning and execution.
@@ -1153,6 +1180,22 @@ class Cortex(ModelComponent, Monitor):
                 f"[Step {i + 1}/{len(plan)}] {fn_name} -> {decision}"
             )
 
+            # CONTINUE loop: wait for active async actions
+            while decision == "CONTINUE":
+                if goal_handle.is_cancel_requested:
+                    break
+                feedback_msg.timestep = i + 1
+                feedback_msg.completed = False
+                feedback_msg.feedback = (
+                    f"Step {i + 1} ({fn_name}): waiting for action to complete..."
+                )
+                goal_handle.publish_feedback(feedback_msg)
+                time.sleep(self.config.monitoring_interval)
+                decision = self._confirm_step(plan, executed_results, i)
+                self.get_logger().info(
+                    f"[Step {i + 1}/{len(plan)}] {fn_name} re-check -> {decision}"
+                )
+
             if decision == "ABORT":
                 feedback_msg.timestep = i + 1
                 feedback_msg.completed = False
@@ -1219,6 +1262,7 @@ class Cortex(ModelComponent, Monitor):
                 f"Task completed: {len(executed_results)} steps executed."
             )
             with self._main_goal_lock:
+                # Do not leave any hanging clients
                 self._cancel_all_active_clients()
                 goal_handle.succeed()
 
