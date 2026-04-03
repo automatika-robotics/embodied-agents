@@ -160,6 +160,9 @@ class Cortex(ModelComponent, Monitor):
         self._configure_from_file_srv_client: Dict = {}
         self._main_srv_clients: Dict[str, ServiceClientHandler] = {}
         self._main_action_clients: Dict[str, ActionClientHandler] = {}
+        self._active_action_clients: Dict[
+            str, ActionClientHandler
+        ] = {}  # Register action clients with active ongoing goals to manage feedback and request cancellation
 
         # Action server mode
         self.run_type = ComponentRunType.ACTION_SERVER
@@ -835,7 +838,12 @@ class Cortex(ModelComponent, Monitor):
                 )
 
     def _send_action_goal_from_dict(
-        self, component_name: str, action_name: str, action_type: Any, goal_fields: Dict
+        self,
+        tool_name: str,
+        component_name: str,
+        action_name: str,
+        action_type: Any,
+        goal_fields: Dict,
     ) -> str:
         """Construct a Goal message from a dict and send it to a component's
         action server.
@@ -860,12 +868,13 @@ class Cortex(ModelComponent, Monitor):
                     f"'{component_name}' from fields: {goal_fields}"
                 )
             if sent:
-                # NOTE: Currently execution will be blocked until the task (action) is done. To make it asynchronous: Action acceptance could be returned immediately, then Action feedback check could be implemented to update the LLM with the ongoing status of the action without blocking other tasks in parallel.
-
-                # Block until action is done.
-                while not action_client.action_returned:
-                    time.sleep(1 / self.config.loop_rate)
-                return f"Action for {component_name} completed and returned result {action_client.action_result}."
+                # NOTE: Add Ongoing Action Monitoring to Execution Loop
+                self._active_action_clients[tool_name] = action_client
+                return (
+                    f"Action '{tool_name}' has been dispatched to '{component_name}' and is now running asynchronously. "
+                    f"You do not need to wait for it — progress updates will be provided automatically. "
+                    f"Proceed with the next step in your plan."
+                )
 
             return f"Action goal was rejected by '{component_name}'."
         except Exception as e:
@@ -919,7 +928,7 @@ class Cortex(ModelComponent, Monitor):
             elif tool_name in self._action_goal_tools:
                 comp_name, action_name, action_type = self._action_goal_tools[tool_name]
                 return self._send_action_goal_from_dict(
-                    comp_name, action_name, action_type, args
+                    tool_name, comp_name, action_name, action_type, args
                 )
             elif tool_name in self._service_request_tools:
                 comp_name, srv_name, srv_type = self._service_request_tools[tool_name]
@@ -1003,6 +1012,60 @@ class Cortex(ModelComponent, Monitor):
     # Main action server callback
     # =========================================================================
 
+    def _monitor_active_clients(self) -> Optional[str]:
+        """Helper method to get a status update on the ongoing Action clients
+
+        :return: Active tools status feedback
+        :rtype: Optional[str]
+        """
+        if not self._active_action_clients:
+            # Not active clients -> Nothing to monitor
+            return None
+        completed_actions = []
+        feedback_lines = "[Active Tools Status]\n"
+        for tool_name, action_client in self._active_action_clients.items():
+            if action_client.action_returned:
+                # Action is done and returned result
+                result = action_client.action_result
+                completed_actions.append(tool_name)
+                feedback_lines += f"- {tool_name}: COMPLETED | Result: {result}\n"
+                continue
+            updates_dict = action_client.get_ui_elements()
+            feedback_lines += f"- {tool_name}: {updates_dict['status']} (running for {updates_dict['duration_secs']}s)"
+            if updates_dict["feedback"]:
+                feedback_lines += f" | Latest feedback: {updates_dict['feedback']}"
+            if updates_dict["feedback_timeout"]:
+                feedback_lines += " [WARNING: No new feedback received — the tool may be stalled or waiting on an external process.]"
+            feedback_lines += "\n"
+        feedback_lines = "[End Of Tools Status Update]\n"
+        # Remove completed actions from the active clients registry
+        for tool in completed_actions:
+            self._active_action_clients.pop(tool)
+        return feedback_lines
+
+    def _cancel_all_active_clients(self) -> Optional[str]:
+        """Helper method to cancel all action Action clients
+
+        :return: Cancellation error message if errors occurred
+        :rtype: Optional[str]
+        """
+        if not self._active_action_clients:
+            # Not active clients to cancel
+            return None
+        failed_cancellation = []
+        successful_cancellation = []
+        for tool_name, action_client in self._active_action_clients.items():
+            cancelled, _ = action_client.cancel_request()
+            if not cancelled:
+                failed_cancellation.append(tool_name)
+            else:
+                successful_cancellation.append(tool_name)
+        for key in successful_cancellation:
+            self._active_action_clients.pop(key)
+        if failed_cancellation:
+            return f"Error: Failed to cancel the following ongoing tools: {failed_cancellation}"
+        return None
+
     def main_action_callback(self, goal_handle):
         """Action server callback. Runs two-phase planning and execution.
 
@@ -1068,6 +1131,7 @@ class Cortex(ModelComponent, Monitor):
             if goal_handle.is_cancel_requested:
                 self.get_logger().info("Task cancelled by client.")
                 with self._main_goal_lock:
+                    self._cancel_all_active_clients()
                     goal_handle.canceled()
                 return result_msg
 
@@ -1131,6 +1195,7 @@ class Cortex(ModelComponent, Monitor):
 
         if aborted:
             with self._main_goal_lock:
+                self._cancel_all_active_clients()
                 goal_handle.abort()
         elif has_failures:
             feedback_msg.timestep = len(plan)
@@ -1140,6 +1205,7 @@ class Cortex(ModelComponent, Monitor):
 
             self.get_logger().warning(f"Task finished with errors: {summary}")
             with self._main_goal_lock:
+                self._cancel_all_active_clients()
                 goal_handle.abort()
         else:
             result_msg.success = True
@@ -1153,6 +1219,7 @@ class Cortex(ModelComponent, Monitor):
                 f"Task completed: {len(executed_results)} steps executed."
             )
             with self._main_goal_lock:
+                self._cancel_all_active_clients()
                 goal_handle.succeed()
 
         return result_msg
