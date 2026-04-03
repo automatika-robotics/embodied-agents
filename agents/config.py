@@ -116,7 +116,7 @@ class LLMConfig(ModelComponentConfig):
         default=10, validator=base_validators.gt(4)
     )  # number of user messages
     temperature: float = field(default=0.8, validator=base_validators.gt(0.0))
-    max_new_tokens: int = field(default=500, validator=base_validators.gt(0))
+    max_new_tokens: int = field(default=1000, validator=base_validators.gt(0))
     stream: bool = field(default=False)
     break_character: str = field(default=".")
     response_terminator: str = field(default="<<Response Ended>>")
@@ -229,7 +229,7 @@ class CortexConfig(LLMConfig):
     confirmation_temperature: float = field(
         default=0.2, validator=base_validators.gt(0.0)
     )
-    confirmation_max_tokens: int = field(default=100, validator=base_validators.gt(0))
+    confirmation_max_tokens: int = field(default=1000, validator=base_validators.gt(0))
     monitoring_interval: float = field(default=2.0, validator=base_validators.gt(0.0))
 
     def _get_inference_params(self) -> Dict:
