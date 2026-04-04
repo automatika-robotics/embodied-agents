@@ -291,7 +291,7 @@ class PointsOfInterest(SupportedType):
     def convert(
         cls,
         output: List[Tuple[int, int]],
-        img: Union[ROSImage, ROSCompressedImage, np.ndarray],
+        image: Union[ROSImage, ROSCompressedImage, np.ndarray],
         **_,
     ) -> ROSPointsOfInterest:
         """
@@ -308,14 +308,14 @@ class PointsOfInterest(SupportedType):
             points.append(point)
         msg.points = points
 
-        if isinstance(img, ROSCompressedImage):
-            msg.compressed_image = CompressedImage.convert(img)
+        if isinstance(image, ROSCompressedImage):
+            msg.compressed_image = CompressedImage.convert(image)
         # Handle RealSense RGBD msgs
-        elif hasattr(img, "depth"):
-            msg.image = Image.convert(img.rgb)
-            msg.depth = Image.convert(img.depth)
+        elif hasattr(image, "depth"):
+            msg.image = Image.convert(image.rgb)
+            msg.depth = Image.convert(image.depth)
         else:
-            msg.image = Image.convert(img)
+            msg.image = Image.convert(image)
         return msg
 
 

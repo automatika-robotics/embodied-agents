@@ -259,7 +259,7 @@ class MLLM(LLM):
             for pub_name in self._poi_publishers:
                 self.publishers_dict[pub_name].publish(
                     **result,
-                    img=self._images[0],  # POI msg takes only one image
+                    image=self._images[0],  # POI msg takes only one image
                     time_stamp=self.get_ros_time(),
                 )
         elif self._task == "grounding":
@@ -282,7 +282,7 @@ class MLLM(LLM):
             for pub_name in self._poi_publishers:
                 self.publishers_dict[pub_name].publish(
                     **result,
-                    img=self._images[0],  # POI msg takes only one image
+                    image=self._images[0],  # POI msg takes only one image
                     time_stamp=self.get_ros_time(),
                 )
 
