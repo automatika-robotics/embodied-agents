@@ -1054,8 +1054,9 @@ class Cortex(ModelComponent, Monitor):
             if action_client.action_returned:
                 # Action is done and returned result
                 result = action_client.action_result
+                status = action_client._status
                 completed_actions.append(tool_name)
-                feedback_lines += f"- {tool_name}: COMPLETED | Result: {result}\n"
+                feedback_lines += f"- {tool_name}: {status.upper()} | Result: {result}\n"
                 continue
             updates_dict = action_client.get_ui_elements()
             feedback_lines += f"- {tool_name}: {updates_dict['status']} (running for {updates_dict['duration_secs']}s)"
