@@ -1196,7 +1196,7 @@ class Cortex(ModelComponent, Monitor):
 
         # Wait for any remaining async actions after the last step
         if self._monitor_active_clients():
-            self._wait_for_active_clients(
+            decision = self._wait_for_active_clients(
                 goal_handle,
                 feedback_msg,
                 plan,
@@ -1204,6 +1204,14 @@ class Cortex(ModelComponent, Monitor):
                 len(plan),
                 "Post-execution",
             )
+            if decision == "ABORT":
+                self._send_feedback(
+                    goal_handle,
+                    feedback_msg,
+                    total,
+                    "Plan aborted while waiting for async actions.",
+                )
+                return executed_results, True
 
         return executed_results, False
 
