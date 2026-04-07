@@ -224,10 +224,10 @@ class Detections(SupportedType):
             output = output[0]
             images = images[0] if images else []
         msg = Detections2D()
-        msg.scores = output["scores"]
-        msg.labels = output["labels"]
+        msg.scores = output.get("scores") or []
+        msg.labels = output.get("labels") or []
         boxes = []
-        for bbox in output["bboxes"]:
+        for bbox in output.get("bboxes") or []:
             box = Bbox2D()
             box.top_left_x = float(bbox[0])
             box.top_left_y = float(bbox[1])
