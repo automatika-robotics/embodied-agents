@@ -420,6 +420,88 @@ class Vision(ModelComponent):
             self.get_logger().error(f"Failed to start recording: {e}")
             return False
 
+    @component_action(
+        description={
+            "type": "function",
+            "function": {
+                "name": "track",
+                "description": (
+                    "Start tracking objects with the given label in the camera feed. "
+                    "This tool is a pre-requisite for starting vision based following "
+                    "controllers. "
+                    "Requires a remote RoboML model client (not a local model) and "
+                    "at least one Tracking output topic on this component. "
+                    "Once started, tracking results are published continuously."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "label": {
+                            "type": "string",
+                            "description": "Object label to track (e.g. 'person', 'cup').",
+                        },
+                    },
+                    "required": ["label"],
+                },
+            },
+        }
+    )
+    def track(self, label: str) -> bool:
+        """Start tracking objects matching the given label.
+
+        Configures the remote model server to enable ByteTrack trackers
+        (reinitializing if needed) and sets the label filter so that
+        tracking results are published on the component's Tracking output
+        topics.
+
+        :param label: Object label to track (e.g. 'person', 'cup').
+        :type label: str
+        :return: True if tracking was started successfully, False otherwise.
+        :rtype: bool
+        """
+        from ..clients.roboml import RoboMLHTTPClient, RoboMLRESPClient
+
+        # must have a remote RoboML client
+        if not self.model_client or not isinstance(
+            self.model_client, (RoboMLHTTPClient, RoboMLRESPClient)
+        ):
+            self.get_logger().error(
+                "Tracking requires a RoboML model client. "
+                "Local models do not support tracking."
+            )
+            return False
+
+        # must have a Tracking output topic
+        has_tracking_output = any(
+            t.msg_type in (Trackings, TrackingsMultiSource) for t in self.out_topics
+        )
+        if not has_tracking_output:
+            self.get_logger().error(
+                "Tracking requires at least one output topic of type "
+                "Trackings or TrackingsMultiSource."
+            )
+            return False
+
+        try:
+            with self.safe_restart():
+                init_params = self.model_client.model_init_params
+                # Enable trackers on the model if not already set up
+                if not init_params.get("setup_trackers"):
+                    init_params["setup_trackers"] = True
+                init_params["num_trackers"] = len(self.in_topics)
+
+            self.get_logger().info("Trackers initialized on remote model server.")
+
+            # Set the label to track
+            self.config.labels_to_track = [label]
+            self.inference_params = self.config._get_inference_params()
+            self.get_logger().info(f"Now tracking: '{label}'")
+            return True
+
+        except Exception as e:
+            self.get_logger().error(f"Failed to start tracking: {e}")
+            return False
+
     def _record_video_thread(
         self,
         target_callback,
