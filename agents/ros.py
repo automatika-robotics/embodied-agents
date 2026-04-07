@@ -344,6 +344,7 @@ class Trackings(SupportedType):
             List[ROSCompressedImage],
             List[np.ndarray],
         ],
+        **_,
     ) -> ROSTrackings:
         """
         Takes tracking data and converts it into a ROS message
@@ -369,19 +370,22 @@ class Trackings(SupportedType):
 
         tracked_boxes = []
         centroids = []
+        # tracked_points: list of [x, y] center points from the tracker
         if o_tracked_points := output.get("tracked_points"):
-            for bbox in o_tracked_points:
-                # Each 3 points represent one object (top-left, bottom-right, center)
-                box = Bbox2D()
-                box.top_left_x = bbox[0][0]
-                box.top_left_y = bbox[0][1]
-                box.bottom_right_x = bbox[1][0]
-                box.bottom_right_y = bbox[1][1]
-                tracked_boxes.append(box)
+            for point in o_tracked_points:
                 centroid = Point2D()
-                centroid.x = bbox[2][0]
-                centroid.y = bbox[2][1]
+                centroid.x = float(point[0])
+                centroid.y = float(point[1])
                 centroids.append(centroid)
+        # tracked_bboxes: list of [x1, y1, x2, y2] bounding boxes
+        if o_tracked_bboxes := output.get("tracked_bboxes"):
+            for bbox in o_tracked_bboxes:
+                box = Bbox2D()
+                box.top_left_x = float(bbox[0])
+                box.top_left_y = float(bbox[1])
+                box.bottom_right_x = float(bbox[2])
+                box.bottom_right_y = float(bbox[3])
+                tracked_boxes.append(box)
 
         msg.boxes = tracked_boxes
         msg.centroids = centroids
