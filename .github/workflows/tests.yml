@@ -7,31 +7,8 @@ on:
       - main
 
 jobs:
-  # Fast tests that don't need ROS or external servers
-  unit-tests:
-    name: Unit tests (no ROS)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install dependencies
-        run: |
-          pip install numpy 'attrs>=23.2.0' jinja2 httpx msgpack msgpack-numpy \
-                    setproctitle platformdirs tqdm websockets pytest
-
-      - name: Run unit tests
-        run: |
-          python -m pytest tests/test_configs.py tests/test_local_llm.py \
-                           tests/test_local_stt.py tests/test_local_tts.py \
-                           tests/test_local_vlm.py -v
-
-  # Component tests that require ROS 2 and rclpy
-  ros-tests:
-    name: Component tests (ROS 2)
+  tests:
+    name: Tests (ROS 2 ${{ matrix.ros_distro }})
     runs-on: ubuntu-latest
     env:
       PIP_BREAK_SYSTEM_PACKAGES: "1"
@@ -68,7 +45,7 @@ jobs:
           colcon build --symlink-install
         shell: bash
 
-      - name: Run component tests
+      - name: Run tests
         run: |
           . /opt/ros/${{ matrix.ros_distro }}/setup.sh
           . /ws/install/setup.sh
