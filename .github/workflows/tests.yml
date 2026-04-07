@@ -1,0 +1,75 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  # Fast tests that don't need ROS or external servers
+  unit-tests:
+    name: Unit tests (no ROS)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install numpy 'attrs>=23.2.0' jinja2 httpx msgpack msgpack-numpy \
+                    setproctitle platformdirs tqdm websockets pytest
+
+      - name: Run unit tests
+        run: |
+          python -m pytest tests/test_configs.py tests/test_local_llm.py \
+                           tests/test_local_stt.py tests/test_local_tts.py \
+                           tests/test_local_vlm.py -v
+
+  # Component tests that require ROS 2 and rclpy
+  ros-tests:
+    name: Component tests (ROS 2)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        ros_distro: [humble, jazzy, kilted, rolling]
+    container:
+      image: ros:${{ matrix.ros_distro }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          apt-get install -y python3-pip python3-pytest
+
+      - name: Install ROS package dependencies
+        run: |
+          . /opt/ros/${{ matrix.ros_distro }}/setup.sh
+          apt-get install -y python3-rosdep
+          rosdep update || true
+          rosdep install --from-paths . -y --ignore-src || true
+
+      - name: Build workspace
+        run: |
+          . /opt/ros/${{ matrix.ros_distro }}/setup.sh
+          mkdir -p /ws/src
+          ln -s $GITHUB_WORKSPACE /ws/src/embodied_agents
+          # Clone and build ros_sugar dependency
+          git clone https://github.com/automatika-robotics/sugarcoat /ws/src/sugarcoat
+          cd /ws
+          pip install --break-system-packages numpy 'attrs>=23.2.0' jinja2 httpx \
+                      msgpack msgpack-numpy setproctitle platformdirs tqdm websockets
+          colcon build --symlink-install
+        shell: bash
+
+      - name: Run component tests
+        run: |
+          . /opt/ros/${{ matrix.ros_distro }}/setup.sh
+          . /ws/install/setup.sh
+          cd $GITHUB_WORKSPACE
+          python3 -m pytest tests/ -v --ignore=tests/test_clients.py -k "not local_only"
+        shell: bash
