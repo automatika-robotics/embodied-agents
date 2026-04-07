@@ -474,8 +474,8 @@ class ModelComponent(Component):
         :param result: A dictionary containing the data to be published.
         :type result: dict
         """
+        output = result.pop("output")
         for publisher in self.publishers_dict.values():
-            output = result.pop("output")
             publisher.publish(output, **result, **kwargs)
 
     def _update_cmd_args_list(self):
