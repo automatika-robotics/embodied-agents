@@ -190,6 +190,9 @@ class Cortex(ModelComponent, Monitor):
             **kwargs,
         )
 
+        # set the cortex action name
+        self.main_action_name = "cortex_input_command"
+
     @staticmethod
     def _validate_actions(actions: Optional[List[Action]]):
         """Validate that all passed actions have descriptions."""
@@ -610,19 +613,15 @@ class Cortex(ModelComponent, Monitor):
                 status = " [PENDING]"
             plan_lines.append(f"  {i + 1}. {name}{args_str}{status}")
 
-        message = (
-            "Original plan:\n"
-            + "\n".join(plan_lines)
-        )
+        message = "Original plan:\n" + "\n".join(plan_lines)
 
         if step_index < len(plan):
             next_step = plan[step_index]
             fn_name = next_step["function"]["name"]
             fn_args = next_step["function"].get("arguments", {})
 
-            message += (
-                f"\n\nNext action: {fn_name}"
-                + (f" with arguments {fn_args}" if fn_args else "")
+            message += f"\n\nNext action: {fn_name}" + (
+                f" with arguments {fn_args}" if fn_args else ""
             )
 
         # Include active async action status if any
@@ -1061,7 +1060,9 @@ class Cortex(ModelComponent, Monitor):
             updates_dict = action_client.get_ui_elements()
             feedback_lines += f"- {tool_name}: {updates_dict['status']} (running for {updates_dict['duration_secs']}s)"
             if updates_dict["feedback"]:
-                feedback_lines += f" | Latest feedback: {ros_msg_to_str(updates_dict['feedback'])}"
+                feedback_lines += (
+                    f" | Latest feedback: {ros_msg_to_str(updates_dict['feedback'])}"
+                )
             if updates_dict["feedback_timeout"]:
                 feedback_lines += " [WARNING: No new feedback received — the tool may be stalled or waiting on an external process.]"
             feedback_lines += "\n"
@@ -1096,67 +1097,49 @@ class Cortex(ModelComponent, Monitor):
     # Main action server callback
     # =========================================================================
 
-    def main_action_callback(self, goal_handle):
-        """Action server callback. Runs two-phase planning and execution.
+    def _send_feedback(
+        self,
+        goal_handle,
+        feedback_msg,
+        timestep: int,
+        text: str,
+        completed: bool = False,
+    ) -> None:
+        """Publish feedback on the action server."""
+        feedback_msg.timestep = timestep
+        feedback_msg.completed = completed
+        feedback_msg.feedback = text
+        goal_handle.publish_feedback(feedback_msg)
 
-        Phase 1: Single LLM call produces a plan (multiple tool_calls).
-        Phase 2: Each step is confirmed then executed sequentially.
+    def _wait_for_active_clients(
+        self, goal_handle, feedback_msg, plan, executed_results, step_index, label: str
+    ) -> str:
+        """Poll active async actions until the LLM stops returning CONTINUE.
 
-        :param goal_handle: Incoming action goal
-        :type goal_handle: VisionLanguageAction.Goal
-        :return: Action result
-        :rtype: VisionLanguageAction.Result
+        :returns: Final decision (EXECUTE, SKIP, or ABORT)
         """
-        task: str = goal_handle.request.task
-        self.get_logger().info(f"Received task: {task}")
+        decision = self._confirm_step(plan, executed_results, step_index)
+        while decision == "CONTINUE":
+            if goal_handle.is_cancel_requested:
+                return "ABORT"
+            self._send_feedback(
+                goal_handle,
+                feedback_msg,
+                step_index,
+                f"{label}: waiting for async actions to complete...",
+            )
+            time.sleep(self.config.monitoring_interval)
+            decision = self._confirm_step(plan, executed_results, step_index)
+            self.get_logger().info(f"[{label}] re-check -> {decision}")
+        return decision
 
-        feedback_msg = VisionLanguageAction.Feedback()
-        result_msg = VisionLanguageAction.Result()
-        result_msg.success = False
+    def _execute_plan(self, plan, goal_handle, feedback_msg) -> Tuple[List[Dict], bool]:
+        """Execute plan steps with per-step confirmation.
 
-        # Feedback: starting planning
-        feedback_msg.timestep = 0
-        feedback_msg.completed = False
-        feedback_msg.feedback = f"Received task. Creating a plan for: {task}"
-        goal_handle.publish_feedback(feedback_msg)
-        self.get_logger().info("Creating a plan ...")
-
-        # Phase 1: Planning
-        plan = self._plan_task(task)
-
-        if plan is None:
-            text_output = getattr(self, "_planning_output", "") or ""
-            if text_output:
-                result_msg.success = True
-                feedback_msg.timestep = 0
-                feedback_msg.completed = True
-                feedback_msg.feedback = f"No actions needed. {text_output}"
-                goal_handle.publish_feedback(feedback_msg)
-                with self._main_goal_lock:
-                    goal_handle.succeed()
-            else:
-                feedback_msg.timestep = 0
-                feedback_msg.completed = True
-                feedback_msg.feedback = "Planning failed: no response from model."
-                goal_handle.publish_feedback(feedback_msg)
-                with self._main_goal_lock:
-                    goal_handle.abort()
-            return result_msg
-
-        # Feedback: plan created
-        plan_description = ", ".join(step["function"]["name"] for step in plan)
-        feedback_msg.timestep = 0
-        feedback_msg.completed = False
-        feedback_msg.feedback = (
-            f"Plan created with {len(plan)} steps: {plan_description}"
-        )
-        goal_handle.publish_feedback(feedback_msg)
-        self.get_logger().info(f"Plan: {plan_description}")
-
-        # Phase 2: Execution
+        :returns: (executed_results, aborted)
+        """
         executed_results: List[Dict] = []
-        aborted = False
-        fn_name_pending = ""
+        total = len(plan)
 
         for i, step in enumerate(plan):
             if goal_handle.is_cancel_requested:
@@ -1164,39 +1147,23 @@ class Cortex(ModelComponent, Monitor):
                 with self._main_goal_lock:
                     self._cancel_all_active_clients()
                     goal_handle.canceled()
-                return result_msg
+                return executed_results, True
 
             fn_name = step["function"]["name"]
             fn_args = step["function"].get("arguments", {})
-            args_str = f" with {fn_args}" if fn_args else ""
+            label = f"Step {i + 1}/{total} ({fn_name})"
 
-            # Confirm step with LLM
-            decision = self._confirm_step(plan, executed_results, i)
-            self.get_logger().info(
-                f"[Step {i + 1}/{len(plan)}] {fn_name} -> {decision}"
+            # Confirm (may wait for async actions via CONTINUE)
+            decision = self._wait_for_active_clients(
+                goal_handle, feedback_msg, plan, executed_results, i, label
             )
-
-            # CONTINUE loop: wait for active async actions
-            while decision == "CONTINUE":
-                if goal_handle.is_cancel_requested:
-                    break
-                feedback_msg.timestep = i + 1
-                feedback_msg.completed = False
-                feedback_msg.feedback = f"Step {i} ({fn_name_pending}): waiting for action to complete..."
-                goal_handle.publish_feedback(feedback_msg)
-                time.sleep(self.config.monitoring_interval)
-                decision = self._confirm_step(plan, executed_results, i)
-                self.get_logger().info(
-                    f"[Step {i}/{len(plan)}] {fn_name_pending} re-check -> {decision}"
-                )
+            self.get_logger().info(f"[{label}] -> {decision}")
 
             if decision == "ABORT":
-                feedback_msg.timestep = i + 1
-                feedback_msg.completed = False
-                feedback_msg.feedback = f"Plan aborted at step {i + 1} ({fn_name})."
-                goal_handle.publish_feedback(feedback_msg)
-                aborted = True
-                break
+                self._send_feedback(
+                    goal_handle, feedback_msg, i + 1, f"Plan aborted at {label}."
+                )
+                return executed_results, True
 
             if decision == "SKIP":
                 executed_results.append({
@@ -1204,58 +1171,46 @@ class Cortex(ModelComponent, Monitor):
                     "action": fn_name,
                     "result": "SKIPPED",
                 })
-                feedback_msg.timestep = i + 1
-                feedback_msg.completed = False
-                feedback_msg.feedback = f"Step {i + 1} ({fn_name}): skipped."
-                goal_handle.publish_feedback(feedback_msg)
+                self._send_feedback(
+                    goal_handle, feedback_msg, i + 1, f"{label}: skipped."
+                )
                 continue
 
-            # EXECUTE action step
-            # Feedback: about to execute step
-            feedback_msg.timestep = i + 1
-            feedback_msg.completed = False
-            feedback_msg.feedback = (
-                f"Executing step {i + 1}/{len(plan)}: {fn_name}{args_str}"
+            # EXECUTE
+            args_str = f" with {fn_args}" if fn_args else ""
+            self._send_feedback(
+                goal_handle, feedback_msg, i + 1, f"Executing {label}{args_str}"
             )
-            goal_handle.publish_feedback(feedback_msg)
 
             step_result = self._execute_action_step(step)
-            step_failed = step_result.startswith("Error")
             executed_results.append({
                 "step": i,
                 "action": fn_name,
                 "result": step_result,
-                "failed": step_failed,
+                "failed": step_result.startswith("Error"),
             })
-            fn_name_pending = fn_name
+            self._send_feedback(
+                goal_handle, feedback_msg, i + 1, f"{label} completed: {step_result}"
+            )
+            self.get_logger().info(f"[{label}] {step_result}")
 
-            feedback_msg.timestep = i + 1
-            feedback_msg.completed = False
-            feedback_msg.feedback = f"Step {i + 1} ({fn_name}) completed: {step_result}"
-            goal_handle.publish_feedback(feedback_msg)
-            self.get_logger().info(f"[Step {i + 1}] {step_result}")
+        # Wait for any remaining async actions after the last step
+        if self._monitor_active_clients():
+            self._wait_for_active_clients(
+                goal_handle,
+                feedback_msg,
+                plan,
+                executed_results,
+                len(plan),
+                f"Post-execution ({fn_name})",
+            )
 
-        # Check for any active action clients
-        active_status = self._monitor_active_clients()
-        if active_status:
-            i = i + 1
-            decision = self._confirm_step(plan, executed_results, i)
-            while decision == "CONTINUE":
-                if goal_handle.is_cancel_requested:
-                    break
-                feedback_msg.timestep = i + 1
-                feedback_msg.completed = False
-                feedback_msg.feedback = (
-                    f"Step {i + 1} ({fn_name}): waiting for action to complete..."
-                )
-                goal_handle.publish_feedback(feedback_msg)
-                time.sleep(self.config.monitoring_interval)
-                decision = self._confirm_step(plan, executed_results, i)
-                self.get_logger().info(
-                    f"[Step {i + 1}/{len(plan)}] {fn_name} re-check -> {decision}"
-                )
+        return executed_results, False
 
-        # Final result handling
+    def _finalize_goal(
+        self, goal_handle, feedback_msg, result_msg, executed_results, plan_len, aborted
+    ) -> None:
+        """Set the final goal status based on execution results."""
         summary = "; ".join(f"{r['action']}: {r['result']}" for r in executed_results)
         has_failures = any(r.get("failed") for r in executed_results)
 
@@ -1264,31 +1219,94 @@ class Cortex(ModelComponent, Monitor):
                 self._cancel_all_active_clients()
                 goal_handle.abort()
         elif has_failures:
-            feedback_msg.timestep = len(plan)
-            feedback_msg.completed = True
-            feedback_msg.feedback = f"Plan finished with errors. {summary}"
-            goal_handle.publish_feedback(feedback_msg)
-
+            self._send_feedback(
+                goal_handle,
+                feedback_msg,
+                plan_len,
+                f"Plan finished with errors. {summary}",
+                completed=True,
+            )
             self.get_logger().warning(f"Task finished with errors: {summary}")
             with self._main_goal_lock:
                 self._cancel_all_active_clients()
                 goal_handle.abort()
         else:
             result_msg.success = True
-
-            feedback_msg.timestep = len(plan)
-            feedback_msg.completed = True
-            feedback_msg.feedback = f"All {len(plan)} steps completed."
-            goal_handle.publish_feedback(feedback_msg)
-
+            self._send_feedback(
+                goal_handle,
+                feedback_msg,
+                plan_len,
+                f"All {plan_len} steps completed.",
+                completed=True,
+            )
             self.get_logger().info(
                 f"Task completed: {len(executed_results)} steps executed."
             )
             with self._main_goal_lock:
-                # Do not leave any hanging clients
                 self._cancel_all_active_clients()
                 goal_handle.succeed()
 
+    def main_action_callback(self, goal_handle):
+        """Action server callback. Runs two-phase planning and execution.
+
+        :param goal_handle: Incoming action goal
+        :return: Action result
+        """
+        task: str = goal_handle.request.task
+        self.get_logger().info(f"Received task: {task}")
+
+        feedback_msg = VisionLanguageAction.Feedback()
+        result_msg = VisionLanguageAction.Result()
+        result_msg.success = False
+
+        self._send_feedback(
+            goal_handle, feedback_msg, 0, f"Received task. Creating a plan for: {task}"
+        )
+
+        # Phase 1: Planning
+        plan = self._plan_task(task)
+
+        if plan is None:
+            text_output = getattr(self, "_planning_output", "") or ""
+            if text_output:
+                result_msg.success = True
+                self._send_feedback(
+                    goal_handle,
+                    feedback_msg,
+                    0,
+                    f"No actions needed. {text_output}",
+                    completed=True,
+                )
+                with self._main_goal_lock:
+                    goal_handle.succeed()
+            else:
+                self._send_feedback(
+                    goal_handle,
+                    feedback_msg,
+                    0,
+                    "Planning failed: no response from model.",
+                    completed=True,
+                )
+                with self._main_goal_lock:
+                    goal_handle.abort()
+            return result_msg
+
+        plan_description = ", ".join(s["function"]["name"] for s in plan)
+        self._send_feedback(
+            goal_handle,
+            feedback_msg,
+            0,
+            f"Plan created with {len(plan)} steps: {plan_description}",
+        )
+        self.get_logger().info(f"Plan: {plan_description}")
+
+        # Phase 2: Execution
+        executed_results, aborted = self._execute_plan(plan, goal_handle, feedback_msg)
+
+        # Finalize
+        self._finalize_goal(
+            goal_handle, feedback_msg, result_msg, executed_results, len(plan), aborted
+        )
         return result_msg
 
     # =========================================================================
