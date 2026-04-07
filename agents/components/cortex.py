@@ -1202,7 +1202,7 @@ class Cortex(ModelComponent, Monitor):
                 plan,
                 executed_results,
                 len(plan),
-                f"Post-execution ({fn_name})",
+                "Post-execution",
             )
 
         return executed_results, False
