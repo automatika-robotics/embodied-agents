@@ -1,6 +1,8 @@
-"""Cortex agent with vision, visual Q&A, speech, and a custom action.
+"""Cortex agent with vision, tracking, visual Q&A, speech, and a custom action.
 
 This example demonstrates a Cortex-based agent that can:
+- Detect objects using the Vision component with a remote RoboML model
+- Track objects by label using the Vision component's ``track`` action
 - Take pictures using the Vision component's ``take_picture`` action
 - Describe what it sees using the VLM component's ``describe`` action
 - Speak using the TextToSpeech component's ``say`` action,
@@ -8,21 +10,20 @@ This example demonstrates a Cortex-based agent that can:
 - Toggle an LED via a custom action defined in this script
 
 The Cortex component acts as the system monitor and task planner. Send it a
-goal like "describe what you see" and it will inspect the available
-components, plan the steps, and execute them in sequence. The VLM's text
-output is routed to the TTS component so descriptions are spoken aloud.
+goal like "track the person" or "describe what you see" and it will inspect
+the available components, plan the steps, and execute them in sequence.
 
 Usage:
     python3 examples/cortex_agent.py
 
     # In another terminal, send a goal:
-    ros2 action send_goal /cortex_<process_id>/vision_language_action automatika_embodied_agents/action/VisionLanguageAction "{task: 'describe what you see'}"
+    ros2 action send_goal /cortex_<process_id>/vision_language_action automatika_embodied_agents/action/VisionLanguageAction "{task: 'track the person'}"
 """
 
 from agents.components import Vision, VLM, TextToSpeech, Cortex
 from agents.config import VisionConfig, TextToSpeechConfig, CortexConfig
-from agents.models import OllamaModel
-from agents.clients import OllamaClient
+from agents.models import OllamaModel, VisionModel
+from agents.clients import OllamaClient, RoboMLRESPClient
 from agents.ros import Topic, Action, Launcher
 
 
@@ -33,14 +34,21 @@ planner_client = OllamaClient(planner_model)
 vlm_model = OllamaModel(name="qwen_vl", checkpoint="qwen2.5vl:latest")
 vlm_client = OllamaClient(vlm_model)
 
-# -- Vision component --
+detection_model = VisionModel(
+    name="rtdetr", checkpoint="PekingU/rtdetr_r50vd_coco_o365"
+)
+detection_client = RoboMLRESPClient(detection_model)
+
+# -- Vision component (RoboML client, with tracking output) --
 image_in = Topic(name="/image_raw", msg_type="Image")
 detections_out = Topic(name="detections", msg_type="Detections")
+trackings_out = Topic(name="trackings", msg_type="Trackings")
 
 vision = Vision(
     inputs=[image_in],
-    outputs=[detections_out],
-    config=VisionConfig(enable_local_classifier=True),
+    outputs=[detections_out, trackings_out],
+    model_client=detection_client,
+    config=VisionConfig(threshold=0.5),
     trigger=0.5,
     component_name="vision",
 )
