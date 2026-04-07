@@ -419,7 +419,7 @@ class LLM(ModelComponent):
         # get RAG results if enabled in config and if docs retrieved
         rag_result = self._handle_rag_query(query) if self.config.enable_rag else None
 
-        # set system prompt template
+        # set component prompt template
         query = (
             self.component_prompt.render(context) if self.component_prompt else query
         )
