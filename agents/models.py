@@ -18,6 +18,7 @@ __all__ = [
     "Whisper",
     "TransformersTTS",
     "VisionModel",
+    "RoboBrain2",
 ]
 
 
@@ -399,7 +400,7 @@ class RoboBrain2(Model):
     }
     :param name: An arbitrary name given to the model.
     :type name: str
-    :param checkpoint: The name of the pre-trained model's checkpoint. Default is "BAAI/RoboBrain2.0-7B". For available checkpoints consult [RoboBrain2 Model Collection](https://huggingface.co/collections/BAAI/robobrain20-6841eeb1df55c207a4ea0036) on HuggingFace.
+    :param checkpoint: The name of the pre-trained model's checkpoint. Default is "BAAI/RoboBrain2.0-3B". For available checkpoints consult [RoboBrain2 Model Collection](https://huggingface.co/collections/BAAI/robobrain20-6841eeb1df55c207a4ea0036) on HuggingFace.
     :type checkpoint: str
     :param init_timeout: The timeout in seconds for the initialization process. Defaults to None.
     :type init_timeout: int, optional
