@@ -299,6 +299,8 @@ class Cortex(ModelComponent, Monitor):
         if self.db_client:
             self.db_client.check_connection()
             self.db_client.deinitialize()
+        # cancel any active action clients held by cortex
+        self._cancel_all_active_clients()
         super().custom_on_deactivate()
 
     def _deploy_local_model(self):
@@ -1056,7 +1058,9 @@ class Cortex(ModelComponent, Monitor):
                 result = action_client.action_result
                 status = action_client._status
                 completed_actions.append(tool_name)
-                feedback_lines += f"- {tool_name}: {status.upper()} | Result: {result}\n"
+                feedback_lines += (
+                    f"- {tool_name}: {status.upper()} | Result: {result}\n"
+                )
                 continue
             updates_dict = action_client.get_ui_elements()
             feedback_lines += f"- {tool_name}: {updates_dict['status']} (running for {updates_dict['duration_secs']}s)"
