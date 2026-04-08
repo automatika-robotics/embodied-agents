@@ -35,7 +35,11 @@ from ros_sugar.config import (
 from ros_sugar.core import BaseComponent, Monitor
 from ros_sugar.core.component import MutuallyExclusiveCallbackGroup
 from ros_sugar import UI_EXTENSIONS
-from ros_sugar.utils import component_action, component_fallback
+from ros_sugar.utils import (
+    component_action,
+    component_fallback,
+    get_methods_with_decorator,
+)
 from ros_sugar.io.utils import run_external_processor
 from ros_sugar.core import Event, Action
 from ros_sugar import actions
@@ -114,6 +118,7 @@ __all__ = [
     "get_ros_msg_fields_dict",
     "ros_msg_to_str",
     "LifecycleStateMsg",
+    "get_methods_with_decorator",
 ]
 
 # =========================================================================

@@ -18,6 +18,7 @@ from ..ros import (
     ActionClientHandler,
     ServiceClientHandler,
     ros_msg_to_str,
+    get_methods_with_decorator,
 )
 from ..utils import validate_func_args, strip_think_tokens
 from ..utils.actions import goal_type_to_json_properties
@@ -800,27 +801,36 @@ class Cortex(ModelComponent, Monitor):
         """Discover @component_action/@component_fallback methods on all
         managed components and register them as callable LLM tools.
 
-        Tool names are namespaced as ``{component_name}.{method_name}``.
+        Uses ``get_methods_with_decorator`` from sugarcoat to find decorated
+        methods. Tool names are namespaced as ``{component_name}.{method_name}``.
         These are execution-phase tools. Lifecycle management methods
         (start, stop, restart, etc.) are excluded.
         """
         for comp_name, comp in self._managed_components.items():
-            # Register component methods
-            for attr_name in dir(comp):
+            # Collect all action/fallback method names
+            action_methods = get_methods_with_decorator(comp, "component_action")
+            fallback_methods = get_methods_with_decorator(comp, "component_fallback")
+
+            for attr_name in action_methods + fallback_methods:
                 if attr_name in self._LIFECYCLE_METHODS:
                     continue
+
                 try:
-                    class_attr = getattr(type(comp), attr_name, None)
-                    if not class_attr or not hasattr(class_attr, "_action_description"):
-                        continue
-                    desc_raw = class_attr._action_description
-                    if not desc_raw:
-                        continue
-
                     tool_name = f"{comp_name}.{attr_name}"
-
                     # Check if already registered
                     if tool_name in self._execution_tools:
+                        continue
+
+                    # Get the description from the decorator attribute
+                    class_attr = getattr(type(comp), attr_name, None)
+                    desc_raw = (
+                        getattr(class_attr, "_action_description", None)
+                        if class_attr
+                        else None
+                    )
+
+                    # Not the decorator we were looking for
+                    if not desc_raw:
                         continue
 
                     # Build tool description from OpenAI-format JSON or docstring
