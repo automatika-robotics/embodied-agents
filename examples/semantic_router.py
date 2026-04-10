@@ -124,7 +124,7 @@ router = SemanticRouter(
 #     inputs=[query_topic],
 #     routes=[llm_route, goto_route],
 #     default_route=llm_route,
-#     model_client=llama_client, # LLM mode requires model_client
+#     model_client=qwen_client, # LLM mode requires model_client
 #     component_name="router",
 # )
 
