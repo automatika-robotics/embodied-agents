@@ -154,6 +154,9 @@ class Cortex(ModelComponent, Monitor):
         self._additional_internal_actions = {}
         action_outputs = self._setup_internal_action_events(actions)
 
+        # Planning output buffer for failed plans
+        self._planning_output: Optional[str] = None
+
         # Monitor-side: Launcher populates these when it detects Cortex
         self._components_to_monitor: List[str] = []
         self._service_components = None
@@ -984,11 +987,14 @@ class Cortex(ModelComponent, Monitor):
         self.get_logger().info(
             f"Calling component action {tool_name} with args: {args}"
         )
-        comp_name, method_name = tool_name.split(".")
-        response = self.execute_component_method(comp_name, method_name, args)
-        if response.success:
-            return f"{tool_name} executed successfully"
-        return f"Error: {tool_name} failed with error: {response.error_msg}"
+        try:
+            comp_name, method_name = tool_name.split(".")
+            response = self.execute_component_method(comp_name, method_name, args)
+            if response.success:
+                return f"{tool_name} executed successfully"
+            return f"Error: {tool_name} failed with error: {response.error_msg}"
+        except Exception as e:
+            return f"Error: Could not parse tool name for {tool_name}. Failed with error: {e}"
 
     def _inspect_component(self, component_name: str) -> str:
         """Return a text description of a component's structure.
@@ -1290,14 +1296,14 @@ class Cortex(ModelComponent, Monitor):
         plan = self._plan_task(task)
 
         if plan is None:
-            text_output = getattr(self, "_planning_output", "") or ""
+            text_output = self._planning_output or ""
             if text_output:
                 result_msg.success = True
                 self._send_feedback(
                     goal_handle,
                     feedback_msg,
                     0,
-                    f"No actions needed. {text_output}",
+                    f"[No actions needed]. {text_output}",
                     completed=True,
                 )
                 with self._main_goal_lock:
