@@ -8,6 +8,9 @@ from ..clients.model_base import ModelClient
 from ..clients.db_base import DBClient
 from ..config import CortexConfig
 from ..ros import (
+    String,
+    StreamingString,
+    Topic,
     Action,
     Event,
     ComponentRunType,
@@ -50,8 +53,8 @@ class Cortex(ModelComponent, Monitor):
     :param actions: The action palette -- a list of Action objects with
         descriptions, representing the actions available to the planner.
     :type actions: list[Action]
-    :param outputs: Output topics for publishing task status/results.
-    :type outputs: list[Topic]
+    :param output: Output topic for publishing results for tasks where an action is not required or a plan is not generated.
+    :type output: Topic
     :param model_client: The model client for LLM inference.
         Optional if ``enable_local_model`` is set to True in the config.
     :type model_client: Optional[ModelClient]
@@ -108,12 +111,14 @@ class Cortex(ModelComponent, Monitor):
         self,
         *,
         actions: Optional[List[Action]] = None,
+        output: Optional[Topic] = None,
         model_client: Optional[ModelClient] = None,
         db_client: Optional[DBClient] = None,
         config: Optional[CortexConfig] = None,
         component_name: str,
         **kwargs,
     ):
+        self.handled_outputs = [String, StreamingString]
         self._validate_actions(actions)
 
         self.config: CortexConfig = config or CortexConfig()
@@ -149,10 +154,10 @@ class Cortex(ModelComponent, Monitor):
         self._action_goal_tools: Dict[str, Tuple[str, str, Any]] = {}
         self._service_request_tools: Dict[str, Tuple[str, str, Any]] = {}
 
-        # Behavioral actions: dispatched via event system
+        # Behavioral actions: dispatched via internal event system
         self._pure_internal_events = []
         self._additional_internal_actions = {}
-        action_outputs = self._setup_internal_action_events(actions)
+        self._setup_internal_action_events(actions)
 
         # Planning output buffer for failed plans
         self._planning_output: Optional[str] = None
@@ -184,7 +189,7 @@ class Cortex(ModelComponent, Monitor):
         ModelComponent.__init__(
             self,
             inputs=None,
-            outputs=action_outputs,
+            outputs=[output] if output else None,
             model_client=model_client,
             config=self.config,
             trigger=None,
@@ -213,7 +218,7 @@ class Cortex(ModelComponent, Monitor):
         self,
         components_names: List[str],
         components: Optional[List[BaseComponent]] = None,
-        events_actions: Optional[Dict[str, List[Action]]] = None,
+        events_actions: Optional[Dict[Event, List[Action]]] = None,
         events_to_emit: Optional[List[Event]] = None,
         config: Optional[BaseComponentConfig] = None,
         services_components: Optional[List[BaseComponent]] = None,
@@ -1306,6 +1311,8 @@ class Cortex(ModelComponent, Monitor):
                     f"[No actions needed]. {text_output}",
                     completed=True,
                 )
+                # publish planning output if there is an output topic
+                self._publish(result={"output": text_output})
                 with self._main_goal_lock:
                     goal_handle.succeed()
             else:

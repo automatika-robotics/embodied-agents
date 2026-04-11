@@ -88,10 +88,15 @@ def toggle_led():
 
 
 # -- Cortex: the planner / monitor --
+# create a topic to capture outputs from cortex when an action is not needed
+cortex_output = Topic(name="cortex_output", msg_type="StreamingString")
+
+# create the component
 cortex = Cortex(
     actions=[
         Action(method=toggle_led, description="Toggle the robot's LED on or off."),
     ],
+    output=cortex_output,
     model_client=planner_client,
     config=CortexConfig(max_planning_steps=5, max_execution_steps=10),
     component_name="cortex",
@@ -100,7 +105,7 @@ cortex = Cortex(
 
 # -- Launch --
 launcher = Launcher()
-launcher.enable_ui(inputs=[cortex.ui_main_action_input])
+launcher.enable_ui(inputs=[cortex.ui_main_action_input], outputs=[cortex_output])
 launcher.add_pkg(
     components=[vision, vlm, tts, cortex],
     multiprocessing=True,
