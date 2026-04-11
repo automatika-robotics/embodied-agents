@@ -100,6 +100,7 @@ cortex = Cortex(
 
 # -- Launch --
 launcher = Launcher()
+launcher.enable_ui(inputs=[cortex.ui_main_action_input])
 launcher.add_pkg(
     components=[vision, vlm, tts, cortex],
     multiprocessing=True,

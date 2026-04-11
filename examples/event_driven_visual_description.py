@@ -56,6 +56,7 @@ visual_describer = VLM(
 
 # Launch
 launcher = Launcher()
+launcher.enable_ui(outputs=[detections, description_output])
 launcher.add_pkg(
     components=[vision_detector, visual_describer],
     multiprocessing=True,
