@@ -2,8 +2,8 @@
 Changelog for package automatika_embodied_agents
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+0.7.0 (2026-04-11)
+------------------
 * (feature) Adds an optional output topic in cortex for capturing outputs when an action is not needed
 * (docs) Updates docs for component actions setup
 * (chore) Bumps up required sugarcoat version
