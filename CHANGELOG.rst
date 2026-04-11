@@ -2,6 +2,55 @@
 Changelog for package automatika_embodied_agents
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+* (feature) Adds an optional output topic in cortex for capturing outputs when an action is not needed
+* (docs) Updates docs for component actions setup
+* (chore) Bumps up required sugarcoat version
+* (fix) Fixes model class type check in roboml client
+* (feature) Adds Action goal final status to Cortex feedback lines
+* (fix) Fixes converter for detections message to handle empty detections
+* (feature) Adds tracking action to vision component
+* (fix) Fixes publishing to multiple output topics in model component
+* (feature) Adds a safe restart context manager to base component
+* (fix) Fixes sender for tracking based on new roboml api
+* (chore) Adds CI workflow to run tests
+* (feature) Adds a describe action to the vlm component
+* (fix) Standardizes param name in POI publishing
+* (fix) Increases default max token limits
+* (fix) Fixes monitoring ongoing actions and feedback status update for step decision
+* (fix) Fixes return value when sending action goal to component
+* (feature) Adds async execution of action clients and monitoring using the main action loop
+* (feature) Adds helper methods to monitor ongoing action clients and cancel their goals
+* (fix) Adds fixes for python3.8 compatibility
+* (refactor) Updates examples for new roboml api
+* (feature) Enables registering component additional ROS entrypoints as system tools
+* (feature) Updates model definitions and default checkpoints based on new version of RoboML
+* (fix) Removes unnecessary config validator for stt
+* (fix) Fixes empty buffer inference call in stt
+* (refactor) Simplifies text to speech playback pipeline for less jitter
+* (feature) Adds internal events setup to cortex launch
+* (fix) Fixes say action for abrupt stopping of play on device thread
+* (feature) Adds multistep planning loop
+  - Separates planning and execution tools
+  - inpection is used only in planning loop
+  - execution handles failures when missed by llm
+* (chore) Locks methods not implemented in VLA component
+* (fix) Fixes tool calling for string args in llm component
+* (fix) Fixes local model download cache paths
+* (feature) Adds component config params inspection to _inspect_component
+* (feature) Registers tools in Cortex for sending Goals to any available component Action Server
+* (refactor) Adds a meaninful action name to the VLA component
+* (feature) Adds running component actions as service call and captures their output for subsequent steps
+* (feature) Adds tool registration from component tools and adds inspect component tool to cortex
+* (feature) Adds tool descriptions to available component actions
+* (feature) Adds planning and execution phases to cortex
+* (feature) Extends the base Launcher to use the Cortex component as a monitor
+* (feature) Adds Cortex, the master planning and execution node
+* (refactor) Moves strip think token to utilities
+* (feature) Adds feedback to VisionLanguageAction feedback msg
+* Contributors: ahr, mkabtoul
+
 0.6.0 (2026-03-21)
 ------------------
 * (docs) Adds advanced guides
