@@ -1,6 +1,7 @@
 import base64
 import json
 import inspect
+import re
 import uuid
 from functools import wraps
 from enum import Enum
@@ -237,7 +238,7 @@ def validate_func_args(func):
         fn_params = inspect.signature(func).parameters
 
         # for parameters with annotation, preference is given to checking by annotation
-        for arg, param in zip(args, list(fn_params)[:args_count], strict=True):
+        for arg, param in zip(args, list(fn_params)[:args_count]):
             if fn_params[param].annotation is not fn_params[param].empty:
                 _check_type_from_signature(arg, fn_params[param])
             elif fn_params[param].default is not fn_params[param].empty:
@@ -269,6 +270,20 @@ def encode_img_base64(img: np.ndarray) -> str:
     bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
     _, buf = cv2.imencode(".png", bgr)
     return base64.b64encode(buf).decode("utf-8")
+
+
+def strip_think_tokens(text: str) -> str:
+    """Strip ``<think>...</think>`` blocks from model output.
+
+    Reasoning models (Qwen3, DeepSeek-R1, etc.) emit these blocks which are
+    useful for debugging but should not be forwarded to downstream components.
+
+    :param text: Raw model output text
+    :type text: str
+    :returns: Text with think blocks removed
+    :rtype: str
+    """
+    return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
 
 class VADStatus(Enum):
@@ -358,11 +373,13 @@ def load_model_repo(
     from platformdirs import user_cache_dir
 
     cachedir = user_cache_dir("ros_agents")
-    model_dir = Path(cachedir) / "models" / model_name
-    model_dir.mkdir(parents=True, exist_ok=True)
+    # Use repo_id to create a unique subdirectory
+    repo_subdir = repo_id.replace("/", "--")
+    base_dir = Path(cachedir) / "models" / model_name
+    model_dir = base_dir / repo_subdir
 
     # If already downloaded, return cached path
-    if any(model_dir.iterdir()):
+    if model_dir.exists() and any(model_dir.iterdir()):
         return str(model_dir)
 
     try:
@@ -373,27 +390,42 @@ def load_model_repo(
             "Install it with: pip install huggingface-hub"
         ) from e
 
-    if allow_patterns:
-        # Download to a temporary staging directory, then flatten the
-        # matching subdirectory into model_dir so relevant files
-        # genai_config.json end up at the root level
-        staging_dir = model_dir.parent / f".{model_name}_staging"
-        staging_dir.mkdir(parents=True, exist_ok=True)
-        snapshot_download(
-            repo_id=repo_id,
-            local_dir=str(staging_dir),
-            allow_patterns=allow_patterns,
-        )
-        # Find the deepest directory that contains the downloaded files
-        # and move its contents to model_dir
-        pattern_prefix = allow_patterns.rstrip("/*")
-        src = staging_dir / pattern_prefix
-        if src.is_dir():
-            for item in src.iterdir():
-                shutil.move(str(item), str(model_dir / item.name))
+    # Download to a temporary staging directory and move into place on
+    # success so that interrupted downloads don't leave a partial cache
+    staging_dir = base_dir / f".{repo_subdir}_staging"
+    if staging_dir.exists():
+        shutil.rmtree(staging_dir)
+    staging_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        if allow_patterns:
+            snapshot_download(
+                repo_id=repo_id,
+                local_dir=str(staging_dir),
+                allow_patterns=allow_patterns,
+            )
+            # Flatten the matching subdirectory so relevant files end up
+            # at the root level
+            pattern_prefix = allow_patterns.rstrip("/*")
+            src = staging_dir / pattern_prefix
+            if src.is_dir():
+                flat_dir = base_dir / f".{repo_subdir}_flat"
+                flat_dir.mkdir(parents=True, exist_ok=True)
+                for item in src.iterdir():
+                    shutil.move(str(item), str(flat_dir / item.name))
+                shutil.rmtree(staging_dir)
+                staging_dir = flat_dir
+        else:
+            snapshot_download(repo_id=repo_id, local_dir=str(staging_dir))
+
+        # Atomic rename into final location
+        if model_dir.exists():
+            shutil.rmtree(model_dir)
+        staging_dir.rename(model_dir)
+    except Exception:
+        # Clean up partial download on failure
         shutil.rmtree(staging_dir, ignore_errors=True)
-    else:
-        snapshot_download(repo_id=repo_id, local_dir=str(model_dir))
+        raise
 
     return str(model_dir)
 
@@ -487,6 +519,7 @@ def _normalize_names(names: Optional[Union[List, Dict]]) -> Optional[List]:
         result = []
 
         def recurse(prefix, obj):
+            """Recurse"""
             if isinstance(obj, List):
                 for item in obj:
                     result.append(f"{prefix}.{item}")

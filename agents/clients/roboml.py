@@ -11,8 +11,7 @@ import httpx
 import msgpack
 import msgpack_numpy as m_pack
 
-from .. import models
-from ..models import Model, OllamaModel, TransformersLLM, TransformersMLLM
+from ..models import Model, OllamaModel
 from ..utils import encode_img_base64
 from .model_base import ModelClient
 
@@ -95,14 +94,7 @@ class RoboMLHTTPClient(ModelClient):
         """
         # Create a model node on RoboML
         self.logger.info("Creating model node on remote")
-        model_class = getattr(models, self.model_type)
-        if issubclass(model_class, TransformersLLM):
-            model_type = TransformersLLM.__name__
-        elif issubclass(model_class, TransformersMLLM):
-            model_type = TransformersMLLM.__name__
-        else:
-            model_type = self.model_type
-        start_params = {"node_name": self.model_name, "node_model": model_type}
+        start_params = {"node_name": self.model_name, "node_model": self.model_type}
         try:
             r = self.client.post("/add_node", params=start_params).raise_for_status()
             self.logger.debug(str(r.json()))
@@ -430,14 +422,7 @@ class RoboMLRESPClient(ModelClient):
         """
         # Create a model node on RoboML
         self.logger.info("Creating model node on remote")
-        self.model_class = getattr(models, self.model_type)
-        if issubclass(self.model_class, TransformersLLM):
-            model_type = TransformersLLM.__name__
-        elif issubclass(self.model_class, TransformersMLLM):
-            model_type = TransformersMLLM.__name__
-        else:
-            model_type = self.model_type
-        start_params = {"node_name": self.model_name, "node_model": model_type}
+        start_params = {"node_name": self.model_name, "node_model": self.model_type}
         try:
             start_params_b = msgpack.packb(start_params)
             node_init_result = self.redis.execute_command("add_node", start_params_b)

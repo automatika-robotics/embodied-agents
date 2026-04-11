@@ -1,5 +1,4 @@
 import json
-import re
 from pathlib import Path
 from typing import Any, Optional, Union, Callable, List, Dict, MutableMapping
 import msgpack
@@ -19,7 +18,7 @@ from ..ros import (
     Detections,
     StreamingString,
 )
-from ..utils import get_prompt_template, validate_func_args
+from ..utils import get_prompt_template, validate_func_args, strip_think_tokens
 from .model_component import ModelComponent
 from .component_base import ComponentRunType
 
@@ -138,7 +137,6 @@ class LLM(ModelComponent):
         )
 
     def custom_on_configure(self):
-
         # deploy local LLM if enabled (only for LLM, not subclasses like MLLM)
         if (
             not self.model_client
@@ -234,7 +232,7 @@ class LLM(ModelComponent):
     def _strip_think_tokens(self, text: str) -> str:
         """Strip <think>...</think> blocks from model output."""
         if self.config.strip_think_tokens:
-            return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+            return strip_think_tokens(text)
         return text
 
     def _deploy_local_model(self):
@@ -321,21 +319,22 @@ class LLM(ModelComponent):
             try:
                 # HACK: Read function argument as serialized datatypes
                 # if they are returned as string
-                arg_json = {
-                    key: json.loads(str(arg))
-                    for key, arg in tool["function"]["arguments"].items()
-                }
+                arg_json = {}
+                for key, arg in tool["function"]["arguments"].items():
+                    try:
+                        arg = json.loads(arg) if isinstance(arg, str) else arg
+                    except json.JSONDecodeError:
+                        pass  # Keep it as a normal string if it's not valid JSON
+                    arg_json[key] = arg
                 if isinstance(function_to_call, Callable):
                     function_response = function_to_call(**arg_json)
                 else:
                     payload = msgpack.packb(arg_json)
-                    if payload:
-                        function_to_call.sendall(payload)
-                    else:
+                    if not payload:
                         raise Exception(
                             f"Could not serialize the following function arguments for tool calling: {arg_json}"
                         )
-
+                    function_to_call.sendall(payload)
                     result_b = function_to_call.recv(1024)
                     function_response = msgpack.unpackb(result_b)
             except Exception as e:
@@ -420,7 +419,7 @@ class LLM(ModelComponent):
         # get RAG results if enabled in config and if docs retrieved
         rag_result = self._handle_rag_query(query) if self.config.enable_rag else None
 
-        # set system prompt template
+        # set component prompt template
         query = (
             self.component_prompt.render(context) if self.component_prompt else query
         )

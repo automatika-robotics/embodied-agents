@@ -1,3 +1,4 @@
+import time
 from typing import Any, Union, Optional, List, Dict, Literal, MutableMapping
 
 import numpy as np
@@ -18,6 +19,7 @@ from ..ros import (
     ComponentRunType,
     ROSImage,
     ROSCompressedImage,
+    component_action,
 )
 from ..utils import validate_func_args
 from .llm import LLM
@@ -246,6 +248,134 @@ class MLLM(LLM):
         self.config.stream = False
         self.inference_params = self.config.get_inference_params()
 
+    @component_action(
+        description={
+            "type": "function",
+            "function": {
+                "name": "describe",
+                "description": (
+                    "Use this method when asked to describe something in robot's "
+                    "surroundings. Captures a frame from a camera topic and describe what "
+                    "is visible in the image using the vision-language model. "
+                    "Returns a text description on components output topics."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "topic_name": {
+                            "type": "string",
+                            "description": (
+                                "Name of the image input topic to capture from. "
+                                "Should be one of the component's image input topics."
+                            ),
+                        },
+                        "query": {
+                            "type": "string",
+                            "description": (
+                                "Question or instruction for the model about the image. "
+                                "Defaults to 'Describe what you see in the image.'"
+                            ),
+                        },
+                    },
+                    "required": ["topic_name"],
+                },
+            },
+        }
+    )
+    def describe(
+        self,
+        topic_name: str,
+        query: str = "Describe what you see in the image.",
+        timeout: float = 0.5,
+    ) -> bool:
+        """Capture a frame from an image topic and describe it.
+
+        Grabs the latest frame from the specified image input topic,
+        runs VLM inference with the given query, and publishes the
+        text result to the component's String output topics.
+
+        :param topic_name: Name of the image input topic to capture from.
+        :type topic_name: str
+        :param query: Question or instruction about the image.
+        :type query: str
+        :param timeout: Seconds to wait for a frame. Defaults to 0.5.
+        :type timeout: float
+        :return: True if successful, False otherwise.
+        :rtype: bool
+        """
+        try:
+            image = self._grab_frame(topic_name, timeout)
+            if image is None:
+                return False
+
+            inference_input = {
+                "query": [{"role": "user", "content": query}],
+                "images": [image],
+                **self.config._get_inference_params(),
+            }
+
+            result = self._call_inference(inference_input)
+            if not result or not result.get("output"):
+                self.get_logger().error("Describe: inference returned no output.")
+                return False
+
+            self._publish(result)
+            return True
+
+        except Exception as e:
+            self.get_logger().error(f"Failed to describe: {e}")
+            return False
+
+    def _grab_frame(self, topic_name: str, timeout: float) -> Optional[np.ndarray]:
+        """Grab a single frame from an image callback.
+
+        :param topic_name: Name of the image input topic
+        :param timeout: Seconds to wait for a frame
+        :returns: Image as numpy array, or None on failure
+        """
+        trig_dict = getattr(self, "trig_callbacks", {})
+        target_callback = trig_dict.get(topic_name) or self.callbacks.get(topic_name)
+        if not target_callback:
+            self.get_logger().error(
+                f"Topic '{topic_name}' is not one of the component inputs."
+            )
+            return None
+
+        # Check that this is an image topic
+        if not issubclass(target_callback.input_topic.msg_type, (Image, RGBD)):
+            self.get_logger().error(f"Topic '{topic_name}' is not an image topic.")
+            return None
+
+        # Save and swap callback to intercept a frame
+        original_callback = target_callback._extra_callback
+        original_get_processed = target_callback._get_processed
+        frames = []
+
+        def frame_interceptor(msg, topic, output=None):
+            if output is not None and not frames:
+                frames.append(output.copy())
+
+        try:
+            target_callback.on_callback_execute(frame_interceptor, get_processed=True)
+            start_time = time.time()
+            while (time.time() - start_time) < timeout and not frames:
+                time.sleep(0.01)
+        finally:
+            if original_callback:
+                target_callback.on_callback_execute(
+                    original_callback, get_processed=original_get_processed
+                )
+            else:
+                target_callback._extra_callback = None
+
+        if not frames:
+            self.get_logger().warning(
+                f"Describe: timeout waiting for image on '{topic_name}'."
+            )
+            return None
+
+        return frames[0]
+
     def _publish_task_specific_outputs(self, result: MutableMapping) -> None:
         """Publish outputs based on task type"""
         if self._task == "general":
@@ -259,7 +389,7 @@ class MLLM(LLM):
             for pub_name in self._poi_publishers:
                 self.publishers_dict[pub_name].publish(
                     **result,
-                    img=self._images[0],  # POI msg takes only one image
+                    image=self._images[0],  # POI msg takes only one image
                     time_stamp=self.get_ros_time(),
                 )
         elif self._task == "grounding":
@@ -282,7 +412,7 @@ class MLLM(LLM):
             for pub_name in self._poi_publishers:
                 self.publishers_dict[pub_name].publish(
                     **result,
-                    img=self._images[0],  # POI msg takes only one image
+                    image=self._images[0],  # POI msg takes only one image
                     time_stamp=self.get_ros_time(),
                 )
 

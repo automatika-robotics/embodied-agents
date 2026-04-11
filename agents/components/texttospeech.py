@@ -2,8 +2,7 @@ import queue
 import socket
 import threading
 from io import BytesIO
-from typing import Any, Union, Optional, List, Dict, Tuple
-import numpy as np
+from typing import Any, Union, Optional, List, Dict
 import base64
 import time
 
@@ -18,7 +17,7 @@ from .component_base import ComponentRunType
 
 class TextToSpeech(ModelComponent):
     """
-    This component takes in text input and outputs an audio representation of the text using TTS models (e.g. SpeechT5). The generated audio can be played using any audio playback device available on the agent.
+    This component takes in text input and outputs an audio representation of the text using TTS models (e.g. TransformersTTS). The generated audio can be played using any audio playback device available on the agent.
 
     :param inputs: The input topics for the TTS.
         This should be a list of Topic objects, limited to String type.
@@ -43,7 +42,7 @@ class TextToSpeech(ModelComponent):
     text_topic = Topic(name="text", msg_type="String")
     audio_topic = Topic(name="audio", msg_type="Audio")
     config = TextToSpeechConfig(play_on_device=True)
-    model_client = ModelClient(model=SpeechT5(name="speecht5"))
+    model_client = ModelClient(model=TransformersTTS(name="tts"))
     tts_component = TextToSpeech(
         inputs=[text_topic],
         outputs=[audio_topic],
@@ -113,7 +112,6 @@ class TextToSpeech(ModelComponent):
 
         # If play_on_device is enabled, start a playing stream on a separate thread
         if self.config.play_on_device:
-            self._stream_queue = queue.Queue(maxsize=self.config.buffer_size)
             self._incoming_queue = queue.Queue()
             self._stop_event = threading.Event()
             self._playback_thread: Optional[threading.Thread] = None
@@ -145,144 +143,17 @@ class TextToSpeech(ModelComponent):
         from ..utils.local_tts import LocalTTS
 
         self.local_model = LocalTTS(
-            model_path=load_model_repo(
-                "local_tts", self.config.local_model_path
-            ),
+            model_path=load_model_repo("local_tts", self.config.local_model_path),
             device=self.config.device_local_model,
             ncpu=self.config.ncpu_local_model,
         )
         # Local TTS does not support streaming
         if self.config.stream:
+            self.get_logger().warning(
+                "Local TTS model does not support streaming. Setting stream to False."
+            )
             self.config.stream = False
             self.inference_params = self.config.get_inference_params()
-
-    def __stream_callback(
-        self, _: bytes, frames: int, time_info: Dict, status: int
-    ) -> Tuple[bytes, int]:
-        """
-        Stream callback for PyAudio, consuming NumPy arrays from the queue.
-        """
-        try:
-            import pyaudio
-        except ModuleNotFoundError as e:
-            raise ModuleNotFoundError(
-                "play_on_device device configuration for TextToSpeech component requires soundfile and pyaudio modules to be installed. Please install them with `pip install soundfile pyaudio`"
-            ) from e
-
-        assert frames == self.config.block_size
-        if status:
-            if pyaudio.paOutputUnderflow:
-                self.get_logger().warn(
-                    "Output underflow: Try to increase the blocksize. Default is 1024"
-                )
-            else:
-                self.get_logger().warn(f"PyAudio stream status flags: {status}")
-
-        # Bytes PyAudio expects = requested_frames * channels * bytes_per_sample
-        expected_bytes_len = (
-            frames * self._current_channels * 4  # float32 is 4 bytes per sample
-        )
-        try:
-            # get numpy chunk from soundfile
-            data = self._stream_queue.get_nowait()
-        except queue.Empty:
-            # Send silence until new data is received
-            return (b"\x00" * expected_bytes_len, pyaudio.paContinue)
-
-        # If chunk is smaller than the full block then pad
-        if data.shape[0] < frames:
-            # create padding array of zeros
-            padding_frames = frames - data.shape[0]
-            padding_np = np.zeros(
-                (padding_frames, self._current_channels), dtype=data.dtype
-            )
-            # concatenate the actual data with padding
-            final_data_np = np.concatenate((data, padding_np), axis=0)
-            out_data_bytes = final_data_np.tobytes()
-            return out_data_bytes, pyaudio.paContinue
-        else:
-            out_data_bytes = data.tobytes()
-            return out_data_bytes, pyaudio.paContinue
-
-    def __get_stream(
-        self, stream, audio_interface, new_framerate: int, new_channels: int
-    ):
-        """If the stream doesn't exist or if the audio format has changed close the old stream and create a new one"""
-        if (
-            stream is None
-            or new_framerate != self._current_framerate
-            or new_channels != self._current_channels
-        ):
-            if stream is not None:
-                self.get_logger().debug("Audio format changed. Re-creating stream.")
-                stream.stop_stream()
-                stream.close()
-
-            # create stream
-            stream = audio_interface.open(
-                format=self._pyaudio_format,
-                channels=new_channels,
-                rate=new_framerate,
-                output=True,
-                frames_per_buffer=self.config.block_size,
-                stream_callback=self.__stream_callback,  # type: ignore[attr-defined]
-                output_device_index=self.config.device,
-            )
-            stream.start_stream()
-            self._current_framerate = new_framerate
-            self._current_channels = new_channels
-            self.get_logger().debug(
-                "PyAudio stream started. Feeding data using SoundFile blocks..."
-            )
-
-        return stream
-
-    def __pre_fill_stream_queue(self, blocks):
-        """Pre-fill stream queue to buffer length"""
-        for _ in range(self.config.buffer_size):
-            try:
-                data = next(blocks)
-                if not len(data):
-                    return
-                self._stream_queue.put_nowait(data)
-            except queue.Full:
-                self.get_logger().warn("Queue already full, skipping prefill.")
-                break
-            except Exception:
-                break
-
-    def __feed_data(self, stream, blocks, timeout: float):
-        """Feed blocks to playback stream"""
-        for data in blocks:
-            try:
-                self._stream_queue.put(data, block=True, timeout=timeout)
-            except queue.Full:
-                self.get_logger().warn(
-                    f"Queue full while feeding stream. Timeout was set to {timeout:2.f}. Try to increate the buffer_size in config. Default is 20 (blocks)"
-                )
-                continue
-            if self._stop_event.is_set():
-                self.get_logger().debug("Event set, stopping data feed.")
-                return
-
-        # Wait until playback is finished after last chunk
-        wait_start_time = time.monotonic()
-        estimated_remaining_blocks = self._stream_queue.qsize()
-        max_wait_timeout = estimated_remaining_blocks * (
-            self.config.block_size / self._current_framerate
-        )
-        max_wait_timeout = max(max_wait_timeout, 0.5)
-        max_wait_timeout = min(max_wait_timeout, 2)  # Cap timeout
-
-        while stream and stream.is_active():
-            if self._stop_event.is_set():
-                return
-            if time.monotonic() - wait_start_time > max_wait_timeout:
-                self.get_logger().debug(
-                    f"Timeout ({max_wait_timeout:.2f}s) waiting for stream to finish."
-                )
-                return
-            time.sleep(0.05)
 
     def __get_audio_bytes(self, chunk: Union[bytes, str]) -> bytes:
         """Get audio bytes"""
@@ -357,99 +228,101 @@ class TextToSpeech(ModelComponent):
             self.get_logger().debug("UDP streaming thread has finished.")
 
     def _playback_audio_local(self):
-        """Creates a stream to play audio on local device"""
-        # import packages
+        """Play audio on local device using blocking writes.
+
+        Uses PyAudio in blocking output mode — ``stream.write()`` blocks
+        until the hardware is ready, providing natural back-pressure
+        """
         try:
-            from soundfile import SoundFile
             import pyaudio
         except ModuleNotFoundError as e:
             raise ModuleNotFoundError(
-                "play_on_device local device configuration for TextToSpeech component requires soundfile and pyaudio modules to be installed. Please install them with `pip install soundfile pyaudio`"
+                "play_on_device local device configuration for TextToSpeech "
+                "component requires soundfile and pyaudio modules to be "
+                "installed. Please install them with `pip install soundfile pyaudio`"
             ) from e
 
-        # Create pyaudio interface and define stream params
         audio_interface = pyaudio.PyAudio()
-        stream: Optional[pyaudio.Stream] = None
-        self._current_framerate: int = 0
-        self._current_channels: int = 0
-        self._pyaudio_format = (
-            pyaudio.paFloat32  # Use float32 format for SoundFile compatibility
-        )
-
+        stream = None
+        fmt = (0, 0)
         try:
             while not self._stop_event.is_set():
                 try:
-                    # Wait for a new chunk with a timeout.
                     chunk = self._incoming_queue.get(
                         timeout=self.config.thread_shutdown_timeout
                     )
-                    # None in the queue is a sentinel to tell the thread to stop.
                     if chunk is None:
                         break
                 except queue.Empty:
-                    # Queue was empty for the duration of the timeout.
                     self.get_logger().debug(
                         f"No new audio for {self.config.thread_shutdown_timeout}s. "
                         "Gracefully shutting down playback thread."
                     )
-                    break  # Exit the loop
+                    break
 
-                # change str to bytes if output is str
                 output_bytes = self.__get_audio_bytes(chunk)
-
                 try:
-                    with SoundFile(BytesIO(output_bytes)) as f:
-                        new_framerate = f.samplerate
-                        new_channels = f.channels
-
-                        # make chunk generator
-                        # request float32 from soundfile, as we have pyAudio paFloat32
-                        blocks = f.blocks(
-                            self.config.block_size, dtype="float32", always_2d=True
-                        )
-                        # calculate timeout
-                        timeout = (
-                            self.config.block_size
-                            * self.config.buffer_size
-                            / f.samplerate
-                        )
-
-                        # pre-fill queue if empty
-                        if not stream or not stream.is_active():
-                            self.__pre_fill_stream_queue(blocks)
-
-                        # Get stream
-                        stream = self.__get_stream(
-                            stream, audio_interface, new_framerate, new_channels
-                        )
-                        # Feed data to the device stream
-                        self.__feed_data(stream, blocks, timeout)
-
+                    stream, fmt = self.__play_chunk(
+                        output_bytes, audio_interface, stream, fmt
+                    )
                 except Exception as e:
                     self.get_logger().error(f"Error processing audio chunk: {e}")
-                    # Continue to the next chunk
-                    continue
         finally:
-            # Cleanup: This block will run when the loop exits for any reason.
-            self.get_logger().debug("Cleaning up playback resources.")
-            if stream:
-                try:
+            self.__cleanup_audio(stream, audio_interface)
+
+    def __play_chunk(self, audio_bytes, audio_interface, stream, fmt):
+        """Decode an audio chunk and write it to the PyAudio stream.
+
+        Opens or recreates the stream if the audio format changed.
+
+        :param audio_bytes: Raw audio file bytes (e.g. WAV)
+        :param audio_interface: PyAudio instance
+        :param stream: Current PyAudio stream or None
+        :param fmt: Tuple of (sample_rate, channels) of the current stream
+        :returns: Tuple of (stream, fmt) for reuse by the caller
+        """
+        from soundfile import SoundFile
+        import pyaudio
+
+        with SoundFile(BytesIO(audio_bytes)) as f:
+            new_fmt = (f.samplerate, f.channels)
+            if stream is None or new_fmt != fmt:
+                if stream is not None:
                     stream.stop_stream()
                     stream.close()
-                except Exception as e:
-                    self.get_logger().error(f"Error closing PyAudio stream: {e}")
-            if audio_interface:
-                try:
-                    audio_interface.terminate()
-                except Exception as e:
-                    self.get_logger().error(f"Error terminating PyAudio instance: {e}")
-            # Clear streaming queue
-            with self._stream_queue.mutex:
-                self._stream_queue.queue.clear()
+                stream = audio_interface.open(
+                    format=pyaudio.paFloat32,
+                    channels=f.channels,
+                    rate=f.samplerate,
+                    output=True,
+                    frames_per_buffer=self.config.block_size,
+                    output_device_index=self.config.device,
+                )
+                fmt = new_fmt
 
-            stream = None
-            audio_interface = None
-            self.get_logger().debug("Playback thread has finished.")
+            for block in f.blocks(
+                self.config.block_size, dtype="float32", always_2d=True
+            ):
+                if self._stop_event.is_set():
+                    break
+                stream.write(block.tobytes())
+
+        return stream, fmt
+
+    @staticmethod
+    def __cleanup_audio(stream, audio_interface):
+        """Close PyAudio stream and terminate the audio interface."""
+        if stream:
+            try:
+                stream.stop_stream()
+                stream.close()
+            except Exception:
+                pass
+        if audio_interface:
+            try:
+                audio_interface.terminate()
+            except Exception:
+                pass
 
     def _play(self, audio_chunk: Union[bytes, str]):
         """
@@ -487,8 +360,17 @@ class TextToSpeech(ModelComponent):
                 )
                 self._playback_thread.start()
 
-    @component_action
-    def stop_playback(self, wait_for_thread: bool = True):
+    @component_action(
+        description={
+            "type": "function",
+            "function": {
+                "name": "stop_playback",
+                "description": "Stop audio playback and clear any pending audio.",
+                "parameters": {"type": "object", "properties": {}, "required": []},
+            },
+        }
+    )
+    def stop_playback(self, wait_for_thread: bool = True) -> bool:
         """
         Stops the playback thread and clears any pending audio.
         Can be used to interrupt the audio playback through an event.
@@ -508,8 +390,28 @@ class TextToSpeech(ModelComponent):
             self._playback_thread.join()
             self.get_logger().debug("Thread terminated.")
 
-    @component_action
-    def say(self, text: str):
+        return True
+
+    @component_action(
+        description={
+            "type": "function",
+            "function": {
+                "name": "say",
+                "description": "Convert text to speech and play it on the robot's speaker to say something out loud.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "text": {
+                            "type": "string",
+                            "description": "The text to be spoken aloud.",
+                        },
+                    },
+                    "required": ["text"],
+                },
+            },
+        }
+    )
+    def say(self, text: str) -> bool:
         """
             Say the input text.
 
@@ -520,8 +422,15 @@ class TextToSpeech(ModelComponent):
         :param text: The text to be spoken out loud.
         :type text: str
         """
-        self.stop_playback()
-        self._execution_step(text=text)
+        try:
+            # Stop current playback if active, so new speech isn't queued
+            # behind stale audio
+            if self._playback_thread and self._playback_thread.is_alive():
+                self.stop_playback()
+            self._execution_step(text=text)
+            return True
+        except Exception:
+            return False
 
     def _handle_websocket_streaming(self) -> Optional[List]:
         """Handle streaming output from a websocket client"""
@@ -587,7 +496,6 @@ class TextToSpeech(ModelComponent):
 
     def _warmup(self):
         """Warm up and stat check"""
-        import time
 
         inference_input = {
             "query": "Add the sum to the product of these three.",

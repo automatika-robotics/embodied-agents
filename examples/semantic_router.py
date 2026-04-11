@@ -9,8 +9,8 @@ from agents.clients import ChromaClient, OllamaClient
 from agents.ros import Launcher, Topic, Route
 
 # Start a Llama3.2 based llm component using ollama client
-llama = OllamaModel(name="llama", checkpoint="llama3.2:3b")
-llama_client = OllamaClient(llama)
+qwen = OllamaModel(name="qwen", checkpoint="qwen3:0.6b")
+qwen_client = OllamaClient(qwen)
 
 # Initialize a vector DB that will store our routes
 chroma = ChromaDB()
@@ -24,7 +24,7 @@ llm_out = Topic(name="text_out_llm", msg_type="String")
 llm = LLM(
     inputs=[llm_in],
     outputs=[llm_out],
-    model_client=llama_client,
+    model_client=qwen_client,
     trigger=llm_in,
     component_name="generic_llm",
 )
@@ -46,7 +46,7 @@ config = LLMConfig(
 goto = LLM(
     inputs=[goto_in],
     outputs=[goal_point],
-    model_client=llama_client,
+    model_client=qwen_client,
     db_client=chroma_client,  # check the previous example where we setup this database client
     trigger=goto_in,
     config=config,
@@ -124,7 +124,7 @@ router = SemanticRouter(
 #     inputs=[query_topic],
 #     routes=[llm_route, goto_route],
 #     default_route=llm_route,
-#     model_client=llama_client, # LLM mode requires model_client
+#     model_client=qwen_client, # LLM mode requires model_client
 #     component_name="router",
 # )
 

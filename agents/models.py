@@ -16,10 +16,9 @@ __all__ = [
     "TransformersMLLM",
     "OllamaModel",
     "Whisper",
-    "SpeechT5",
-    "Bark",
-    "MeloTTS",
+    "TransformersTTS",
     "VisionModel",
+    "RoboBrain2",
 ]
 
 
@@ -352,7 +351,7 @@ class TransformersLLM(LLM):
 
     :param name: An arbitrary name given to the model.
     :type name: str
-    :param checkpoint: The name of the pre-trained model's checkpoint. Default is "microsoft/Phi-3-mini-4k-instruct". For available checkpoints consult [HuggingFace LLM Models](https://huggingface.co/models?other=LLM)
+    :param checkpoint: The name of the pre-trained model's checkpoint. Default is "Qwen/Qwen3-0.6B". For available checkpoints consult [HuggingFace LLM Models](https://huggingface.co/models?other=LLM)
     :type checkpoint: str
     :param quantization: The quantization scheme used by the model. Can be one of "4bit", "8bit" or None (default is "4bit").
     :type quantization: str or None
@@ -365,7 +364,7 @@ class TransformersLLM(LLM):
     ```
     """
 
-    checkpoint: str = field(default="microsoft/Phi-3-mini-4k-instruct")
+    checkpoint: str = field(default="Qwen/Qwen3-0.6B")
 
 
 @define(kw_only=True)
@@ -374,7 +373,7 @@ class TransformersMLLM(TransformersLLM):
 
     :param name: An arbitrary name given to the model.
     :type name: str
-    :param checkpoint: The name of the pre-trained model's checkpoint. Default is "HuggingFaceM4/idefics2-8b". For available checkpoints consult [HuggingFace Image-Text to Text Models](https://huggingface.co/models?pipeline_tag=image-text-to-text)
+    :param checkpoint: The name of the pre-trained model's checkpoint. Default is "Qwen/Qwen2.5-VL-3B-Instruct". For available checkpoints consult [HuggingFace Image-Text to Text Models](https://huggingface.co/models?pipeline_tag=image-text-to-text)
     :type checkpoint: str
     :param quantization: The quantization scheme used by the model. Can be one of "4bit", "8bit" or None (default is "4bit").
     :type quantization: str or None
@@ -387,7 +386,7 @@ class TransformersMLLM(TransformersLLM):
     ```
     """
 
-    checkpoint: str = field(default="HuggingFaceM4/idefics2-8b")
+    checkpoint: str = field(default="Qwen/Qwen2.5-VL-3B-Instruct")
 
 
 @define(kw_only=True)
@@ -401,7 +400,7 @@ class RoboBrain2(Model):
     }
     :param name: An arbitrary name given to the model.
     :type name: str
-    :param checkpoint: The name of the pre-trained model's checkpoint. Default is "BAAI/RoboBrain2.0-7B". For available checkpoints consult [RoboBrain2 Model Collection](https://huggingface.co/collections/BAAI/robobrain20-6841eeb1df55c207a4ea0036) on HuggingFace.
+    :param checkpoint: The name of the pre-trained model's checkpoint. Default is "BAAI/RoboBrain2.0-3B". For available checkpoints consult [RoboBrain2 Model Collection](https://huggingface.co/collections/BAAI/robobrain20-6841eeb1df55c207a4ea0036) on HuggingFace.
     :type checkpoint: str
     :param init_timeout: The timeout in seconds for the initialization process. Defaults to None.
     :type init_timeout: int, optional
@@ -412,7 +411,7 @@ class RoboBrain2(Model):
     ```
     """
 
-    checkpoint: str = field(default="BAAI/RoboBrain2.0-7B")
+    checkpoint: str = field(default="BAAI/RoboBrain2.0-3B")
 
     def _get_init_params(self) -> Dict:
         """Get init params for model initialization."""
@@ -452,99 +451,41 @@ class Whisper(Model):
 
 
 @define(kw_only=True)
-class SpeechT5(Model):
-    """A model for text-to-speech synthesis developed by Microsoft. [Details](https://github.com/microsoft/SpeechT5)
+class TransformersTTS(Model):
+    """Generic text-to-speech model from [HuggingFace Transformers](https://huggingface.co/models?pipeline_tag=text-to-speech).
+
+    Supports all TTS models registered in Transformers including Bark, VITS, SpeechT5, SeamlessM4T, and more.
+    The model automatically detects whether to use generative inference (Bark, SpeechT5) or forward-only inference (VITS).
 
     :param name: An arbitrary name given to the model.
     :type name: str
-    :param checkpoint: The name of the pre-trained model's checkpoint. Default is "microsoft/speecht5_tts".
+    :param checkpoint: The HuggingFace model ID. Default is "facebook/mms-tts-eng" (VITS). Other examples: "suno/bark-small", "microsoft/speecht5_tts" (SpeechT5).
     :type checkpoint: str
-    :param voice: The voice to use for synthesis. Can be one of "awb", "bdl", "clb", "jmk", "ksp", "rms", or "slt". Default is "clb".
+    :param voice: Voice preset. For Bark, use presets like "v2/en_speaker_6". For other models, this may be unused. Default is "v2/en_speaker_6".
+    :type voice: str, optional
+    :param vocoder_checkpoint: Vocoder model ID for spectrogram models (e.g. SpeechT5). If not provided, defaults to "microsoft/speecht5_hifigan" when needed.
+    :type vocoder_checkpoint: str, optional
     :param init_timeout: The timeout in seconds for the initialization process. Defaults to None.
     :type init_timeout: int, optional
 
     Example usage:
     ```python
-    speecht5 = SpeechT5(name='t2s1', voice="bdl")  # Initialize with a different voice
+    tts = TransformersTTS(name='t2s')  # Default Bark
+    tts = TransformersTTS(name='t2s', checkpoint="facebook/mms-tts-eng", voice=None)  # VITS
+    tts = TransformersTTS(name='t2s', checkpoint="microsoft/speecht5_tts", vocoder_checkpoint="microsoft/speecht5_hifigan")  # SpeechT5
     ```
     """
 
-    checkpoint: str = field(default="microsoft/speecht5_tts")
-    voice: str = field(
-        default="clb",
-        validator=base_validators.in_([
-            "awb",
-            "bdl",
-            "clb",
-            "jmk",
-            "ksp",
-            "rms",
-            "slt",
-        ]),
-    )
-
-    def _get_init_params(self) -> Dict:
-        """Get init params for model initialization."""
-        return {"checkpoint": self.checkpoint, "voice": self.voice}
-
-
-@define(kw_only=True)
-class Bark(Model):
-    """A model for text-to-speech synthesis developed by SunoAI. [Details](https://github.com/suno-ai/bark)
-
-    :param name: An arbitrary name given to the model.
-    :type name: str
-    :param checkpoint: The name of the pre-trained model's checkpoint. [Bark checkpoints on HuggingFace](https://huggingface.co/collections/suno/bark-6502bdd89a612aa33a111bae). Default is "suno/bark-small".
-    :type checkpoint: str
-    :param attn_implementation: The attention implementation to use for the model. Default is "flash_attention_2".
-    :param voice: The voice to use for synthesis. More choices are available [here](https://suno-ai.notion.site/8b8e8749ed514b0cbf3f699013548683?v=bc67cff786b04b50b3ceb756fd05f68c). Default is "v2/en_speaker_6".
-    :param init_timeout: The timeout in seconds for the initialization process. Defaults to None.
-    :type init_timeout: int, optional
-
-    Example usage:
-    ```python
-    bark = Bark(name='t2s2', voice="v2/en_speaker_1")  # Initialize with a different voice
-    ```
-    """
-
-    checkpoint: str = field(default="suno/bark-small")
-    voice: str = field(default="v2/en_speaker_6")
+    checkpoint: str = field(default="facebook/mms-tts-eng")
+    voice: Optional[str] = field(default="v2/en_speaker_6")
+    vocoder_checkpoint: Optional[str] = field(default=None)
 
     def _get_init_params(self) -> Dict:
         """Get init params for model initialization."""
         return {
             "checkpoint": self.checkpoint,
             "voice": self.voice,
-        }
-
-
-@define(kw_only=True)
-class MeloTTS(Model):
-    """A model for text-to-speech synthesis developed by MyShell AI using the MeloTTS engine.
-
-    :param name: An arbitrary name given to the model.
-    :type name: str
-    :param language: The language for speech synthesis. Supported values: ["EN", "ES", "FR", "ZH", "JP", "KR"]. Default is "EN".
-    :type language: str
-    :param speaker_id: The speaker ID for the chosen language. Default is "EN-US". For details check [here](https://github.com/myshell-ai/MeloTTS/blob/main/docs/install.md#python-api)
-    :type speaker_id: str
-    :param init_timeout: The timeout in seconds for the initialization process. Defaults to None.
-    :type init_timeout: int, optional
-
-    Example usage:
-    ```python
-    melotts = MeloTTS(name='melo1', language='JP', speaker_id='JP-1')
-    ```
-    """
-
-    language: str = field(default="EN")
-    speaker_id: str = field(default="EN-US")
-
-    def _get_init_params(self) -> Dict:
-        """Get init params for model initialization."""
-        return {
-            "language": self.language,
-            "speaker_id": self.speaker_id,
+            "vocoder_checkpoint": self.vocoder_checkpoint,
         }
 
 
@@ -552,53 +493,41 @@ class MeloTTS(Model):
 class VisionModel(Model):
     """Object Detection Model with Optional Tracking.
 
-    This vision model provides a flexible framework for object detection and tracking using the [mmdet framework](https://github.com/open-mmlab/mmdetection). It can be used as a standalone detector or as a tracker to follow detected objects over time. It can be initizaled with any checkpoint available in the mmdet framework.
+    This vision model provides a flexible framework for object detection and tracking using [HuggingFace Transformers](https://huggingface.co/models?pipeline_tag=object-detection). It supports any HuggingFace detection model (RT-DETR, DETR, Grounding DINO, YOLOS, etc.) with optional ByteTrack tracking.
 
     :param name: An arbitrary name given to the model.
     :type name: str
-    :param checkpoint: The name of the pre-trained model's checkpoint. [All available checkpoints in the mmdet framework](https://github.com/open-mmlab/mmdetection?tab=readme-ov-file#overview-of-benchmark-and-model-zoo). Default is "dino-4scale_r50_8xb2-12e_coco".
+    :param checkpoint: HuggingFace model ID for object detection. Default is "PekingU/rtdetr_r50vd_coco_o365". For available models see [HuggingFace Object Detection Models](https://huggingface.co/models?pipeline_tag=object-detection).
     :type checkpoint: str
-    :param cache_dir: The directory where downloaded models are cached. Default is 'mmdet'.
-    :type cache_dir: str
-    :param setup_trackers: Whether to set up trackers using norfair or not. Default is False.
+    :param setup_trackers: Whether to set up ByteTrack trackers. Default is False.
     :type setup_trackers: bool
-    :param tracking_distance_function: The function used to calculate the distance between detected objects. This can be any distance metric string available in [scipy.spatial.distance.cdist](https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.distance.cdist.html) Default is "euclidean".
-    :type tracking_distance_function: str
-    :param tracking_distance_threshold: The threshold for determining whether two object in consecutive frames are considered close enough to be considered the same object. Default is 30, with a minimum value of 1.
+    :param tracking_distance_threshold: The IoU threshold (as percentage) for tracking association. Default is 30, with a minimum value of 1.
     :type tracking_distance_threshold: int
-    :param deploy_tensorrt: Deploy the vision model using NVIDIA TensorRT. To utilize this feature with roboml, checkout the instructions [here](https://github.com/automatika-robotics/roboml). Default is False.
-    :type deploy_tensorrt: bool
-    :param _num_trackers: The number of trackers to use. This number depends on the number of inputs image streams being given to the component. It is set automatically if **setup_trackers** is True.
+    :param _num_trackers: The number of trackers to use. This number depends on the number of input image streams being given to the component. It is set automatically if **setup_trackers** is True.
     :type _num_trackers: int
     :param init_timeout: The timeout in seconds for the initialization process. Defaults to None.
     :type init_timeout: int, optional
 
     Example usage:
     ```python
-    model = DetectionModel(name='detection1', setup_trackers=True, num_trackers=1, tracking_distance_threshold=20)  # Initialize the model for tracking one object
+    model = VisionModel(name='detection1', setup_trackers=True, tracking_distance_threshold=20)
     ```
     """
 
-    checkpoint: str = field(default="dino-4scale_r50_8xb2-12e_coco")
-    cache_dir: str = field(default="mmdet")
+    checkpoint: str = field(default="PekingU/rtdetr_r50vd_coco_o365")
     setup_trackers: bool = field(default=False)
-    tracking_distance_function: str = field(default="euclidean")
     tracking_distance_threshold: int = field(
         default=30, validator=base_validators.gt(0)
     )
-    deploy_tensorrt: bool = field(default=False)
     _num_trackers: int = field(default=1, validator=base_validators.gt(0))
 
     def _get_init_params(self) -> Dict:
         """Get init params for model initialization."""
         return {
             "checkpoint": self.checkpoint,
-            "cache_dir": self.cache_dir,
             "setup_trackers": self.setup_trackers,
             "num_trackers": self._num_trackers,
-            "tracking_distance_function": self.tracking_distance_function,
             "tracking_distance_threshold": self.tracking_distance_threshold,
-            "deploy_tensorrt": self.deploy_tensorrt,
         }
 
 

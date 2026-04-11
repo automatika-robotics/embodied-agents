@@ -2,7 +2,6 @@
 import json
 import argparse
 import importlib
-from types import NoneType
 from typing import List, Dict, Union, Tuple, Optional, Any
 
 import rclpy
@@ -24,6 +23,8 @@ from agents.ros import (
     Event,
 )
 
+# Python3.8 compatible NoneType
+NoneType = type(None)
 
 def _parse_args() -> Tuple[argparse.Namespace, List[str]]:
     """Parse arguments."""

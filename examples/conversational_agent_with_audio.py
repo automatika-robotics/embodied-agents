@@ -1,7 +1,7 @@
 from agents.components import MLLM, SpeechToText, TextToSpeech
 from agents.config import SpeechToTextConfig, TextToSpeechConfig, MLLMConfig
 from agents.clients import OllamaClient, RoboMLWSClient
-from agents.models import Whisper, SpeechT5, OllamaModel
+from agents.models import Whisper, TransformersTTS, OllamaModel
 from agents.ros import Topic, Launcher
 
 audio_in = Topic(name="audio0", msg_type="Audio")
@@ -11,7 +11,7 @@ whisper = Whisper(name="whisper")  # Custom model init params can be provided he
 roboml_whisper = RoboMLWSClient(whisper)
 
 s2t_config = SpeechToTextConfig(
-    enable_vad=True,  # option to listen for speech through the microphone
+    enable_vad=False,  # option to listen for speech through the microphone
     # enable_wakeword=True,  # option to invoke the component with a wakeword like 'hey jarvis'
 )
 speech_to_text = SpeechToText(
@@ -43,24 +43,26 @@ mllm = MLLM(
 
 # config for asynchronously playing audio on device
 t2s_config = TextToSpeechConfig(
-    play_on_device=True, stream=True
+    play_on_device=False, stream=True
 )  # Set play_on_device to false if using the web UI
 
 # Uncomment the following line for receiving output on the web UI
-# audio_out = Topic(name="audio_out", msg_type="Audio")
+audio_out = Topic(name="audio_out", msg_type="Audio")
 
-speecht5 = SpeechT5(name="speecht5")
-roboml_speecht5 = RoboMLWSClient(speecht5)
+tts = TransformersTTS(name="tts")
+roboml_tts = RoboMLWSClient(tts)
 text_to_speech = TextToSpeech(
     inputs=[text_answer],
-    outputs=[],  # use outputs=[audio_out] for web UI
+    outputs=[audio_out],  # use outputs=[audio_out] for web UI
     trigger=text_answer,
-    model_client=roboml_speecht5,
+    model_client=roboml_tts,
     config=t2s_config,
     component_name="text_to_speech",
 )
 
 launcher = Launcher()
-launcher.enable_ui(inputs=[audio_in, text_query], outputs=[image0])  # specify topics
+launcher.enable_ui(
+    inputs=[audio_in, text_query], outputs=[image0, audio_out]
+)  # specify topics
 launcher.add_pkg(components=[speech_to_text, mllm, text_to_speech])
 launcher.bringup()

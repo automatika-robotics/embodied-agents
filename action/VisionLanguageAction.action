@@ -7,3 +7,4 @@ bool success
 # Feedback
 int32 timestep
 bool completed
+string feedback

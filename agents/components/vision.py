@@ -170,7 +170,29 @@ class Vision(ModelComponent):
         # deactivate component
         super().custom_on_deactivate()
 
-    @component_action
+    @component_action(
+        description={
+            "type": "function",
+            "function": {
+                "name": "take_picture",
+                "description": "Capture a photo from a camera topic and save it to disk.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "topic_name": {
+                            "type": "string",
+                            "description": "Name of the input topic to capture from. Should be name of one of the topics which are inputs of this component.",
+                        },
+                        "save_path": {
+                            "type": "string",
+                            "description": "Directory path where the image will be saved. The default path is ~/emos/pictures, unless specifically asked, don't use another path.",
+                        },
+                    },
+                    "required": ["topic_name"],
+                },
+            },
+        }
+    )
     def take_picture(
         self,
         topic_name: str,
@@ -280,7 +302,37 @@ class Vision(ModelComponent):
             self.get_logger().error(f"Failed to take picture: {e}")
             return False
 
-    @component_action
+    @component_action(
+        description={
+            "type": "function",
+            "function": {
+                "name": "record_video",
+                "description": "Record a video from a camera topic for a set duration and save it to disk.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "topic_name": {
+                            "type": "string",
+                            "description": "Name of the input topic to record from. Should be name of one of the topics which are inputs of this component.",
+                        },
+                        "duration": {
+                            "type": "number",
+                            "description": "Duration of the recording in seconds. Default is 5 seconds",
+                        },
+                        "save_path": {
+                            "type": "string",
+                            "description": "Directory path where the video will be saved. The default path is ~/emos/videos, unless specifically asked, don't use another path.",
+                        },
+                        "fps": {
+                            "type": "integer",
+                            "description": "Frames per second for the recording. Default is 30",
+                        },
+                    },
+                    "required": ["topic_name"],
+                },
+            },
+        }
+    )
     def record_video(
         self,
         topic_name: str,
@@ -366,6 +418,88 @@ class Vision(ModelComponent):
 
         except Exception as e:
             self.get_logger().error(f"Failed to start recording: {e}")
+            return False
+
+    @component_action(
+        description={
+            "type": "function",
+            "function": {
+                "name": "track",
+                "description": (
+                    "Start tracking objects with the given label in the camera feed. "
+                    "This tool is a pre-requisite for starting vision based following "
+                    "controllers. "
+                    "Requires a remote RoboML model client (not a local model) and "
+                    "at least one Tracking output topic on this component. "
+                    "Once started, tracking results are published continuously."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "label": {
+                            "type": "string",
+                            "description": "Object label to track (e.g. 'person', 'cup').",
+                        },
+                    },
+                    "required": ["label"],
+                },
+            },
+        }
+    )
+    def track(self, label: str) -> bool:
+        """Start tracking objects matching the given label.
+
+        Configures the remote model server to enable ByteTrack trackers
+        (reinitializing if needed) and sets the label filter so that
+        tracking results are published on the component's Tracking output
+        topics.
+
+        :param label: Object label to track (e.g. 'person', 'cup').
+        :type label: str
+        :return: True if tracking was started successfully, False otherwise.
+        :rtype: bool
+        """
+        from ..clients.roboml import RoboMLHTTPClient, RoboMLRESPClient
+
+        # must have a remote RoboML client
+        if not self.model_client or not isinstance(
+            self.model_client, (RoboMLHTTPClient, RoboMLRESPClient)
+        ):
+            self.get_logger().error(
+                "Tracking requires a RoboML model client. "
+                "Local models do not support tracking."
+            )
+            return False
+
+        # must have a Tracking output topic
+        has_tracking_output = any(
+            t.msg_type in (Trackings, TrackingsMultiSource) for t in self.out_topics
+        )
+        if not has_tracking_output:
+            self.get_logger().error(
+                "Tracking requires at least one output topic of type "
+                "Trackings or TrackingsMultiSource."
+            )
+            return False
+
+        try:
+            with self.safe_restart():
+                init_params = self.model_client.model_init_params
+                # Enable trackers on the model if not already set up
+                if not init_params.get("setup_trackers"):
+                    init_params["setup_trackers"] = True
+                init_params["num_trackers"] = len(self.in_topics)
+
+            self.get_logger().info("Trackers initialized on remote model server.")
+
+            # Set the label to track
+            self.config.labels_to_track = [label]
+            self.inference_params = self.config._get_inference_params()
+            self.get_logger().info(f"Now tracking: '{label}'")
+            return True
+
+        except Exception as e:
+            self.get_logger().error(f"Failed to start tracking: {e}")
             return False
 
     def _record_video_thread(

@@ -217,15 +217,17 @@ class SpeechToText(ModelComponent):
         from ..utils.local_stt import LocalSTT
 
         self.local_model = LocalSTT(
-            model_path=load_model_repo(
-                "local_stt", self.config.local_model_path
-            ),
+            model_path=load_model_repo("local_stt", self.config.local_model_path),
             device=self.config.device_local_model,
             ncpu=self.config.ncpu_local_model,
-            sample_rate=self.config._sample_rate
+            sample_rate=self.config._sample_rate,
+            language=self.config.language or "en",
         )
         # Local STT does not support streaming
         if self.config.stream:
+            self.get_logger().warning(
+                "Local STT model does not support streaming. Setting stream to False."
+            )
             self.config.stream = False
 
     def __stream_callback(
@@ -342,13 +344,15 @@ class SpeechToText(ModelComponent):
             self.get_logger().debug("Speech ended")
             if self.config.enable_wakeword:
                 self.wake_word_triggered = False
-            if self.config.stream:
-                # Send again in case last segment was shorter than min_chunk_size
-                self._execution_step(speech=self.speech_buffer)
-                # Send termination token
-                self._execution_step(speech=[b"\r\n"])
-            else:
-                self._execution_step(speech=self.speech_buffer)
+            # Only send to STT if there is buffered speech
+            if self.speech_buffer:
+                if self.config.stream:
+                    # Send again in case last segment was shorter than min_chunk_size
+                    self._execution_step(speech=self.speech_buffer)
+                    # Send termination token
+                    self._execution_step(speech=[b"\r\n"])
+                else:
+                    self._execution_step(speech=self.speech_buffer)
             self.speech_buffer.clear()
 
     def _handle_websocket_streaming(self) -> Optional[List]:

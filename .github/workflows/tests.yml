@@ -1,0 +1,54 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  tests:
+    name: Tests (ROS 2 ${{ matrix.ros_distro }})
+    runs-on: ubuntu-latest
+    env:
+      PIP_BREAK_SYSTEM_PACKAGES: "1"
+    strategy:
+      matrix:
+        ros_distro: [humble, jazzy, kilted, rolling]
+    container:
+      image: ros:${{ matrix.ros_distro }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          apt-get install -y python3-pip python3-pytest
+
+      - name: Install ROS package dependencies
+        run: |
+          . /opt/ros/${{ matrix.ros_distro }}/setup.sh
+          apt-get install -y python3-rosdep
+          rosdep update || true
+          rosdep install --from-paths . -y --ignore-src || true
+
+      - name: Build workspace
+        run: |
+          . /opt/ros/${{ matrix.ros_distro }}/setup.sh
+          mkdir -p /ws/src
+          ln -s $GITHUB_WORKSPACE /ws/src/embodied_agents
+          # Clone and build ros_sugar dependency
+          git clone https://github.com/automatika-robotics/sugarcoat /ws/src/sugarcoat
+          cd /ws
+          pip install numpy 'attrs>=23.2.0' jinja2 httpx \
+                      msgpack msgpack-numpy setproctitle platformdirs tqdm websockets
+          colcon build --symlink-install
+        shell: bash
+
+      - name: Run tests
+        run: |
+          . /opt/ros/${{ matrix.ros_distro }}/setup.sh
+          . /ws/install/setup.sh
+          cd $GITHUB_WORKSPACE
+          python3 -m pytest tests/ -v --ignore=tests/test_clients.py -k "not local_only"
+        shell: bash

@@ -10,6 +10,7 @@ __all__ = [
     "LLMConfig",
     "MLLMConfig",
     "VLMConfig",
+    "CortexConfig",
     "VLAConfig",
     "SpeechToTextConfig",
     "TextToSpeechConfig",
@@ -115,7 +116,7 @@ class LLMConfig(ModelComponentConfig):
         default=10, validator=base_validators.gt(4)
     )  # number of user messages
     temperature: float = field(default=0.8, validator=base_validators.gt(0.0))
-    max_new_tokens: int = field(default=500, validator=base_validators.gt(0))
+    max_new_tokens: int = field(default=1000, validator=base_validators.gt(0))
     stream: bool = field(default=False)
     break_character: str = field(default=".")
     response_terminator: str = field(default="<<Response Ended>>")
@@ -153,6 +154,92 @@ class LLMConfig(ModelComponentConfig):
             "temperature": self.temperature,
             "max_new_tokens": self.max_new_tokens,
             "stream": self.stream,
+        }
+
+
+@define(kw_only=True)
+class CortexConfig(LLMConfig):
+    """
+    Configuration for the Cortex task planning and execution component.
+
+    The Cortex component uses an LLM to decompose high-level tasks into sub-tasks
+    and executes them by dispatching Actions registered on other components.
+
+    The task execution follows a two-phase approach:
+
+    1. **Planning** — A multi-step conversational loop where the LLM can call
+       ``inspect_component`` to research available components and their capabilities.
+       Once the LLM has enough context, it returns action tool calls which become
+       the execution plan. RAG context from a vector DB is also available during
+       this phase. Controlled by ``max_planning_steps``.
+    2. **Execution** — Each planned step is executed sequentially. Before each
+       step, a brief LLM confirmation call decides: EXECUTE, SKIP, or ABORT,
+       based on the original plan and results so far. Controlled by
+       ``max_execution_steps``.
+
+    The ``chat_history`` and ``stream`` fields are enforced by the component
+    (``chat_history=True``, ``stream=False``) and cannot be overridden.
+
+    :param max_planning_steps: Maximum number of LLM calls allowed during the
+        planning phase (e.g. inspect_component calls). Default is 10.
+    :type max_planning_steps: int
+    :param max_execution_steps: Maximum number of action steps allowed in the
+        execution plan. Plans with more steps are truncated. Default is 10.
+    :type max_execution_steps: int
+    :param confirmation_temperature: Temperature for the per-step confirmation LLM
+        calls. Lower values give more deterministic responses. Default is 0.2.
+    :type confirmation_temperature: float
+    :param confirmation_max_tokens: Maximum tokens for confirmation responses.
+        Kept low since only EXECUTE/SKIP/ABORT is expected. Default is 100.
+    :type confirmation_max_tokens: int
+    :param temperature: Temperature used for the planning LLM call.
+        Default is 0.8 and must be greater than 0.0.
+    :type temperature: float
+    :param max_new_tokens: The maximum number of new tokens to generate during planning.
+        Default is 500 and must be greater than 0.
+    :type max_new_tokens: int
+    :param enable_rag: Enable Retrieval Augmented Generation to provide context
+        during planning. Requires a ``db_client`` to be passed to the Cortex component.
+        Default is False.
+    :type enable_rag: bool
+    :param strip_think_tokens: Whether to strip ``<think>...</think>`` blocks from model output. Default is True.
+    :type strip_think_tokens: bool
+    :param enable_local_model: Whether to enable a local LLM via llama.cpp. Requires ``llama-cpp-python``. Default is False.
+    :type enable_local_model: bool
+    :param device_local_model: Device to run the local model on, either "cpu" or "cuda" (default: "cuda").
+    :type device_local_model: str
+    :param ncpu_local_model: Number of CPU cores for the local model (default: 1).
+    :type ncpu_local_model: int
+    :param local_model_path: HuggingFace repository ID for a GGUF model (default: ``Qwen/Qwen3-0.6B-GGUF``), or a local path to a ``.gguf`` file.
+    :type local_model_path: Optional[str]
+
+    Example of usage:
+    ```python
+    config = CortexConfig(max_planning_steps=10, max_execution_steps=15, temperature=0.2)
+    ```
+
+    Example of usage with local model:
+    ```python
+    config = CortexConfig(enable_local_model=True, max_execution_steps=20)
+    ```
+    """
+
+    max_planning_steps: int = field(default=10, validator=base_validators.gt(0))
+    max_execution_steps: int = field(default=10, validator=base_validators.gt(0))
+    confirmation_temperature: float = field(
+        default=0.2, validator=base_validators.gt(0.0)
+    )
+    confirmation_max_tokens: int = field(default=1000, validator=base_validators.gt(0))
+    monitoring_interval: float = field(default=2.0, validator=base_validators.gt(0.0))
+
+    def _get_inference_params(self) -> Dict:
+        """get_inference_params.
+        :rtype: dict
+        """
+        return {
+            "temperature": self.temperature,
+            "max_new_tokens": self.max_new_tokens,
+            "stream": False,
         }
 
 
@@ -440,7 +527,7 @@ class TextToSpeechConfig(ModelComponentConfig):
     :type stream_to_port: Optional[int]
     :param buffer_size: Size of the buffer for playing audio on device. Only effective if play_on_device is True (default: 20).
     :type buffer_size: int
-    :param block_size: Size of the audio block to be read for playing audio on device. Only effective if play_on_device is True (default: 1024).
+    :param block_size: Size of the audio block to be read for playing audio on device. Only effective if play_on_device is True (default: 4096).
     :type block_size: int
     :param thread_shutdown_timeout: Timeout to shutdown a playback thread, if data is not received for more than a certain number of seconds. Only effective if play_on_device is True (default: 5 seconds).
     :type thread_shutdown_timeout: int
@@ -472,25 +559,10 @@ class TextToSpeechConfig(ModelComponentConfig):
     stream_to_ip: Optional[str] = field(default=None)
     stream_to_port: Optional[int] = field(default=None)
     buffer_size: int = field(default=20)
-    block_size: int = field(default=1024)
+    block_size: int = field(default=4096)
     thread_shutdown_timeout: int = field(default=5)
     stream: bool = field(default=True)
     _get_bytes: bool = field(default=False, alias="_get_bytes")
-
-    @stream.validator
-    def _check_stream(self, _, value):
-        """Stream validator"""
-        if value and self.enable_local_model:
-            raise ValueError(
-                "stream cannot be set to True when enable_local_model is True in TextToSpeechConfig. "
-                "Local TTS model does not support streaming."
-            )
-
-    def _get_inference_params(self) -> Dict:
-        """get_inference_params.
-        :rtype: dict
-        """
-        return {"get_bytes": self._get_bytes}
 
     @stream_to_ip.validator
     def _check_stream_to_ip(self, _, value):
@@ -515,6 +587,12 @@ class TextToSpeechConfig(ModelComponentConfig):
             raise ValueError(
                 "stream_to_port is set, but stream_to_ip is not. stream_to_ip must be set."
             )
+
+    def _get_inference_params(self) -> Dict:
+        """get_inference_params.
+        :rtype: dict
+        """
+        return {"get_bytes": self._get_bytes}
 
 
 @define(kw_only=True)
@@ -733,11 +811,6 @@ class SpeechToTextConfig(ModelComponentConfig):
         if value and not self.enable_vad:
             raise ValueError(
                 "enable_vad (voice activity detection) must be set to True when stream is set to True"
-            )
-        if value and self.enable_local_model:
-            raise ValueError(
-                "stream cannot be set to True when enable_local_model is True in SpeechToTextConfig. "
-                "Local STT model does not support streaming. Use a WebSocket client for streaming."
             )
 
     def __attrs_post_init__(self):

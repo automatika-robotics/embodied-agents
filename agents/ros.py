@@ -7,6 +7,7 @@ from importlib.util import find_spec
 from rclpy.logging import get_logger
 
 from sensor_msgs.msg import JointState as JointStateROS
+from lifecycle_msgs.msg import State as LifecycleStateMsg
 
 # FROM SUGARCOAT
 from ros_sugar.supported_types import (
@@ -20,6 +21,8 @@ from ros_sugar.supported_types import (
     ROSImage,
     ROSCompressedImage,
     add_additional_datatypes,
+    get_ros_msg_fields_dict,
+    ros_msg_to_str,
 )
 from ros_sugar.io.topic import QoSConfig, Topic as BaseTopic
 
@@ -29,16 +32,20 @@ from ros_sugar.config import (
     BaseAttrs,
     base_validators,
 )
-from ros_sugar.core import BaseComponent
+from ros_sugar.core import BaseComponent, Monitor
 from ros_sugar.core.component import MutuallyExclusiveCallbackGroup
 from ros_sugar import UI_EXTENSIONS
-from ros_sugar.utils import component_action, component_fallback
+from ros_sugar.utils import (
+    component_action,
+    component_fallback,
+    get_methods_with_decorator,
+)
 from ros_sugar.io.utils import run_external_processor
-from ros_sugar.core import Event
-from ros_sugar.core import Action
+from ros_sugar.core import Event, Action
 from ros_sugar import actions
+from ros_sugar.base_clients import ServiceClientHandler, ActionClientHandler
 
-from ros_sugar import Launcher
+from .launcher import Launcher
 
 # AGENTS TYPES
 from automatika_embodied_agents.msg import (
@@ -95,6 +102,7 @@ __all__ = [
     "BaseComponentConfig",
     "ComponentRunType",
     "Launcher",
+    "Monitor",
     "MapLayer",
     "Route",
     "MutuallyExclusiveCallbackGroup",
@@ -105,6 +113,12 @@ __all__ = [
     "component_action",
     "VisionLanguageAction",
     "run_external_processor",
+    "ServiceClientHandler",
+    "ActionClientHandler",
+    "get_ros_msg_fields_dict",
+    "ros_msg_to_str",
+    "LifecycleStateMsg",
+    "get_methods_with_decorator",
 ]
 
 # =========================================================================
@@ -215,10 +229,10 @@ class Detections(SupportedType):
             output = output[0]
             images = images[0] if images else []
         msg = Detections2D()
-        msg.scores = output["scores"]
-        msg.labels = output["labels"]
+        msg.scores = output.get("scores") or []
+        msg.labels = output.get("labels") or []
         boxes = []
-        for bbox in output["bboxes"]:
+        for bbox in output.get("bboxes") or []:
             box = Bbox2D()
             box.top_left_x = float(bbox[0])
             box.top_left_y = float(bbox[1])
@@ -261,7 +275,7 @@ class DetectionsMultiSource(SupportedType):
         """
         msg = Detections2DMultiSource()
         detections = []
-        for img, detection in zip(images, output, strict=True):
+        for img, detection in zip(images, output):
             detections.append(Detections.convert(detection, img))
         msg.detections = detections
         return msg
@@ -284,7 +298,7 @@ class PointsOfInterest(SupportedType):
     def convert(
         cls,
         output: List[Tuple[int, int]],
-        img: Union[ROSImage, ROSCompressedImage, np.ndarray],
+        image: Union[ROSImage, ROSCompressedImage, np.ndarray],
         **_,
     ) -> ROSPointsOfInterest:
         """
@@ -301,14 +315,14 @@ class PointsOfInterest(SupportedType):
             points.append(point)
         msg.points = points
 
-        if isinstance(img, ROSCompressedImage):
-            msg.compressed_image = CompressedImage.convert(img)
+        if isinstance(image, ROSCompressedImage):
+            msg.compressed_image = CompressedImage.convert(image)
         # Handle RealSense RGBD msgs
-        elif hasattr(img, "depth"):
-            msg.image = Image.convert(img.rgb)
-            msg.depth = Image.convert(img.depth)
+        elif hasattr(image, "depth"):
+            msg.image = Image.convert(image.rgb)
+            msg.depth = Image.convert(image.depth)
         else:
-            msg.image = Image.convert(img)
+            msg.image = Image.convert(image)
         return msg
 
 
@@ -337,6 +351,7 @@ class Trackings(SupportedType):
             List[ROSCompressedImage],
             List[np.ndarray],
         ],
+        **_,
     ) -> ROSTrackings:
         """
         Takes tracking data and converts it into a ROS message
@@ -362,19 +377,22 @@ class Trackings(SupportedType):
 
         tracked_boxes = []
         centroids = []
+        # tracked_points: list of [x, y] center points from the tracker
         if o_tracked_points := output.get("tracked_points"):
-            for bbox in o_tracked_points:
-                # Each 3 points represent one object (top-left, bottom-right, center)
-                box = Bbox2D()
-                box.top_left_x = bbox[0][0]
-                box.top_left_y = bbox[0][1]
-                box.bottom_right_x = bbox[1][0]
-                box.bottom_right_y = bbox[1][1]
-                tracked_boxes.append(box)
+            for point in o_tracked_points:
                 centroid = Point2D()
-                centroid.x = bbox[2][0]
-                centroid.y = bbox[2][1]
+                centroid.x = float(point[0])
+                centroid.y = float(point[1])
                 centroids.append(centroid)
+        # tracked_bboxes: list of [x1, y1, x2, y2] bounding boxes
+        if o_tracked_bboxes := output.get("tracked_bboxes"):
+            for bbox in o_tracked_bboxes:
+                box = Bbox2D()
+                box.top_left_x = float(bbox[0])
+                box.top_left_y = float(bbox[1])
+                box.bottom_right_x = float(bbox[2])
+                box.bottom_right_y = float(bbox[3])
+                tracked_boxes.append(box)
 
         msg.boxes = tracked_boxes
         msg.centroids = centroids
@@ -412,7 +430,7 @@ class TrackingsMultiSource(SupportedType):
         """
         msg = ROSTrackingsMultiSource()
         trackings = []
-        for img, tracking in zip(images, output, strict=True):
+        for img, tracking in zip(images, output):
             trackings.append(Trackings.convert(tracking, img))
         msg.trackings = trackings
         return msg

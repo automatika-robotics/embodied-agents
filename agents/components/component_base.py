@@ -1,7 +1,8 @@
 import json
 from abc import abstractmethod
 from copy import deepcopy
-from types import NoneType
+import time
+from contextlib import contextmanager
 from typing import Optional, Sequence, Union, List, Dict, Type
 
 from ..ros import (
@@ -13,9 +14,13 @@ from ..ros import (
     BaseTopic,
     Event,
     Action,
+    LifecycleStateMsg,
 )
 from ..config import BaseComponentConfig
 from ..utils import flatten
+
+# Python3.8 compatible NoneType
+NoneType = type(None)
 
 
 class Component(BaseComponent):
@@ -335,3 +340,31 @@ class Component(BaseComponent):
         self._update_inactive_input_topic(old_topic, new_topic)
 
         return None
+
+    # TODO: Move the context manager to sugarcoat base component
+    @contextmanager
+    def safe_restart(self):
+        """Stop the component, yield for operations, then restart and wait for ACTIVE state."""
+        self._maintain_default_services = True
+        self.stop()
+        self.trigger_cleanup()
+
+        try:
+            yield
+        finally:
+            self.start()
+
+            timeout_counter = 0
+            while self.lifecycle_state != LifecycleStateMsg.PRIMARY_STATE_ACTIVE and (
+                timeout_counter < self.config.wait_for_restart_time
+            ):
+                self.get_logger().warn(
+                    f"Component {self.node_name} is not in ACTIVE state. Waiting for it to become active again.",
+                    once=True,
+                )
+                time.sleep(1 / self.config.loop_rate)
+                timeout_counter += 1 / self.config.loop_rate
+
+            if self.lifecycle_state != LifecycleStateMsg.PRIMARY_STATE_ACTIVE:
+                self.health_status.set_fail_component()
+                raise RuntimeError("Error restarting the component")

@@ -41,6 +41,7 @@ class JointsData:
         Defaults to 0.0.
     :type delay: float
     """
+
     joints_names: List[str] = field()
     positions: np.ndarray = field(
         default=np.array([], dtype=np.float64), validator=_size_validator
@@ -272,7 +273,7 @@ def cap_actions_with_limits(
         return target_actions
 
     for idx, (jname, target) in enumerate(
-        zip(joint_names, target_actions, strict=True)
+        zip(joint_names, target_actions)
     ):
         # If limit missing in dict
         joint_limits = limits_dict.get(jname)
@@ -328,6 +329,86 @@ def cap_actions_with_limits(
         result[idx] = capped
 
     return result
+
+
+_ROS_TYPE_MAP = {
+    "bool": "boolean",
+    "boolean": "boolean",
+    "byte": "integer",
+    "octet": "integer",
+    "char": "integer",
+    "int8": "integer",
+    "int16": "integer",
+    "int32": "integer",
+    "int64": "integer",
+    "uint8": "integer",
+    "uint16": "integer",
+    "uint32": "integer",
+    "uint64": "integer",
+    "float": "number",
+    "float32": "number",
+    "float64": "number",
+    "double": "number",
+    "string": "string",
+    "wstring": "string",
+}
+
+
+def _fields_dict_to_json_schema(fields_dict: Dict) -> Dict:
+    """Convert a parsed ROS fields dict to JSON schema properties.
+
+    Takes the output of ``get_ros_msg_fields_dict`` where values are
+    either type strings (``"double"``), sequence strings
+    (``"sequence<string>"``), or nested dicts, and produces an OpenAI
+    tool-compatible JSON schema.
+
+    :param fields_dict: Output of ``get_ros_msg_fields_dict``
+    :returns: JSON schema ``properties`` dict
+    """
+    properties = {}
+    for field_name, field_value in fields_dict.items():
+        if isinstance(field_value, dict):
+            # Nested message — recurse
+            nested_props = _fields_dict_to_json_schema(field_value)
+            properties[field_name] = {
+                "type": "object",
+                "properties": nested_props,
+            }
+        elif isinstance(field_value, str) and field_value.startswith("sequence<"):
+            # Array type — extract inner type
+            inner = field_value[len("sequence<") : -1]
+            inner_json = _ROS_TYPE_MAP.get(inner, "string")
+            properties[field_name] = {
+                "type": "array",
+                "items": {"type": inner_json},
+                "description": f"ROS type: {field_value}",
+            }
+        else:
+            # Primitive type
+            json_type = _ROS_TYPE_MAP.get(field_value, "string")
+            properties[field_name] = {
+                "type": json_type,
+                "description": f"ROS type: {field_value}",
+            }
+    return properties
+
+
+def goal_type_to_json_properties(goal_type: type) -> Tuple[Dict, List]:
+    """Introspect a ROS Goal message class and return JSON schema
+    properties and required fields for tool registration.
+
+    Uses ``get_ros_msg_fields_dict`` from ros_sugar to recursively parse
+    nested message types into a flat dict, then converts to JSON schema.
+
+    :param goal_type: The ROS Goal message class
+    :returns: (properties dict, required list) for the JSON schema
+    """
+    from ..ros import get_ros_msg_fields_dict
+
+    fields_dict = get_ros_msg_fields_dict(goal_type)
+    properties = _fields_dict_to_json_schema(fields_dict)
+    required = list(properties.keys())
+    return properties, required
 
 
 def parse_urdf_joints(path_or_url: str) -> Dict:

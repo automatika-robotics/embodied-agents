@@ -94,6 +94,9 @@ class VLA(ModelComponent):
             **kwargs,
         )
 
+        # set a meaningful component action name
+        self.main_action_name = f"{self.node_name}/manipulate_with_vla"
+
     def custom_on_activate(self):
         """Custom activation"""
 
@@ -722,6 +725,14 @@ class VLA(ModelComponent):
                 return True
 
         return False
+
+    # =========================================================================
+    # Unused/overridden methods (action server mode)
+    # =========================================================================
+
+    def _execution_step(self, *args, **kwargs):
+        """Not used -- VLA runs as an action server."""
+        pass
 
     def _warmup(self):
         """Warm up and stat check"""
