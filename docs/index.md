@@ -85,6 +85,14 @@ End-to-end guide: wire a new data modality from ROS message through callback, ty
 Health status, fallback recovery, model client hot-swapping, local model fallbacks, and the event/action system.
 :::
 
+:::{grid-item-card} {material-regular}`bolt;1.5em;sd-text-primary` Component Actions
+:link: development/component_actions
+:link-type: doc
+:class-card: sugar-card
+
+Define callable actions on components using `@component_action`. Expose capabilities for the Cortex planner, events, and ROS services.
+:::
+
 ::::
 
 ---
@@ -101,6 +109,7 @@ development/custom_model
 development/messages
 development/adding_modality
 development/advanced_component
+development/component_actions
 ```
 
 ```{toctree}

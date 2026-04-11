@@ -31,6 +31,9 @@ A Component is the main execution unit in _EmbodiedAgents_ and in essence each c
 * - **[Vision](agents.components.vision.md)**
   - An essential component in all vision powered robots. Performs object detection and tracking on incoming images. Outputs object classes, bounding boxes, and confidence scores. It implements a low-latency small on-board classification model as well.
 
+* - **[Cortex](agents.components.cortex.md)**
+  - An LLM-powered high level cognitive component that combines the roll of a long term task planner and executor and also serves as the system monitor. Receives high-level natural language goals, decomposes them into steps by inspecting available components, and executes them with per-step confirmation. Automatically discovers component actions and ROS entrypoints as callable tools.
+
 * - **[VideoMessageMaker](agents.components.imagestovideo.md)**
   - This component generates ROS video messages from input image messages. A video message is a collection of image messages that have a perceivable motion. I.e. the primary task of this component is to make intentionality decisions about what sequence of consecutive images should be treated as one coherent temporal sequence. The chunking method used for selecting images for a video can be configured in component config. It can be useful in sending videos to ML models that take image sequences.
 ```
