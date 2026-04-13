@@ -7,7 +7,6 @@ from importlib.util import find_spec
 from rclpy.logging import get_logger
 
 from sensor_msgs.msg import JointState as JointStateROS
-from lifecycle_msgs.msg import State as LifecycleStateMsg
 
 # FROM SUGARCOAT
 from ros_sugar.supported_types import (
@@ -117,7 +116,6 @@ __all__ = [
     "ActionClientHandler",
     "get_ros_msg_fields_dict",
     "ros_msg_to_str",
-    "LifecycleStateMsg",
     "get_methods_with_decorator",
 ]
 
