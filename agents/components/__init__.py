@@ -44,6 +44,7 @@ from .cortex import Cortex
 from .imagestovideo import VideoMessageMaker
 from .llm import LLM
 from .map_encoding import MapEncoding
+from .memory import Memory
 from .mllm import MLLM, VLM
 from .model_component import ModelComponent
 from .semantic_router import SemanticRouter
@@ -57,6 +58,7 @@ __all__ = [
     "Cortex",
     "ModelComponent",
     "MapEncoding",
+    "Memory",
     "MLLM",
     "VLM",
     "LLM",
