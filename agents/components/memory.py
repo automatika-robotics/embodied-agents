@@ -336,6 +336,115 @@ class Memory(Component):
         description={
             "type": "function",
             "function": {
+                "name": "store_specific_memory",
+                "description": (
+                    "Write a piece of text into memory as a new observation. "
+                    "Use this to record things that did not come in through a "
+                    "perception layer, for example a scene description the "
+                    "planner just produced, a decision made during a task, or "
+                    "a fact the operator just told the robot. "
+                    "By default the note goes into the 'agent_notes' layer, "
+                    "which is separate from perception streams. "
+                    "Only override 'layer_name' if you are confident the note "
+                    "belongs with an existing perception layer reported by "
+                    "inspect_component (e.g. if you are adding a caption to a "
+                    "'scene_description' layer that already stores VLM output); "
+                    "otherwise leave it at the default so hallucinated text "
+                    "does not contaminate detector streams. "
+                    "If coordinates are not provided, the robot's current "
+                    "odometry position is used."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "content": {
+                            "type": "string",
+                            "description": "The text to remember.",
+                        },
+                        "layer_name": {
+                            "type": "string",
+                            "description": (
+                                "Layer tag to store the note under. Defaults "
+                                "to 'agent_notes'. Only change this if the "
+                                "note genuinely belongs with an existing "
+                                "perception layer visible via inspect_component."
+                            ),
+                            "default": "agent_notes",
+                        },
+                        "x": {
+                            "type": "number",
+                            "description": (
+                                "X coordinate in world-frame meters. Omit to "
+                                "use the robot's current position."
+                            ),
+                        },
+                        "y": {
+                            "type": "number",
+                            "description": (
+                                "Y coordinate in world-frame meters. Omit to "
+                                "use the robot's current position."
+                            ),
+                        },
+                        "z": {
+                            "type": "number",
+                            "description": (
+                                "Z coordinate in meters. Omit to use the "
+                                "robot's current position (or 0 for 2D maps)."
+                            ),
+                        },
+                    },
+                    "required": ["content"],
+                },
+            },
+        }
+    )
+    def store_specific_memory(
+        self,
+        content: str,
+        layer_name: str = "agent_notes",
+        x: Optional[float] = None,
+        y: Optional[float] = None,
+        z: Optional[float] = None,
+    ) -> bool:
+        """Store an arbitrary piece of text at a given (or current) position.
+
+        :param content: Text to record.
+        :param layer_name: Layer tag to store under. Defaults to ``agent_notes``.
+        :param x: Optional X in world-frame meters. If omitted, current odometry is used.
+        :param y: Optional Y in world-frame meters. If omitted, current odometry is used.
+        :param z: Optional Z in meters. If omitted, current odometry is used.
+        :returns: True if the note was stored, False if position was unavailable.
+        """
+        if x is None or y is None:
+            position = self.callbacks[self.position.name].get_output()
+            if position is None:
+                self.get_logger().warning(
+                    "store_note: no coordinates given and no odometry "
+                    "available, note not stored."
+                )
+                return False
+            px = float(position[0])
+            py = float(position[1])
+            pz = float(position[2]) if len(position) > 2 else 0.0
+        else:
+            px = float(x)
+            py = float(y)
+            pz = float(z) if z is not None else 0.0
+
+        self.memory.add(
+            text=content,
+            x=px,
+            y=py,
+            z=pz,
+            layer_name=layer_name,
+            timestamp=float(self.get_ros_time().sec),
+        )
+        return True
+
+    @component_action(
+        description={
+            "type": "function",
+            "function": {
                 "name": "start_episode",
                 "description": (
                     "Open a named episode. All observations stored between now "
