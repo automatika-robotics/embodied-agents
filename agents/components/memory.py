@@ -218,6 +218,46 @@ class Memory(Component):
             self.model_client.check_connection()
             self.model_client.deinitialize()
 
+    def inspect_component(self) -> str:
+        """Return component info including configured perception layers.
+
+        Appends a ``Perception layers:`` section listing each configured
+        MapLayer (layer name, source topic, and message type). A consumer
+        like Cortex can read this to learn which layer tags observations
+        get stored under. Useful when planning retrieval calls that take
+        a ``layer`` filter, or when deciding whether an LLM-injected memory
+        should share a tag with an existing perception stream.
+        """
+        result = super().inspect_component()
+
+        if self.layers_dict:
+            lines = [
+                "",
+                "Perception layers (layer_name → source topic):",
+                (
+                    "  Each layer tags observations with a label derived from "
+                    "its source topic. Use these names as the 'layer' filter in "
+                    "memory retrieval tools (semantic_search, spatial_query, "
+                    "locate, ...) to narrow results to one stream."
+                ),
+            ]
+            for name, layer in self.layers_dict.items():
+                topic = layer.subscribes_to
+                msg_name = (
+                    topic.msg_type.__name__
+                    if hasattr(topic.msg_type, "__name__")
+                    else str(topic.msg_type)
+                )
+                lines.append(
+                    f"  - {name}  (from topic '{topic.name}', type {msg_name})"
+                )
+            result += "\n".join(lines)
+        else:
+            result += "\nPerception layers: none configured"
+
+        result += f"\nPosition topic: {self.position.name}"
+        return result
+
     def _layers(self, layers: List[MapLayer]):
         """Set up perception layers and callbacks"""
         self.layers_dict = {layer.subscribes_to.name: layer for layer in layers}
