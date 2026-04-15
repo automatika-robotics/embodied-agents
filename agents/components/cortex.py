@@ -1416,11 +1416,24 @@ class Cortex(ModelComponent, Monitor):
         return executed_results, False
 
     def _finalize_goal(
-        self, goal_handle, feedback_msg, result_msg, executed_results, plan_len, aborted
+        self,
+        goal_handle,
+        feedback_msg,
+        result_msg,
+        executed_results,
+        plan_len,
+        aborted,
+        voluntarily_stopped: bool = False,
     ) -> None:
-        """Set the final goal status based on execution results."""
-        summary = "; ".join(f"{r['action']}: {r['result']}" for r in executed_results)
+        """Set the final goal status based on execution results.
+
+        Success criterion: the planning loop ended voluntarily (the LLM
+        returned no more tool calls), meaning the LLM considered the task
+        complete. Earlier per-step errors are tolerated as long as the
+        loop recovered — the LLM had the chance to continue if needed.
+        """
         has_failures = any(r.get("failed") for r in executed_results)
+        had_recovery = has_failures and voluntarily_stopped
 
         # If the goal is already in a terminal state e.g on client cancellation,
         # don't attempt another state transition.
@@ -1432,33 +1445,38 @@ class Cortex(ModelComponent, Monitor):
             with self._main_goal_lock:
                 self._cancel_all_active_clients()
                 goal_handle.abort()
-        elif has_failures:
-            self._send_feedback(
-                goal_handle,
-                feedback_msg,
-                plan_len,
-                f"Plan finished with errors. {summary}",
-                completed=True,
-            )
-            self.get_logger().warning(f"Task finished with errors: {summary}")
-            with self._main_goal_lock:
-                self._cancel_all_active_clients()
-                goal_handle.abort()
-        else:
+        elif voluntarily_stopped:
             result_msg.success = True
+            if had_recovery:
+                feedback = "Plan finished despite errors along the way."
+                self.get_logger().info(feedback)
+            else:
+                feedback = f"All {plan_len} steps completed."
+                self.get_logger().info(
+                    f"Task completed: {len(executed_results)} steps executed."
+                )
             self._send_feedback(
-                goal_handle,
-                feedback_msg,
-                plan_len,
-                f"All {plan_len} steps completed. {summary}",
-                completed=True,
-            )
-            self.get_logger().info(
-                f"Task completed: {len(executed_results)} steps executed."
+                goal_handle, feedback_msg, plan_len, feedback, completed=True
             )
             with self._main_goal_lock:
                 self._cancel_all_active_clients()
                 goal_handle.succeed()
+        else:
+            # Loop exhausted without the LLM voluntarily stopping
+            self._send_feedback(
+                goal_handle,
+                feedback_msg,
+                plan_len,
+                f"Plan did not finish: reached max_execution_steps "
+                f"({self.config.max_execution_steps}).",
+                completed=True,
+            )
+            self.get_logger().warning(
+                "Task exhausted max_execution_steps without voluntary completion."
+            )
+            with self._main_goal_lock:
+                self._cancel_all_active_clients()
+                goal_handle.abort()
 
     def main_action_callback(self, goal_handle):
         """Action server callback. Iterative plan-execute loop.
@@ -1485,6 +1503,7 @@ class Cortex(ModelComponent, Monitor):
         all_executed_results: List[Dict] = []
         total_steps = 0
         planning_messages = None
+        voluntarily_stopped = False
 
         for _ in range(self.config.max_execution_steps):
             # Plan (or continue planning with prior results)
@@ -1493,7 +1512,8 @@ class Cortex(ModelComponent, Monitor):
             if plan is None:
                 # No more actions needed
                 if all_executed_results:
-                    # We already executed some steps — task is complete
+                    # We already executed some steps — LLM signalled done
+                    voluntarily_stopped = True
                     break
                 # First iteration, no plan at all
                 text_output = self._planning_output or ""
@@ -1544,7 +1564,7 @@ class Cortex(ModelComponent, Monitor):
                     result_msg,
                     all_executed_results,
                     total_steps,
-                    True,
+                    aborted=True,
                 )
                 return result_msg
 
@@ -1554,14 +1574,15 @@ class Cortex(ModelComponent, Monitor):
                 planning_messages, plan, executed_results
             )
 
-        # All iterations done — finalize
+        # Loop exited — either voluntarily (LLM stopped) or exhausted
         self._finalize_goal(
             goal_handle,
             feedback_msg,
             result_msg,
             all_executed_results,
             total_steps,
-            False,
+            aborted=False,
+            voluntarily_stopped=voluntarily_stopped,
         )
         return result_msg
 
