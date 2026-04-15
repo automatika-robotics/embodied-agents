@@ -150,12 +150,16 @@ class Cortex(ModelComponent, Monitor):
         self.model_client = model_client
         self.db_client = db_client if db_client else None
 
+        # Effective planning prompt; augmented in custom_on_activate
+        # based on discovered managed components (e.g. to handle Memory)
+        self._effective_planning_prompt = self._PLANNING_PROMPT
+
         # Initialize messages buffer
         self.messages: List[Dict] = [
-            {"role": "system", "content": self._PLANNING_PROMPT}
+            {"role": "system", "content": self._effective_planning_prompt}
         ]
 
-        # Tool registries — separated into planning and execution phases.
+        # Tool registries separated into planning and execution phases.
         # Planning tools (e.g. inspect_component) gather information.
         # Execution tools (actions, system tools) are what the plan consists of.
         self._planning_tools: Set = set()
@@ -306,6 +310,7 @@ class Cortex(ModelComponent, Monitor):
         if self._components_to_monitor:
             Monitor.activate(self)
             self._register_system_tools()
+            self._augment_planning_prompt_for_memory()
 
         # Display all the tools registered
         planning_names = [
@@ -316,6 +321,83 @@ class Cortex(ModelComponent, Monitor):
         ]
         self.get_logger().debug(f"Cortex planning tools: {planning_names}")
         self.get_logger().debug(f"Cortex execution tools: {execution_names}")
+
+    def _augment_planning_prompt_for_memory(self) -> None:
+        """Append memory-aware guidance to the planning prompt when a
+        Memory component is present in the managed recipe.
+
+        Detects the Memory component by class name, verifies it exposes
+        the expected episode/body-status tools, and builds an addendum
+        instructing the planner to wrap tasks in episodes, check body
+        status during planning, and use memory retrieval tools.
+        """
+        # Find a managed Memory component
+        memory_comp_name: Optional[str] = None
+        for name, comp in self._managed_components.items():
+            if type(comp).__name__ == "Memory":
+                memory_comp_name = name
+                break
+
+        if not memory_comp_name:
+            return
+
+        prefix = f"{memory_comp_name}."
+        start_ep_tool = f"{prefix}start_episode"
+        end_ep_tool = f"{prefix}end_episode"
+        body_status_tool = f"{prefix}body_status"
+
+        # Only augment if the expected tools are actually registered
+        required = {start_ep_tool, end_ep_tool}
+        if not required.issubset(self._execution_tools):
+            return
+
+        # Retrieval tools registered on the memory component (planning phase)
+        retrieval_tools = sorted(
+            name
+            for name in self._planning_tools
+            if name.startswith(prefix) and name != body_status_tool
+        )
+        retrieval_str = ", ".join(retrieval_tools) if retrieval_tools else "(none)"
+
+        addendum = (
+            "\n\n=== Memory Guidance ===\n"
+            f"A spatio-temporal memory component '{memory_comp_name}' is "
+            "available.\n\n"
+            "TASK CLASSIFICATION — first decide which type of task you have:\n"
+            "  (A) QUERY TASK: the user is asking a question about the past "
+            "(e.g. 'what happened in the last episode?', 'where did you see "
+            "the cup?', 'what did you do today?'). No real-world action is "
+            "needed.\n"
+            "  (B) ACTION TASK: the user wants the robot to do something "
+            "(e.g. 'take a picture and describe it', 'toggle the LED', "
+            "'navigate to the kitchen').\n\n"
+            "FOR QUERY TASKS:\n"
+            f"  - Call the appropriate retrieval tool(s) during planning: "
+            f"{retrieval_str}.\n"
+            "  - After the retrieval results come back, respond with a "
+            "text answer summarizing what you found. DO NOT return any "
+            "execution tool calls. DO NOT start or end an episode — "
+            "query tasks do not generate new observations.\n\n"
+            "FOR ACTION TASKS:\n"
+            f"  1. Call '{body_status_tool}' during planning to read the "
+            "robot's current internal state (battery, location, etc.).\n"
+            "  2. Optionally use retrieval tools during planning to ground "
+            f"the task in past memory (e.g. use '{memory_comp_name}.locate' "
+            "to find a known object's position).\n"
+            f"  3. Begin your execution plan with '{start_ep_tool}' using a "
+            "short, descriptive episode name derived from the task.\n"
+            f"  4. End your execution plan with '{end_ep_tool}' to "
+            "consolidate observations from this task into long-term memory.\n"
+            f"  Episodes are mandatory for ACTION tasks — always wrap the "
+            f"plan between '{start_ep_tool}' and '{end_ep_tool}'."
+        )
+
+        self._effective_planning_prompt = self._PLANNING_PROMPT + addendum
+        self.config._system_prompt = self._effective_planning_prompt
+        self.messages = [{"role": "system", "content": self._effective_planning_prompt}]
+        self.get_logger().info(
+            f"Planning prompt augmented for Memory component '{memory_comp_name}'."
+        )
 
     def custom_on_deactivate(self):
         if self.db_client:
@@ -486,7 +568,7 @@ class Cortex(ModelComponent, Monitor):
                 user_content = f"Context:\n{rag_context}\n\nTask: {task}"
 
         return [
-            {"role": "system", "content": self._PLANNING_PROMPT},
+            {"role": "system", "content": self._effective_planning_prompt},
             {"role": "user", "content": user_content},
         ]
 
@@ -519,9 +601,6 @@ class Cortex(ModelComponent, Monitor):
                 f"[Planning step {step + 1}] calling {fn_name}({fn_args})"
             )
             tool_result = self._execute_planning_tool(fn_name, fn_args)
-            self.get_logger().debug(
-                f"[Planning step {step + 1}] {fn_name} -> {tool_result[:300]}"
-            )
             messages.append({
                 "role": "tool",
                 "tool_call_id": f"plan_{step}_{i}",
@@ -777,7 +856,6 @@ class Cortex(ModelComponent, Monitor):
             inference_input["tools"] = self._execution_tool_descriptions
 
         result = self._call_inference(inference_input)
-        self.get_logger().debug(f"Got confirm step result = {result}")
         if not result:
             self.get_logger().warning(
                 "Confirmation inference failed; defaulting to EXECUTE."

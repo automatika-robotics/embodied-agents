@@ -159,7 +159,7 @@ class OllamaClient(ModelClient):
             else inference_input
         )
 
-        # self.logger.debug(f"Sending to ollama server: {input}")
+        self.logger.debug(f"Sending to ollama server: {input}")
 
         # call inference method
         try:
