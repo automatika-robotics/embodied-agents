@@ -1,6 +1,7 @@
 """The following classes provide wrappers for data being transmitted via ROS topics. These classes form the inputs and outputs of [Components](agents.components.md)."""
 
-from typing import Union, Any, Dict, List, Tuple, Optional
+from enum import Enum
+from typing import Callable, Union, Any, Dict, List, Optional, Tuple
 import numpy as np
 from attrs import define, field, Factory
 from importlib.util import find_spec
@@ -35,7 +36,7 @@ from ros_sugar.core import BaseComponent, Monitor
 from ros_sugar.core.component import MutuallyExclusiveCallbackGroup
 from ros_sugar import UI_EXTENSIONS
 from ros_sugar.utils import (
-    component_action,
+    component_action as _sugar_component_action,
     component_fallback,
     get_methods_with_decorator,
 )
@@ -117,7 +118,82 @@ __all__ = [
     "get_ros_msg_fields_dict",
     "ros_msg_to_str",
     "get_methods_with_decorator",
+    "ActionPhase",
 ]
+
+
+# =========================================================================
+# Sugarcoat Overrides
+# =========================================================================
+
+
+class ActionPhase(str, Enum):
+    """Cognitive phase in which a component action should be exposed.
+
+    Read by Cortex when discovering tools on managed components.
+
+    - ``PLANNING``: tool is only registered with the planner. Use for
+      research / introspection tools that the planner calls while
+      building a plan but that the executor has no reason to invoke.
+    - ``EXECUTION``: tool is only registered with the executor. This is
+      the default and matches the historical behavior of bare
+      ``@component_action``. Use for state-changing actions (``say``,
+      ``store_specific_memory``, ``start_episode``, ...).
+    - ``BOTH``: tool is registered with both. Use for retrieval tools
+      that the planner benefits from calling before emitting a plan
+      (e.g. ``describe``, ``locate``) and that the executor may
+      also need at run time.
+    """
+
+    PLANNING = "planning"
+    EXECUTION = "execution"
+    BOTH = "both"
+
+
+def component_action(
+    function: Optional[Callable] = None,
+    *,
+    description: Optional[Dict] = None,
+    active: bool = False,
+    phase: Union[ActionPhase, str] = ActionPhase.EXECUTION,
+):
+    """Wrapper around sugarcoat's ``component_action`` decorator.
+
+    Delegates to ``ros_sugar.utils.component_action`` for the core
+    behavior and additionally tags the method with ``_action_phase``
+    — a hint to Cortex about whether the tool is a planning tool,
+    an execution tool, or both.
+
+    Can be used the same way as sugarcoat's decorator:
+
+        @component_action(description={...}, phase=ActionPhase.BOTH)
+        def c(self) -> str: ...
+
+    If ``phase`` is not specified the action defaults to
+    ``ActionPhase.EXECUTION``, preserving the previous behavior.
+
+    :param function: The method being decorated (set when the decorator
+        is used without parentheses).
+    :param description: OpenAI-format tool description dict, forwarded
+        verbatim to sugarcoat.
+    :param active: If True, sugarcoat will reject calls while the
+        component is not in the active lifecycle state.
+    :param phase: Cognitive phase. Defaults to
+        :attr:`ActionPhase.EXECUTION`.
+    """
+    phase_value = phase.value if isinstance(phase, ActionPhase) else str(phase)
+
+    def _wrap(func: Callable) -> Callable:
+        wrapped = _sugar_component_action(
+            function=func, description=description, active=active
+        )
+        wrapped._action_phase = phase_value
+        return wrapped
+
+    if function is not None:
+        return _wrap(function)
+    return _wrap
+
 
 # =========================================================================
 # Additional Datatypes (Augment Sugarcoat datatypes)
