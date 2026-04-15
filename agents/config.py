@@ -188,16 +188,18 @@ class CortexConfig(LLMConfig):
         execution plan. Plans with more steps are truncated. Default is 10.
     :type max_execution_steps: int
     :param confirmation_temperature: Temperature for the per-step confirmation LLM
-        calls. Lower values give more deterministic responses. Default is 0.2.
+        calls. Used for both the decision and resolving tool call arguments
+        from prior step results. Default is 0.3.
     :type confirmation_temperature: float
     :param confirmation_max_tokens: Maximum tokens for confirmation responses.
-        Kept low since only EXECUTE/SKIP/ABORT is expected. Default is 100.
+        Must be large enough to accommodate a tool call with resolved arguments
+        when the LLM returns EXECUTE. Default is 500.
     :type confirmation_max_tokens: int
     :param temperature: Temperature used for the planning LLM call.
         Default is 0.8 and must be greater than 0.0.
     :type temperature: float
     :param max_new_tokens: The maximum number of new tokens to generate during planning.
-        Default is 500 and must be greater than 0.
+        Default is 1000 (inherited from LLMConfig) and must be greater than 0.
     :type max_new_tokens: int
     :param enable_rag: Enable Retrieval Augmented Generation to provide context
         during planning. Requires a ``db_client`` to be passed to the Cortex component.
@@ -228,9 +230,9 @@ class CortexConfig(LLMConfig):
     max_planning_steps: int = field(default=10, validator=base_validators.gt(0))
     max_execution_steps: int = field(default=10, validator=base_validators.gt(0))
     confirmation_temperature: float = field(
-        default=0.2, validator=base_validators.gt(0.0)
+        default=0.3, validator=base_validators.gt(0.0)
     )
-    confirmation_max_tokens: int = field(default=1000, validator=base_validators.gt(0))
+    confirmation_max_tokens: int = field(default=500, validator=base_validators.gt(0))
     monitoring_interval: float = field(default=2.0, validator=base_validators.gt(0.0))
 
     def _get_inference_params(self) -> Dict:
