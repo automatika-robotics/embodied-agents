@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Any, Dict, Optional, Union, List
+import json
 
 from ..clients.model_base import ModelClient
 from ..config import MemoryConfig
@@ -577,3 +578,48 @@ class Memory(Component):
             name = desc["function"]["name"]
             if tools is None or name in tools:
                 llm.register_tool(fn, desc, send_tool_response_to_model)
+
+    def _update_cmd_args_list(self):
+        """
+        Update launch command arguments
+        """
+        super()._update_cmd_args_list()
+
+        self.launch_cmd_args = [
+            "--layers",
+            self._get_layers_json(),
+        ]
+
+        self.launch_cmd_args = [
+            "--model_client",
+            self._get_client_json(self.model_client),
+        ]
+
+        self.launch_cmd_args = [
+            "--embedding_client",
+            self._get_client_json(self.embedding_client),
+        ]
+
+    def _get_layers_json(self) -> Union[str, bytes, bytearray]:
+        """
+        Serialize component layers to json
+
+        :return: Serialized inputs
+        :rtype:  str | bytes | bytearray
+        """
+        if not hasattr(self, "layers_dict"):
+            return "[]"
+        return json.dumps([layer.to_json() for layer in self.layers_dict.values()])
+
+    def _get_client_json(
+        self, client: Optional[ModelClient]
+    ) -> Union[str, bytes, bytearray]:
+        """
+        Serialize component client to json
+
+        :return: Serialized inputs
+        :rtype:  str | bytes | bytearray
+        """
+        if not client:
+            return ""
+        return json.dumps(client.serialize())
