@@ -111,7 +111,7 @@ class ModelComponent(Component):
             },
         }
     )
-    def fallback_to_local(self) -> bool:
+    def fallback_to_local(self) -> str:
         """Switch from remote model_client to the built-in local model at runtime.
 
         The local model is deployed on first call (lazy initialization) to avoid
@@ -120,8 +120,9 @@ class ModelComponent(Component):
 
         This is commonly used as a target for Actions in the Event system.
 
-        :return: True if the switch was successful, False otherwise.
-        :rtype: bool
+        :return: A confirmation message describing the switch.
+        :rtype: str
+        :raises RuntimeError: If the local model could not be deployed.
 
         :Example:
 
@@ -146,8 +147,7 @@ class ModelComponent(Component):
         try:
             self._deploy_local_model()
         except Exception as e:
-            self.get_logger().error(f"Failed to deploy local model: {e}")
-            return False
+            raise RuntimeError(f"Failed to deploy local model: {e}") from e
 
         # Deinitialize remote client
         if self.model_client:
@@ -158,7 +158,7 @@ class ModelComponent(Component):
             self.model_client = None
 
         self.get_logger().info("Switched to local model for inference.")
-        return True
+        return f"Component '{self.node_name}' switched to local model for inference."
 
     @component_fallback(
         description={
@@ -179,7 +179,7 @@ class ModelComponent(Component):
             },
         }
     )
-    def change_model_client(self, model_client_name: str) -> bool:
+    def change_model_client(self, model_client_name: str) -> str:
         """
         Hot-swap the active model client at runtime.
 
@@ -191,8 +191,10 @@ class ModelComponent(Component):
 
         :param model_client_name: The key corresponding to the desired client in ``additional_model_clients``.
         :type model_client_name: str
-        :return: True if the swap was successful, False otherwise (e.g., if the name was not found or initialization failed).
-        :rtype: bool
+        :return: A confirmation message describing the swap.
+        :rtype: str
+        :raises RuntimeError: If no additional clients are registered, the
+            requested client name is not found, or initialization fails.
 
         :Example:
 
@@ -211,16 +213,16 @@ class ModelComponent(Component):
         ```
         """
         if not self._additional_model_clients:
-            self.get_logger().error(
-                "Cannot change model client as the component was not given any additional model clients at init."
+            raise RuntimeError(
+                "Cannot change model client as the component was not given any "
+                "additional model clients at init."
             )
-            return False
         new_client = self._additional_model_clients.get(model_client_name, None)
         if not new_client:
-            self.get_logger().info(
-                f"No additional client named {model_client_name} is available in the component. Only the following additional clients were provided {self._additional_model_clients}"
+            raise RuntimeError(
+                f"No additional client named '{model_client_name}' is available. "
+                f"Available clients: {list(self._additional_model_clients.keys())}"
             )
-            return False
 
         self.get_logger().info(f"Changing model client to {model_client_name}")
 
@@ -232,13 +234,15 @@ class ModelComponent(Component):
             # Set the new client
             self.model_client = new_client
             self.model_client.initialize()  # initialize the new client
-        except Exception:
-            self.get_logger().error(
-                "Error encountered during initialization when changing model client"
-            )
-            return False
+        except Exception as e:
+            raise RuntimeError(
+                f"Error initializing new model client '{model_client_name}': {e}"
+            ) from e
 
-        return True
+        return (
+            f"Component '{self.node_name}' switched to model client "
+            f"'{model_client_name}'."
+        )
 
     def inspect_component(self) -> str:
         """Return component info including additional model clients."""
