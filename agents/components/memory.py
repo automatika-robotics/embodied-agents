@@ -11,6 +11,7 @@ from ..ros import (
     Detections,
     DetectionsMultiSource,
     MapLayer,
+    ActionPhase,
     component_action,
 )
 from ..utils import validate_func_args
@@ -496,52 +497,54 @@ class Memory(Component):
 
     ### Retrieval actions ###
 
-    @component_action(description=_tool("semantic_search"))
+    @component_action(description=_tool("semantic_search"), phase=ActionPhase.PLANNING)
     def semantic_search(self, **kwargs) -> str:
         """Search memory by meaning."""
         return self.memory.dispatch_tool_call("semantic_search", kwargs)
 
-    @component_action(description=_tool("spatial_query"))
+    @component_action(description=_tool("spatial_query"), phase=ActionPhase.PLANNING)
     def spatial_query(self, **kwargs) -> str:
         """Find observations within a radius of a point."""
         return self.memory.dispatch_tool_call("spatial_query", kwargs)
 
-    @component_action(description=_tool("temporal_query"))
+    @component_action(description=_tool("temporal_query"), phase=ActionPhase.PLANNING)
     def temporal_query(self, **kwargs) -> str:
         """Find observations in a time range."""
         return self.memory.dispatch_tool_call("temporal_query", kwargs)
 
-    @component_action(description=_tool("episode_summary"))
+    @component_action(description=_tool("episode_summary"), phase=ActionPhase.PLANNING)
     def episode_summary(self, **kwargs) -> str:
         """Get summary of one or more episodes."""
         return self.memory.dispatch_tool_call("episode_summary", kwargs)
 
-    @component_action(description=_tool("get_current_context"))
+    @component_action(
+        description=_tool("get_current_context"), phase=ActionPhase.PLANNING
+    )
     def get_current_context(self, **kwargs) -> str:
         """Get situational awareness."""
         return self.memory.dispatch_tool_call("get_current_context", kwargs)
 
-    @component_action(description=_tool("search_gists"))
+    @component_action(description=_tool("search_gists"), phase=ActionPhase.PLANNING)
     def search_gists(self, **kwargs) -> str:
         """Search consolidated memory summaries."""
         return self.memory.dispatch_tool_call("search_gists", kwargs)
 
-    @component_action(description=_tool("entity_query"))
+    @component_action(description=_tool("entity_query"), phase=ActionPhase.PLANNING)
     def entity_query(self, **kwargs) -> str:
         """Find known entities."""
         return self.memory.dispatch_tool_call("entity_query", kwargs)
 
-    @component_action(description=_tool("locate"))
+    @component_action(description=_tool("locate"), phase=ActionPhase.PLANNING)
     def locate(self, **kwargs) -> str:
         """Find the spatial location of a concept."""
         return self.memory.dispatch_tool_call("locate", kwargs)
 
-    @component_action(description=_tool("recall"))
+    @component_action(description=_tool("recall"), phase=ActionPhase.PLANNING)
     def recall(self, **kwargs) -> str:
         """Recall everything known about a concept."""
         return self.memory.dispatch_tool_call("recall", kwargs)
 
-    @component_action(description=_tool("body_status"))
+    @component_action(description=_tool("body_status"), phase=ActionPhase.BOTH)
     def body_status(self, **kwargs) -> str:
         """Get latest body/internal state readings."""
         return self.memory.dispatch_tool_call("body_status", kwargs)
