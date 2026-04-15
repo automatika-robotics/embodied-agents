@@ -7,11 +7,12 @@ from ..config import MemoryConfig
 from ..ros import (
     Odometry,
     String,
+    StreamingString,
     Event,
     Topic,
     Detections,
     DetectionsMultiSource,
-    MapLayer,
+    MemLayer,
     ActionPhase,
     component_action,
 )
@@ -61,8 +62,12 @@ class Memory(Component):
     and provides consolidation, entity tracking, and structured retrieval tools
     instead of flat vector DB storage.
 
-    :param layers: Perception layers to encode (output topics from other components).
-    :type layers: list[MapLayer]
+    :param layers: Input layers to encode. Each layer subscribes to a topic
+        whose callback produces a string via ``_get_ui_content``. Layers with
+        ``is_internal_state=True`` are written via ``add_body_state`` and
+        retrieved through the ``body_status`` tool; all other layers are
+        perception layers retrieved through ``semantic_search`` and friends.
+    :type layers: list[MemLayer]
     :param position: Odometry topic providing the robot's current position.
     :type position: Topic
     :param model_client: Model client for memory consolidation (summarization, entity extraction). If not provided, consolidation uses simple text concatenation.
@@ -81,12 +86,14 @@ class Memory(Component):
     position = Topic(name="odom", msg_type="Odometry")
     detections = Topic(name="detections", msg_type="Detections")
     room_type = Topic(name="room_type", msg_type="String")
+    battery = Topic(name="battery_state", msg_type="BatteryState")
 
-    layer1 = MapLayer(subscribes_to=detections, temporal_change=True)
-    layer2 = MapLayer(subscribes_to=room_type, resolution_multiple=3)
+    layer1 = MemLayer(subscribes_to=detections, temporal_change=True)
+    layer2 = MemLayer(subscribes_to=room_type, resolution_multiple=3)
+    layer3 = MemLayer(subscribes_to=battery, is_internal_state=True)
 
     memory = Memory(
-        layers=[layer1, layer2],
+        layers=[layer1, layer2, layer3],
         position=position,
         model_client=llama_client,
         embedding_client=embed_client,
@@ -101,7 +108,7 @@ class Memory(Component):
     def __init__(
         self,
         *,
-        layers: List[MapLayer],
+        layers: List[MemLayer],
         position: Topic,
         model_client: Optional[ModelClient] = None,
         embedding_client: Optional[ModelClient] = None,
@@ -121,9 +128,8 @@ class Memory(Component):
         self.config: MemoryConfig = config or MemoryConfig()
         self.allowed_inputs = {
             "Required": [Odometry],
-            "Optional": [String, Detections, DetectionsMultiSource],
+            "Optional": [String, StreamingString, Detections, DetectionsMultiSource],
         }
-
         self.model_client = model_client
         self.embedding_client = embedding_client
 
@@ -221,66 +227,136 @@ class Memory(Component):
             self.model_client.deinitialize()
 
     def inspect_component(self) -> str:
-        """Return component info including configured perception layers.
+        """Return component info including configured layers.
 
-        Appends a ``Perception layers:`` section listing each configured
-        MapLayer (layer name, source topic, and message type). A consumer
+        Appends a ``Perception layers:`` section and, if any are
+        configured, an ``Internal-state layers:`` section. A consumer
         like Cortex can read this to learn which layer tags observations
         get stored under. Useful when planning retrieval calls that take
-        a ``layer`` filter, or when deciding whether an LLM-injected memory
-        should share a tag with an existing perception stream.
+        a ``layer`` filter: perception layers are queried via
+        ``semantic_search`` / ``spatial_query`` / ``locate``, while
+        internal-state layers are queried via ``body_status``.
         """
         result = super().inspect_component()
 
-        if self.layers_dict:
-            lines = [
-                "",
+        def _fmt(name, layer):
+            topic = layer.subscribes_to
+            msg_name = (
+                topic.msg_type.__name__
+                if hasattr(topic.msg_type, "__name__")
+                else str(topic.msg_type)
+            )
+            return f"  - {name}  (from topic '{topic.name}', type {msg_name})"
+
+        perception = {
+            n: lay for n, lay in self.layers_dict.items() if not lay.is_internal_state
+        }
+        internal = {
+            n: lay for n, lay in self.layers_dict.items() if lay.is_internal_state
+        }
+
+        lines = [""]
+        if perception:
+            lines += [
                 "Perception layers (layer_name → source topic):",
                 (
-                    "  Each layer tags observations with a label derived from "
-                    "its source topic. Use these names as the 'layer' filter in "
-                    "memory retrieval tools (semantic_search, spatial_query, "
-                    "locate, ...) to narrow results to one stream."
+                    "  Use these names as the 'layer' filter in perception "
+                    "retrieval tools (semantic_search, spatial_query, locate, "
+                    "...) to narrow results to one stream."
                 ),
             ]
-            for name, layer in self.layers_dict.items():
-                topic = layer.subscribes_to
-                msg_name = (
-                    topic.msg_type.__name__
-                    if hasattr(topic.msg_type, "__name__")
-                    else str(topic.msg_type)
-                )
-                lines.append(
-                    f"  - {name}  (from topic '{topic.name}', type {msg_name})"
-                )
-            result += "\n".join(lines)
+            lines += [_fmt(n, lay) for n, lay in perception.items()]
         else:
-            result += "\nPerception layers: none configured"
+            lines.append("Perception layers: none configured")
 
+        if internal:
+            lines += [
+                "",
+                "Internal-state layers (layer_name → source topic):",
+                (
+                    "  These carry the robot's own state (battery, temperature, "
+                    "joint health, etc.). Query them via body_status(layers=[...]) "
+                    "— they are NOT returned by semantic_search."
+                ),
+            ]
+            lines += [_fmt(n, lay) for n, lay in internal.items()]
+
+        result += "\n".join(lines)
         result += f"\nPosition topic: {self.position.name}"
         return result
 
-    def _layers(self, layers: List[MapLayer]):
-        """Set up perception layers and callbacks"""
+    def _layers(self, layers: List[MemLayer]):
+        """Set up layers and callbacks.
+
+        Perception-layer topics are validated against ``allowed_inputs``
+        so mis-wired topics fail loudly at configuration time. Internal-state
+        layers are *not* validated: their message types come from
+        robot plugins and the plugin contract is that their callback's
+        ``get_output`` returns something representable as a string.
+        """
         self.layers_dict = {layer.subscribes_to.name: layer for layer in layers}
-        layer_topics = [layer.subscribes_to for layer in layers]
-        all_inputs = [*layer_topics, self.config._position]
-        self._validate_topics(all_inputs, self.allowed_inputs, "Inputs")
+
+        perception_topics = [
+            layer.subscribes_to for layer in layers if not layer.is_internal_state
+        ]
+        try:
+            self._validate_topics(
+                [*perception_topics, self.config._position],
+                self.allowed_inputs,
+                "Inputs",
+            )
+        except Exception as e:
+            raise TypeError(
+                f"Memory Layers which do not have `is_internal_state=True` can only be of the allowed datatypes: {[lay.__name__ for lay in self.allowed_inputs['Optional']]} or their subclasses."
+            ) from e
+
+        all_topics = [layer.subscribes_to for layer in layers] + [self.config._position]
         self.callbacks = {
-            input.name: input.msg_type.callback(input) for input in all_inputs
+            input.name: input.msg_type.callback(input) for input in all_topics
         }
 
     def _store_layers(self, position, time_stamp) -> None:
-        """Store all layer data at the given position and time."""
-        for name in self.layers_dict:
-            if item := self.callbacks[name].get_output():
-                self.memory.add(
-                    text=item,
-                    x=float(position[0]),
-                    y=float(position[1]),
-                    z=float(position[2]) if len(position) > 2 else 0.0,
+        """Store all layer data at the given position and time.
+
+        Every layer's text is read via the callback's ``get_output``.
+        Perception callbacks already return semantic strings there; for
+        internal-state layers a plugin-provided callback is expected to
+        return a string (or at worst something that stringifies
+        sensibly). Non-string returns are coerced.
+
+        Layers flagged ``is_internal_state=True`` are routed to
+        ``SpatioTemporalMemory.add_body_state``.
+        """
+        x = float(position[0])
+        y = float(position[1])
+        z = float(position[2]) if len(position) > 2 else 0.0
+        ts = float(time_stamp)
+
+        for name, layer in self.layers_dict.items():
+            raw = self.callbacks[name].get_output()
+            if raw is None:
+                continue
+            text = raw if isinstance(raw, str) else str(raw)
+            if not text:
+                continue
+
+            if layer.is_internal_state:
+                self.memory.add_body_state(
+                    text=text,
                     layer_name=name,
-                    timestamp=float(time_stamp),
+                    x=x,
+                    y=y,
+                    z=z,
+                    timestamp=ts,
+                )
+            else:
+                self.memory.add(
+                    text=text,
+                    x=x,
+                    y=y,
+                    z=z,
+                    layer_name=name,
+                    timestamp=ts,
                 )
 
     def _execution_step(self, **kwargs):

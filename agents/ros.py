@@ -103,6 +103,7 @@ __all__ = [
     "ComponentRunType",
     "Launcher",
     "Monitor",
+    "MemLayer",
     "MapLayer",
     "Route",
     "MutuallyExclusiveCallbackGroup",
@@ -831,21 +832,32 @@ def _get_np_coordinates(
 
 
 @define(kw_only=True)
-class MapLayer(BaseAttrs):
-    """A MapLayer represents a single input for a MapEncoding component. It can subscribe to a specific text topic.
+class MemLayer(BaseAttrs):
+    """A MemLayer represents a single input layer for a ``Memory`` or
+    ``MapEncoding`` component. It subscribes to a topic whose callback
+    produces a string representation (via ``_get_ui_content``) that can be
+    stored as an observation.
 
-    :param subscribes_to: The topic that this map layer is subscribed to.
+    :param subscribes_to: The topic that this layer is subscribed to.
     :type subscribes_to: Topic
-    :param temporal_change: Indicates whether the map should store changes over time for the same position. Defaults to False.
+    :param temporal_change: Indicates whether the map should store changes over time for the same position. Defaults to False. (``MapEncoding`` only.)
     :type temporal_change: bool
-    :param resolution_multiple: A positive multiplication factor for the base resolution of the map grid, for fine or coarse graining the map. Defaults to 1.
+    :param resolution_multiple: A positive multiplication factor for the base resolution of the map grid, for fine or coarse graining the map. Defaults to 1. (``MapEncoding`` only.)
     :type resolution_multiple: int
     :param pre_defined: An optional list of pre-defined data points in the layer. Each datapoint is a tuple of [position, text], where position is a numpy array of coordinates.
     :type pre_defined: list[tuple[np.ndarray, str]]
+    :param is_internal_state: If True, observations from this layer are
+        treated as internal state (interoception) by ``Memory``: they are
+        written via ``add_body_state`` and are retrieved through the
+        ``body_status`` tool rather than the perception tools. Use this
+        for robot-internal signals like battery, temperature, or joint
+        health. Defaults to False. (``Memory`` only.)
+    :type is_internal_state: bool
 
     Example of usage:
     ```python
-    my_map_layer = MapLayer(subscribes_to='my_topic', temporal_change=True)
+    my_layer = MemLayer(subscribes_to='my_topic', temporal_change=True)
+    battery_layer = MemLayer(subscribes_to='battery_state', is_internal_state=True)
     ```
     """
 
@@ -857,6 +869,11 @@ class MapLayer(BaseAttrs):
     pre_defined: List[Union[List, Tuple[np.ndarray, str]]] = field(
         default=Factory(list), converter=_get_np_coordinates
     )
+    is_internal_state: bool = field(default=False)
+
+
+# Backwards-compatible alias
+MapLayer = MemLayer
 
 
 @define(kw_only=True)
