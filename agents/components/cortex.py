@@ -332,61 +332,106 @@ class Cortex(ModelComponent, Monitor):
         status during planning, and use memory retrieval tools.
         """
         # Find a managed Memory component
-        memory_comp_name: Optional[str] = None
-        for name, comp in self._managed_components.items():
+        memory_comp = None
+        for comp in self._managed_components.values():
             if type(comp).__name__ == "Memory":
-                memory_comp_name = name
+                memory_comp = comp
                 break
 
-        if not memory_comp_name:
+        if memory_comp is None:
             return
 
-        prefix = f"{memory_comp_name}."
+        prefix = f"{memory_comp.node_name}."
         start_ep_tool = f"{prefix}start_episode"
         end_ep_tool = f"{prefix}end_episode"
         body_status_tool = f"{prefix}body_status"
+        store_note_tool = f"{prefix}store_specific_memory"
 
         # Only augment if the expected tools are actually registered
         required = {start_ep_tool, end_ep_tool}
         if not required.issubset(self._execution_tools):
             return
 
-        # Retrieval tools registered on the memory component (planning phase)
-        retrieval_tools = sorted(
+        # Perception retrieval tools (planning phase), excluding body_status
+        perception_retrieval_tools = sorted(
             name
             for name in self._planning_tools
             if name.startswith(prefix) and name != body_status_tool
         )
-        retrieval_str = ", ".join(retrieval_tools) if retrieval_tools else "(none)"
+        perception_str = (
+            ", ".join(perception_retrieval_tools)
+            if perception_retrieval_tools
+            else "(none)"
+        )
+
+        # Pre-compute memory component inspection so layer names are in
+        # the prompt directly — the planner doesn't need to spend a round
+        # trip calling inspect_component on memory
+        try:
+            memory_inspection = memory_comp.inspect_component()
+        except Exception as e:
+            self.get_logger().warning(
+                f"Failed to inspect memory component for prompt augmentation: {e}"
+            )
+            memory_inspection = ""
 
         addendum = (
             "\n\n=== Memory Guidance ===\n"
-            f"A spatio-temporal memory component '{memory_comp_name}' is "
-            "available.\n\n"
-            "TASK CLASSIFICATION — first decide which type of task you have:\n"
-            "  (A) QUERY TASK: the user is asking a question about the past "
-            "(e.g. 'what happened in the last episode?', 'where did you see "
-            "the cup?', 'what did you do today?'). No real-world action is "
-            "needed.\n"
-            "  (B) ACTION TASK: the user wants the robot to do something "
-            "(e.g. 'take a picture and describe it', 'toggle the LED', "
+            f"A spatio-temporal memory component '{memory_comp.node_name}' is "
+            "available. It has TWO distinct retrieval surfaces you must "
+            "distinguish between:\n"
+            f"  - Perception memory: past external observations (what the "
+            f"robot saw, detected, or was told). Retrieved via: {perception_str}.\n"
+            f"  - Interoception / body state: the robot's own internal "
+            f"readings (battery, temperature, joint health, fault flags). "
+            f"Retrieved via '{body_status_tool}' ONLY — internal state is "
+            f"NOT returned by perception retrieval tools.\n\n"
+            + (
+                f"Memory component inspection (use these layer names as "
+                f"'layer' / 'layers' filters on retrieval tools):\n"
+                f"{memory_inspection}\n\n"
+                if memory_inspection
+                else ""
+            )
+            + "TASK CLASSIFICATION — decide which type of task you have:\n"
+            "  (A) PERCEPTION QUERY: user is asking about past external "
+            "observations (e.g. 'what happened in the last episode?', "
+            "'where did you see the cup?', 'what did you do today?').\n"
+            "  (B) BODY QUERY: user is asking about the robot's internal "
+            "state (e.g. 'are you low on battery?', 'is anything wrong?', "
+            "'what is your current temperature?').\n"
+            "  (C) ACTION TASK: user wants the robot to do something in "
+            "the world (e.g. 'take a picture and describe it', "
             "'navigate to the kitchen').\n\n"
-            "FOR QUERY TASKS:\n"
-            f"  - Call the appropriate retrieval tool(s) during planning: "
-            f"{retrieval_str}.\n"
-            "  - After the retrieval results come back, respond with a "
-            "text answer summarizing what you found. DO NOT return any "
-            "execution tool calls. DO NOT start or end an episode — "
-            "query tasks do not generate new observations.\n\n"
+            "FOR PERCEPTION QUERY TASKS:\n"
+            f"  - Call one or more perception retrieval tools during "
+            f"planning: {perception_str}.\n"
+            "  - Respond with a text answer summarizing what you found.\n"
+            "  - DO NOT return any execution tool calls. DO NOT start or "
+            "end an episode — query tasks do not generate new observations.\n\n"
+            "FOR BODY QUERY TASKS:\n"
+            f"  - Call '{body_status_tool}' during planning (optionally "
+            f"filtered by an internal-state layer name listed above).\n"
+            "  - Respond with a text answer summarizing the readings.\n"
+            "  - DO NOT return execution tool calls. DO NOT start or end "
+            "an episode.\n\n"
             "FOR ACTION TASKS:\n"
             f"  1. Call '{body_status_tool}' during planning to read the "
-            "robot's current internal state (battery, location, etc.).\n"
-            "  2. Optionally use retrieval tools during planning to ground "
-            f"the task in past memory (e.g. use '{memory_comp_name}.locate' "
-            "to find a known object's position).\n"
+            "robot's current internal state. If readings indicate a "
+            "problem (very low battery, fault, overheating), abort the task "
+            "with a clear text explanation instead of proceeding.\n"
+            "  2. Optionally call perception retrieval tools during "
+            f"planning to ground the task in past memory (e.g. use "
+            f"'{memory_comp.node_name}.locate' to find a known object's "
+            "position).\n"
             f"  3. Begin your execution plan with '{start_ep_tool}' using a "
             "short, descriptive episode name derived from the task.\n"
-            f"  4. End your execution plan with '{end_ep_tool}' to "
+            "  4. Execute the task steps.\n"
+            f"  5. If during the task you derive a fact worth remembering "
+            f"(e.g. a VLM description you want to persist, an operator "
+            f"instruction, a decision), include '{store_note_tool}' in the "
+            f"plan to record it.\n"
+            f"  6. End your execution plan with '{end_ep_tool}' to "
             "consolidate observations from this task into long-term memory.\n"
             f"  Episodes are mandatory for ACTION tasks — always wrap the "
             f"plan between '{start_ep_tool}' and '{end_ep_tool}'."
@@ -396,7 +441,7 @@ class Cortex(ModelComponent, Monitor):
         self.config._system_prompt = self._effective_planning_prompt
         self.messages = [{"role": "system", "content": self._effective_planning_prompt}]
         self.get_logger().info(
-            f"Planning prompt augmented for Memory component '{memory_comp_name}'."
+            f"Planning prompt augmented for Memory component '{memory_comp.node_name}'."
         )
 
     def custom_on_deactivate(self):
