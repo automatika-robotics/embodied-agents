@@ -172,9 +172,9 @@ class Cortex(ModelComponent, Monitor):
         self._service_request_tools: Dict[str, Tuple[str, str, Any]] = {}
 
         # Behavioral actions: dispatched via internal event system
+        self._behavioral_actions = actions
         self._pure_internal_events = []
         self._additional_internal_actions = {}
-        self._setup_internal_action_events(actions)
 
         # Planning output buffer for failed plans
         self._planning_output: Optional[str] = None
@@ -267,6 +267,7 @@ class Cortex(ModelComponent, Monitor):
             activation_attempt_time=activation_attempt_time,
         )
         self.config = _config
+        self._setup_internal_action_events(self._behavioral_actions)
 
     def _setup_internal_action_events(self, actions: Optional[List[Action]]) -> None:
         """Create internal event topics and tool descriptions for each action."""

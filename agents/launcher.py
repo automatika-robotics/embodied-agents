@@ -71,7 +71,8 @@ class Launcher(BaseLauncher):
                 cortex_monitor = component
                 break
         if cortex_monitor:
-            # remove the Cortex component from the lists of components to monitor, as it will be the monitor itself
+            # remove the Cortex component from the lists of components to monitor,
+            # as it will be the monitor itself
             self._components.remove(cortex_monitor)
             components_names.remove(cortex_monitor.node_name)
             if cortex_monitor in services_components:
@@ -80,6 +81,8 @@ class Launcher(BaseLauncher):
                 action_components.remove(cortex_monitor)
             if cortex_monitor.node_name in all_components_to_activate_on_start:
                 all_components_to_activate_on_start.remove(cortex_monitor.node_name)
+
+            # set cortex as the monitor node now
             self.monitor_node = cortex_monitor
             self.monitor_node._init_internal_monitor(
                 components_names=components_names,
