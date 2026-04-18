@@ -22,8 +22,11 @@ A Component is the main execution unit in _EmbodiedAgents_ and in essence each c
 * - **[TextToSpeech](agents.components.texttospeech.md)**
   - Synthesizes audio from text using TTS models (e.g., TransformersTTS). Output audio can be played using the robot's speakers or published to a topic. Implements `say(text)` and `stop_playback` functions to play/stop audio based on events from other components or the environment.
 
-* - **[MapEncoding](agents.components.map_encoding.md)**
-  - Provides a spatio-temporal working memory by converting semantic outputs (e.g., from MLLMs or Vision) into a structured map representation. Uses robot localization data and output topics from other components to store information in a vector DB.
+* - **[MapEncoding](agents.components.map_encoding.md)** *(deprecated — use Memory)*
+  - Provides a spatio-temporal working memory by converting semantic outputs (e.g., from MLLMs or Vision) into a structured map representation. Uses robot localization data and output topics from other components to store information in a vector DB. **Deprecated:** use the [Memory](agents.components.memory.md) component instead.
+
+* - **[Memory](agents.components.memory.md)**
+  - Provides a graph-based spatio-temporal memory primitive powered by eMEM. Encodes perception streams (e.g., VLM descriptions, detections) and interoception streams (internal body state) into a memory indexed by meaning, location, and time. Exposes structured retrieval tools (semantic, spatial, temporal, entity, episode) as component actions and supports episode-based consolidation with entity tracking.
 
 * - **[SemanticRouter](agents.components.semantic_router.md)**
   - Routes information between topics based on semantic content and predefined routing rules. Uses a vector DB for semantic matching or an LLM for decision-making. This allows for creating complex graphs of components where a single input source can trigger different information processing pathways.

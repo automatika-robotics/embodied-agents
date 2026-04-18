@@ -25,6 +25,12 @@ class MapEncoding(Component):
     It takes in map layers, position topic, map occupancy grid topic, and a vector database client.
     Map layers can be arbitrary text based outputs from other components such as MLLMs or Vision.
 
+    .. deprecated::
+        MapEncoding is deprecated. Use the :class:`~agents.components.memory.Memory`
+        component instead, which provides a richer graph-based spatio-temporal
+        memory with perception + interoception encoding, episode-based
+        consolidation, and structured retrieval tools.
+
     :param layers: A list of map layer objects to be encoded.
     :type layers: list[MapLayer]
     :param position: The topic for the current robot position.
@@ -309,27 +315,29 @@ class MapEncoding(Component):
             input.name: input.msg_type.callback(input) for input in all_inputs
         }
 
-    @component_action(description={
-        "type": "function",
-        "function": {
-            "name": "add_point",
-            "description": "Add a labelled point to a spatial map layer.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "layer": {
-                        "type": "string",
-                        "description": "Name of the map layer to add the point to. Should be one of the layers available in this component",
+    @component_action(
+        description={
+            "type": "function",
+            "function": {
+                "name": "add_point",
+                "description": "Add a labelled point to a spatial map layer.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "layer": {
+                            "type": "string",
+                            "description": "Name of the map layer to add the point to. Should be one of the layers available in this component",
+                        },
+                        "point": {
+                            "type": "string",
+                            "description": "A position and label for the point.",
+                        },
                     },
-                    "point": {
-                        "type": "string",
-                        "description": "A position and label for the point.",
-                    },
+                    "required": ["layer", "point"],
                 },
-                "required": ["layer", "point"],
             },
-        },
-    })
+        }
+    )
     def add_point(self, layer: MapLayer, point: Tuple[np.ndarray, str]) -> None:
         """Component action to add a user defined point to the map collection.
         This action can be executed on an event.
