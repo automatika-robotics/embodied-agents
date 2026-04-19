@@ -17,7 +17,7 @@ from agents.clients import OllamaClient
 from agents.models import Whisper, TransformersTTS, VisionModel, OllamaModel
 from agents.vectordbs import ChromaDB
 from agents.config import VisionConfig, LLMConfig, MapConfig, SemanticRouterConfig
-from agents.ros import Topic, FixedInput, MapLayer, Route, Launcher
+from agents.ros import Topic, FixedInput, MapLayer, Route, Launcher, Action
 
 
 ### Setup our models and vectordb ###
@@ -250,26 +250,36 @@ router = SemanticRouter(
     component_name="router",
 )
 
+# Per-component fallback strategies.
+all_components = [
+    mllm,
+    llm,
+    goto,
+    introspector,
+    map,
+    router,
+    speech_to_text,
+    text_to_speech,
+    vision,
+]
+for component in all_components:
+    component.on_fail(  # on any failure
+        action=Action(component.restart),
+        max_retries=2,
+    )
+    component.fallback_rate = 1 / 10  # 0.1 Hz -- check for failures every 10s
+
 # Launch the components
 launcher = Launcher()
 launcher.enable_ui(
     inputs=[query_topic, audio_in], outputs=[detections_topic, query_answer, goal_point]
 )
 launcher.add_pkg(
-    components=[
-        mllm,
-        llm,
-        goto,
-        introspector,
-        map,
-        router,
-        speech_to_text,
-        text_to_speech,
-        vision,
-    ],
+    components=all_components,
     package_name="automatika_embodied_agents",
     multiprocessing=True,
 )
-launcher.on_process_fail()
-launcher.fallback_rate = 1 / 10  # 0.1 Hz or 10 seconds
+# Process-level crash recovery: respawn any multi-process component whose
+# process exits unexpectedly, up to ``max_retries`` times.
+launcher.on_process_fail(max_retries=3)
 launcher.bringup()
