@@ -270,6 +270,6 @@ launcher.add_pkg(
     package_name="automatika_embodied_agents",
     multiprocessing=True,
 )
-launcher.on_fail(action_name="restart")
+launcher.on_process_fail()
 launcher.fallback_rate = 1 / 10  # 0.1 Hz or 10 seconds
 launcher.bringup()
