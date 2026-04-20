@@ -41,7 +41,8 @@ jobs:
           git clone https://github.com/automatika-robotics/sugarcoat /ws/src/sugarcoat
           cd /ws
           pip install numpy 'attrs>=23.2.0' jinja2 httpx \
-                      msgpack msgpack-numpy setproctitle platformdirs tqdm websockets
+                      msgpack msgpack-numpy setproctitle platformdirs tqdm websockets \
+                      emem
           colcon build --symlink-install
         shell: bash
 
