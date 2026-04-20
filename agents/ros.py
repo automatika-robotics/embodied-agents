@@ -1,13 +1,13 @@
 """The following classes provide wrappers for data being transmitted via ROS topics. These classes form the inputs and outputs of [Components](agents.components.md)."""
 
-from typing import Union, Any, Dict, List, Tuple, Optional
+from enum import Enum
+from typing import Callable, Union, Any, Dict, List, Optional, Tuple
 import numpy as np
 from attrs import define, field, Factory
 from importlib.util import find_spec
 from rclpy.logging import get_logger
 
 from sensor_msgs.msg import JointState as JointStateROS
-from lifecycle_msgs.msg import State as LifecycleStateMsg
 
 # FROM SUGARCOAT
 from ros_sugar.supported_types import (
@@ -36,7 +36,7 @@ from ros_sugar.core import BaseComponent, Monitor
 from ros_sugar.core.component import MutuallyExclusiveCallbackGroup
 from ros_sugar import UI_EXTENSIONS
 from ros_sugar.utils import (
-    component_action,
+    component_action as _sugar_component_action,
     component_fallback,
     get_methods_with_decorator,
 )
@@ -103,6 +103,7 @@ __all__ = [
     "ComponentRunType",
     "Launcher",
     "Monitor",
+    "MemLayer",
     "MapLayer",
     "Route",
     "MutuallyExclusiveCallbackGroup",
@@ -117,9 +118,83 @@ __all__ = [
     "ActionClientHandler",
     "get_ros_msg_fields_dict",
     "ros_msg_to_str",
-    "LifecycleStateMsg",
     "get_methods_with_decorator",
+    "ActionPhase",
 ]
+
+
+# =========================================================================
+# Sugarcoat Overrides
+# =========================================================================
+
+
+class ActionPhase(str, Enum):
+    """Cognitive phase in which a component action should be exposed.
+
+    Read by Cortex when discovering tools on managed components.
+
+    - ``PLANNING``: tool is only registered with the planner. Use for
+      research / introspection tools that the planner calls while
+      building a plan but that the executor has no reason to invoke.
+    - ``EXECUTION``: tool is only registered with the executor. This is
+      the default and matches the historical behavior of bare
+      ``@component_action``. Use for state-changing actions (``say``,
+      ``store_specific_memory``, ``start_episode``, ...).
+    - ``BOTH``: tool is registered with both. Use for retrieval tools
+      that the planner benefits from calling before emitting a plan
+      (e.g. ``describe``, ``locate``) and that the executor may
+      also need at run time.
+    """
+
+    PLANNING = "planning"
+    EXECUTION = "execution"
+    BOTH = "both"
+
+
+def component_action(
+    function: Optional[Callable] = None,
+    *,
+    description: Optional[Dict] = None,
+    active: bool = False,
+    phase: Union[ActionPhase, str] = ActionPhase.EXECUTION,
+):
+    """Wrapper around sugarcoat's ``component_action`` decorator.
+
+    Delegates to ``ros_sugar.utils.component_action`` for the core
+    behavior and additionally tags the method with ``_action_phase``
+    — a hint to Cortex about whether the tool is a planning tool,
+    an execution tool, or both.
+
+    Can be used the same way as sugarcoat's decorator:
+
+        @component_action(description={...}, phase=ActionPhase.BOTH)
+        def c(self) -> str: ...
+
+    If ``phase`` is not specified the action defaults to
+    ``ActionPhase.EXECUTION``, preserving the previous behavior.
+
+    :param function: The method being decorated (set when the decorator
+        is used without parentheses).
+    :param description: OpenAI-format tool description dict, forwarded
+        verbatim to sugarcoat.
+    :param active: If True, sugarcoat will reject calls while the
+        component is not in the active lifecycle state.
+    :param phase: Cognitive phase. Defaults to
+        :attr:`ActionPhase.EXECUTION`.
+    """
+    phase_value = phase.value if isinstance(phase, ActionPhase) else str(phase)
+
+    def _wrap(func: Callable) -> Callable:
+        wrapped = _sugar_component_action(
+            function=func, description=description, active=active
+        )
+        wrapped._action_phase = phase_value
+        return wrapped
+
+    if function is not None:
+        return _wrap(function)
+    return _wrap
+
 
 # =========================================================================
 # Additional Datatypes (Augment Sugarcoat datatypes)
@@ -757,21 +832,32 @@ def _get_np_coordinates(
 
 
 @define(kw_only=True)
-class MapLayer(BaseAttrs):
-    """A MapLayer represents a single input for a MapEncoding component. It can subscribe to a specific text topic.
+class MemLayer(BaseAttrs):
+    """A MemLayer represents a single input layer for a ``Memory`` or
+    ``MapEncoding`` component. It subscribes to a topic whose callback
+    produces a string representation (via ``_get_ui_content``) that can be
+    stored as an observation.
 
-    :param subscribes_to: The topic that this map layer is subscribed to.
+    :param subscribes_to: The topic that this layer is subscribed to.
     :type subscribes_to: Topic
-    :param temporal_change: Indicates whether the map should store changes over time for the same position. Defaults to False.
+    :param temporal_change: Indicates whether the map should store changes over time for the same position. Defaults to False. (``MapEncoding`` only.)
     :type temporal_change: bool
-    :param resolution_multiple: A positive multiplication factor for the base resolution of the map grid, for fine or coarse graining the map. Defaults to 1.
+    :param resolution_multiple: A positive multiplication factor for the base resolution of the map grid, for fine or coarse graining the map. Defaults to 1. (``MapEncoding`` only.)
     :type resolution_multiple: int
     :param pre_defined: An optional list of pre-defined data points in the layer. Each datapoint is a tuple of [position, text], where position is a numpy array of coordinates.
     :type pre_defined: list[tuple[np.ndarray, str]]
+    :param is_internal_state: If True, observations from this layer are
+        treated as internal state (interoception) by ``Memory``: they are
+        written via ``add_body_state`` and are retrieved through the
+        ``body_status`` tool rather than the perception tools. Use this
+        for robot-internal signals like battery, temperature, or joint
+        health. Defaults to False. (``Memory`` only.)
+    :type is_internal_state: bool
 
     Example of usage:
     ```python
-    my_map_layer = MapLayer(subscribes_to='my_topic', temporal_change=True)
+    my_layer = MemLayer(subscribes_to='my_topic', temporal_change=True)
+    battery_layer = MemLayer(subscribes_to='battery_state', is_internal_state=True)
     ```
     """
 
@@ -783,6 +869,11 @@ class MapLayer(BaseAttrs):
     pre_defined: List[Union[List, Tuple[np.ndarray, str]]] = field(
         default=Factory(list), converter=_get_np_coordinates
     )
+    is_internal_state: bool = field(default=False)
+
+
+# Backwards-compatible alias
+MapLayer = MemLayer
 
 
 @define(kw_only=True)

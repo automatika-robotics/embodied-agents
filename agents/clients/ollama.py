@@ -74,6 +74,25 @@ class OllamaClient(ModelClient):
             )
             raise
 
+    def _is_embedding_model(self) -> bool:
+        """Detect whether the served model is an embedding model.
+
+        First checks Ollama's ``show()`` capabilities list, then falls back
+        to the legacy internal name used by ChromaClient.
+        """
+        if self.model_name == "internal_ollama_embeddings":
+            return True
+        try:
+            info = self.client.show(self.model_init_params["checkpoint"])
+            capabilities = getattr(info, "capabilities", None) or []
+            return "embedding" in capabilities
+        except Exception as e:
+            self.logger.debug(
+                f"Could not probe capabilities for "
+                f"{self.model_init_params['checkpoint']}: {e}"
+            )
+            return False
+
     def _initialize(self) -> None:
         """
         Initialize the model on platform using the paramters provided in the model specification class
@@ -87,12 +106,14 @@ class OllamaClient(ModelClient):
                 raise Exception(
                     f"Could not pull model {self.model_init_params['checkpoint']}"
                 )
-            # load model in memory with empty request
-            if (
-                self.model_name == "internal_ollama_embeddings"
-            ):  # Internal embeddings model name
+            # Cache capability check so _deinitialize can use it too
+            self._is_embedding = self._is_embedding_model()
+            # load model in memory with an appropriate empty request
+            if self._is_embedding:
                 self.client.embed(
-                    model=self.model_init_params["checkpoint"], keep_alive=10
+                    model=self.model_init_params["checkpoint"],
+                    input="",
+                    keep_alive=10,
                 )
             else:
                 self.client.generate(
@@ -201,8 +222,15 @@ class OllamaClient(ModelClient):
 
         self.logger.error(f"Deinitializing {self.model_name} model on ollama")
         try:
-            self.client.generate(
-                model=self.model_init_params["checkpoint"], keep_alive=0
-            )
+            if getattr(self, "_is_embedding", False):
+                self.client.embed(
+                    model=self.model_init_params["checkpoint"],
+                    input="",
+                    keep_alive=0,
+                )
+            else:
+                self.client.generate(
+                    model=self.model_init_params["checkpoint"], keep_alive=0
+                )
         except Exception as e:
             self.logger.error(str(e))

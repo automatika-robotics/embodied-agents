@@ -26,6 +26,7 @@ from agents.ros import (
 # Python3.8 compatible NoneType
 NoneType = type(None)
 
+
 def _parse_args() -> Tuple[argparse.Namespace, List[str]]:
     """Parse arguments."""
     parser = argparse.ArgumentParser(description="Component Executable Config")
@@ -73,6 +74,11 @@ def _parse_args() -> Tuple[argparse.Namespace, List[str]]:
         "--db_client",
         type=str,
         help="DB Client",
+    )
+    parser.add_argument(
+        "--embedding_client",
+        type=str,
+        help="Embedding Client for Memory Component",
     )
     parser.add_argument(
         "--additional_model_clients",
@@ -379,6 +385,26 @@ def main():
             position=config._position,
             map_topic=config._map_topic,
             db_client=db_client,
+            config=config,
+            trigger=trigger,
+            component_name=component_name,
+            config_file=config_file,
+        )
+
+    elif component_type == all_components.Memory.__name__:
+        embedding_client_json = json.loads(args.embedding_client)
+        embedding_client = (
+            getattr(clients, embedding_client_json["client_type"])(
+                **embedding_client_json
+            )
+            if embedding_client_json
+            else None
+        )
+        component = comp_class(
+            layers=layers,
+            position=config._position,
+            model_client=model_client,
+            embedding_client=embedding_client,
             config=config,
             trigger=trigger,
             component_name=component_name,

@@ -1,4 +1,5 @@
 import time
+import json
 from typing import Any, Union, Optional, List, Dict, Literal, MutableMapping
 
 import numpy as np
@@ -257,7 +258,8 @@ class MLLM(LLM):
                     "Use this method when asked to describe something in robot's "
                     "surroundings. Captures a frame from a camera topic and describe what "
                     "is visible in the image using the vision-language model. "
-                    "Returns a text description on components output topics."
+                    "Returns a text description to the caller, which can be used in a"
+                    " subsequent tool call if required."
                 ),
                 "parameters": {
                     "type": "object",
@@ -287,7 +289,7 @@ class MLLM(LLM):
         topic_name: str,
         query: str = "Describe what you see in the image.",
         timeout: float = 0.5,
-    ) -> bool:
+    ) -> str:
         """Capture a frame from an image topic and describe it.
 
         Grabs the latest frame from the specified image input topic,
@@ -306,7 +308,10 @@ class MLLM(LLM):
         try:
             image = self._grab_frame(topic_name, timeout)
             if image is None:
-                return False
+                self.get_logger().error(
+                    "Describe: could not get image from image topic."
+                )
+                raise Exception("Could not get image from image topic.")
 
             inference_input = {
                 "query": [{"role": "user", "content": query}],
@@ -315,16 +320,16 @@ class MLLM(LLM):
             }
 
             result = self._call_inference(inference_input)
-            if not result or not result.get("output"):
+            if not result or not (output := result.get("output")):
                 self.get_logger().error("Describe: inference returned no output.")
-                return False
+                raise Exception("Inference failed and returned no output.")
 
-            self._publish(result)
-            return True
+            # return text output to caller
+            return json.dumps(output)
 
         except Exception as e:
             self.get_logger().error(f"Failed to describe: {e}")
-            return False
+            raise
 
     def _grab_frame(self, topic_name: str, timeout: float) -> Optional[np.ndarray]:
         """Grab a single frame from an image callback.

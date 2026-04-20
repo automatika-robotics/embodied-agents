@@ -40,8 +40,15 @@ jobs:
           # Clone and build ros_sugar dependency
           git clone https://github.com/automatika-robotics/sugarcoat /ws/src/sugarcoat
           cd /ws
-          pip install numpy 'attrs>=23.2.0' jinja2 httpx \
-                      msgpack msgpack-numpy setproctitle platformdirs tqdm websockets
+          # humble ships cv2 compiled against NumPy 1.x (apt numpy 1.21).
+          # Pin numpy <2 on humble so pip resolves to the highest 1.x
+          if [ "${{ matrix.ros_distro }}" = "humble" ]; then
+            NUMPY_PIN='numpy<2'
+          else
+            NUMPY_PIN='numpy'
+          fi
+          pip install "$NUMPY_PIN" 'attrs>=23.2.0' jinja2 httpx msgpack msgpack-numpy \
+                      setproctitle platformdirs tqdm websockets emem
           colcon build --symlink-install
         shell: bash
 

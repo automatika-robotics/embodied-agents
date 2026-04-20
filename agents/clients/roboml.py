@@ -459,7 +459,7 @@ class RoboMLRESPClient(ModelClient):
         """Call inference on the model using data and inference parameters from the component"""
         try:
             if inference_input.get("stream"):
-                self.logger.warn(
+                self.logger.warning(
                     "RoboML RESPClient currently does not handle streaming. Set stream to False in component config to get rid of this warning."
                 )
                 inference_input.pop("stream")
