@@ -17,6 +17,25 @@ def _make_mock_action(name="test_action", description="A test action"):
     return action
 
 
+def _make_cortex(actions, mock_model_client, component_name, **cortex_kwargs):
+    """Construct a Cortex and run the action-registration step that the
+    Launcher normally triggers through ``_init_internal_monitor``.
+    Tests that assert on ``_execution_tools`` /
+    ``_execution_tool_descriptions`` need this because registration was
+    deliberately moved out of ``__init__`` so that Monitor init cannot
+    overwrite the registry (see commit 8d7eb95)."""
+    comp = Cortex(
+        outputs=[Topic(name="out", msg_type="String")],
+        actions=actions,
+        model_client=mock_model_client,
+        config=cortex_kwargs.pop("config", CortexConfig()),
+        component_name=component_name,
+        **cortex_kwargs,
+    )
+    comp._setup_internal_action_events(comp._behavioral_actions)
+    return comp
+
+
 class TestCortexConstruction:
     def test_with_model_client(self, rclpy_init, mock_model_client):
         comp = Cortex(
@@ -104,11 +123,9 @@ class TestCortexConstruction:
 class TestCortexActions:
     def test_action_registers_tool_description(self, rclpy_init, mock_model_client):
         action = _make_mock_action(name="navigate", description="Go somewhere")
-        comp = Cortex(
-            outputs=[Topic(name="out", msg_type="String")],
+        comp = _make_cortex(
             actions=[action],
-            model_client=mock_model_client,
-            config=CortexConfig(),
+            mock_model_client=mock_model_client,
             component_name="test_cortex_tools",
         )
 
@@ -119,11 +136,9 @@ class TestCortexActions:
 
     def test_action_registers_in_execution_tools(self, rclpy_init, mock_model_client):
         action = _make_mock_action(name="grasp", description="Grasp object")
-        comp = Cortex(
-            outputs=[Topic(name="out", msg_type="String")],
+        comp = _make_cortex(
             actions=[action],
-            model_client=mock_model_client,
-            config=CortexConfig(),
+            mock_model_client=mock_model_client,
             component_name="test_cortex_events",
         )
 
@@ -135,11 +150,9 @@ class TestCortexActions:
             _make_mock_action(name="grasp", description="Grasp object"),
             _make_mock_action(name="release", description="Release object"),
         ]
-        comp = Cortex(
-            outputs=[Topic(name="out", msg_type="String")],
+        comp = _make_cortex(
             actions=actions,
-            model_client=mock_model_client,
-            config=CortexConfig(),
+            mock_model_client=mock_model_client,
             component_name="test_cortex_multi",
         )
 
