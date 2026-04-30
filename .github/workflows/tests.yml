@@ -23,7 +23,8 @@ jobs:
       - name: Install system dependencies
         run: |
           apt-get update
-          apt-get install -y python3-pip python3-pytest
+          # python3-opencv: sugarcoat imports cv2 at module load
+          apt-get install -y python3-pip python3-pytest python3-opencv
 
       - name: Install ROS package dependencies
         run: |
