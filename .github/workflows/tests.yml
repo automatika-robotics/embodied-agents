@@ -20,6 +20,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install pip
+        run: |
+          apt-get update
+          apt-get install -y python3-pip
+
       - name: Build workspace
         run: |
           . /opt/ros/${{ matrix.ros_distro }}/setup.sh
