@@ -20,11 +20,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install system dependencies
-        run: |
-          apt-get update
-          apt-get install -y python3-pip python3-pytest
-
       - name: Build workspace
         run: |
           . /opt/ros/${{ matrix.ros_distro }}/setup.sh
@@ -33,7 +28,7 @@ jobs:
           git clone https://github.com/automatika-robotics/sugarcoat /ws/src/sugarcoat
           cd /ws
           # All Python deps installed via pip, covers sugarcoat and embodied-agents
-          pip install --ignore-installed opencv-python-headless \
+          pip install --ignore-installed pytest opencv-python-headless \
                       'attrs>=23.2.0' jinja2 httpx msgpack msgpack-numpy \
                       setproctitle pyyaml toml platformdirs tqdm websockets \
                       emem
