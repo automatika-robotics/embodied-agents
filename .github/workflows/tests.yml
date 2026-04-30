@@ -23,33 +23,20 @@ jobs:
       - name: Install system dependencies
         run: |
           apt-get update
-          # python3-opencv: sugarcoat imports cv2 at module load
-          apt-get install -y python3-pip python3-pytest python3-opencv
-
-      - name: Install ROS package dependencies
-        run: |
-          . /opt/ros/${{ matrix.ros_distro }}/setup.sh
-          apt-get install -y python3-rosdep
-          rosdep update || true
-          rosdep install --from-paths . -y --ignore-src || true
+          apt-get install -y python3-pip python3-pytest
 
       - name: Build workspace
         run: |
           . /opt/ros/${{ matrix.ros_distro }}/setup.sh
           mkdir -p /ws/src
           ln -s $GITHUB_WORKSPACE /ws/src/embodied_agents
-          # Clone and build ros_sugar dependency
           git clone https://github.com/automatika-robotics/sugarcoat /ws/src/sugarcoat
           cd /ws
-          # humble ships cv2 compiled against NumPy 1.x (apt numpy 1.21).
-          # Pin numpy <2 on humble so pip resolves to the highest 1.x
-          if [ "${{ matrix.ros_distro }}" = "humble" ]; then
-            NUMPY_PIN='numpy<2'
-          else
-            NUMPY_PIN='numpy'
-          fi
-          pip install "$NUMPY_PIN" 'attrs>=23.2.0' jinja2 httpx msgpack msgpack-numpy \
-                      setproctitle platformdirs tqdm websockets emem
+          # All Python deps installed via pip, covers sugarcoat and embodied-agents
+          pip install --ignore-installed opencv-python-headless \
+                      'attrs>=23.2.0' jinja2 httpx msgpack msgpack-numpy \
+                      setproctitle pyyaml toml platformdirs tqdm websockets \
+                      emem
           colcon build --symlink-install
         shell: bash
 
