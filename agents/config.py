@@ -869,8 +869,6 @@ class MemoryConfig(BaseComponentConfig):
     :type embedding_checkpoint: str
     :param auto_store: Automatically store layer data on each execution step. If False, storage only happens via the ``store`` component action.
     :type auto_store: bool
-    :param embedding_dim: Embedding vector dimension. Must match the dimension of the embedding model used by the embedding_client (e.g. 768 for ``nomic-embed-text``, 384 for ``all-MiniLM-L6-v2``). When using ``CallableEmbeddingProvider``, this is auto-detected.
-    :type embedding_dim: int
     :param working_memory_size: Max observations held in the in-process buffer before the oldest are dropped. Observations are flushed to persistent storage well before this limit via ``flush_batch_size`` and ``flush_interval``.
     :type working_memory_size: int
     :param flush_interval: Seconds between auto-flushes of the working memory buffer to persistent storage. Lower values mean observations become searchable faster but increase write frequency.
@@ -917,7 +915,6 @@ class MemoryConfig(BaseComponentConfig):
     embedding_checkpoint: str = field(default="all-MiniLM-L6-v2")
     auto_store: bool = field(default=True)
     # eMEM config parameters (mirrors emem.SpatioTemporalMemoryConfig)
-    embedding_dim: int = field(default=384, validator=base_validators.gt(0))
     working_memory_size: int = field(default=50, validator=base_validators.gt(0))
     flush_interval: float = field(default=2.0, validator=base_validators.gt(0.0))
     flush_batch_size: int = field(default=5, validator=base_validators.gt(0))
