@@ -175,8 +175,11 @@ class CortexConfig(LLMConfig):
        this phase. Controlled by ``max_planning_steps``.
     2. **Execution** — Each planned step is executed sequentially. Before each
        step, a brief LLM confirmation call decides: EXECUTE, SKIP, or ABORT,
-       based on the original plan and results so far. Controlled by
-       ``max_execution_steps``.
+       based on the original plan and results so far. After a plan is fully
+       executed, Cortex feeds the results back to the planner and may produce
+       a follow-up plan, repeating the plan-execute loop until the planner
+       signals completion. Both the per-plan length and the number of
+       plan-execute iterations are capped by ``max_execution_steps``.
 
     The ``chat_history`` and ``stream`` fields are enforced by the component
     (``chat_history=True``, ``stream=False``) and cannot be overridden.
@@ -184,8 +187,13 @@ class CortexConfig(LLMConfig):
     :param max_planning_steps: Maximum number of LLM calls allowed during the
         planning phase (e.g. inspect_component calls). Default is 10.
     :type max_planning_steps: int
-    :param max_execution_steps: Maximum number of action steps allowed in the
-        execution plan. Plans with more steps are truncated. Default is 10.
+    :param max_execution_steps: Caps two things at once: (1) the maximum
+        number of action steps allowed in any single execution plan, plans
+        with more steps are truncated; and (2) the maximum number of
+        plan-execute iterations Cortex will run before giving up if the
+        planner never signals completion. The worst-case total number of
+        actions executed for one task is therefore ``max_execution_steps²``.
+        Default is 10.
     :type max_execution_steps: int
     :param confirmation_temperature: Temperature for the per-step confirmation LLM
         calls. Used for both the decision and resolving tool call arguments

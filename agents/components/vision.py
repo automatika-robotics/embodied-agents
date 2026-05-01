@@ -405,6 +405,10 @@ class Vision(ModelComponent):
         self.get_logger().info(
             f"Started recording video on topic '{topic_name}' for {duration} seconds."
         )
+        # NOTE: We do not wait to join the video recording thread, any failures
+        # will be silent. This can be changed when action execution
+        # infrastructure is in place to allow for monitoring and returning
+        # results from async actions.
 
         return (
             f"Started recording {duration}s video from '{topic_name}' at {fps} FPS. "
