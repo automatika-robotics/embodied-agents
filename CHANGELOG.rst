@@ -2,6 +2,29 @@
 Changelog for package automatika_embodied_agents
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+* (chore) Bumps minimum sugarcoat version
+* (chore) Adds test for memory component
+* (chore) Adds an example recipe for using cortex with memory
+* (chore) Adds both component level and launcher level failure recovery in multiprocessing example
+* (chore) Updates docstrings. Adds deprecation for MapEncoding component in favour of memory component
+* (feature) Augments memory prompt for interoception tools
+* (feature) Adds mem layer alias for map layers with internal state flag for interoception topics
+* (feature) Adds memory specific planning prompt augmentation
+* (feature) Adds better failure handling in cortex for task summary
+* (feature) Adds serialization, deserialization of clients for memory component
+* (fix) Fixes init/deinit of ollama based embedding models
+* (feature) Adds classification in memory component actions for planning and execution actions
+* (feature) Updates cortex to utilize executed component action outputs and replan if the plan has not fully executed
+* (feature) Overrides component action decorator to differentiate between planning and execution actions in agents
+* (feautre) Changes component actions and fallbacks to raise errors and return meaningful responses on happy path
+* (feature) Adds a store specific memory method for cortex to write arbitrary runtime memories
+* (feautre) Adds information about perception layers in the memory components inspect method
+* (feature) Adds memory component using emem that exposes basic memory management tools as component actions
+* (chore) Removes safe_restart from base component as it has been upstreamed in sugarcoat
+* Contributors: ahr
+
 0.7.0 (2026-04-11)
 ------------------
 * (feature) Adds an optional output topic in cortex for capturing outputs when an action is not needed
