@@ -198,7 +198,7 @@ class Vision(ModelComponent):
         topic_name: str,
         save_path: str = "~/emos/pictures",
         timeout: float = 0.5,
-    ) -> bool:
+    ) -> str:
         """
         Take a picture from a specific input topic and save it to the specified location.
 
@@ -214,93 +214,87 @@ class Vision(ModelComponent):
         :param timeout: Timeout if an image is not available on the topic.
                           Defaults to 0.5 seconds.
         :type timeout: float
-        :return: True if successful, False otherwise.
-        :rtype: bool
-        :raises ValueError: If the provided topic_name is not found in inputs.
+        :return: The full path to the saved image file.
+        :rtype: str
+        :raises ValueError: If the topic is not one of the component inputs.
+        :raises TimeoutError: If no image was received within the timeout.
         """
-        try:
-            # Preflight check for timed components
-            if (
-                self.run_type == ComponentRunType.TIMED
-                and (loop_time := 1 / self.config.loop_rate) > timeout
-            ):
-                self.get_logger().warning(
-                    f"Warning: take_picture timeout ({timeout}s) is strictly shorter than the component's trigger period ({loop_time}s) for this timed component. "
-                    f"The action is highly likely to timeout before the image callback executes. Consider running the component faster or increasing the timeout for this action."
-                )
-            # Expand user path
-            save_path = os.path.expanduser(save_path)
-            os.makedirs(save_path, exist_ok=True)
-
-            # Identify callback type
-            trig_dict = getattr(self, "trig_callbacks", {})
-            target_callback = trig_dict.get(topic_name) or self.callbacks.get(
-                topic_name
+        # Preflight check for timed components
+        if (
+            self.run_type == ComponentRunType.TIMED
+            and (loop_time := 1 / self.config.loop_rate) > timeout
+        ):
+            self.get_logger().warning(
+                f"Warning: take_picture timeout ({timeout}s) is strictly shorter than the component's trigger period ({loop_time}s) for this timed component. "
+                f"The action is highly likely to timeout before the image callback executes. Consider running the component faster or increasing the timeout for this action."
             )
-            if not target_callback:
-                self.get_logger().error(
-                    f"Topic '{topic_name}' is not one of the component inputs. You can only take pictures on topics that are provided as inputs to this component."
-                )
-                return False
+        # Expand user path
+        save_path = os.path.expanduser(save_path)
+        os.makedirs(save_path, exist_ok=True)
 
-            # if target is a trigger, issue a warning
-            is_trigger = topic_name in trig_dict
-            if is_trigger:
-                self.get_logger().warning(
-                    f"Capturing image from trigger '{topic_name}'. Inference paused momentarily."
-                )
-            # save callback state
-            original_callback = target_callback._extra_callback
-            original_get_processed = target_callback._get_processed
+        # Identify callback type
+        trig_dict = getattr(self, "trig_callbacks", {})
+        target_callback = trig_dict.get(topic_name) or self.callbacks.get(topic_name)
+        if not target_callback:
+            raise ValueError(
+                f"Topic '{topic_name}' is not one of the component inputs. "
+                "You can only take pictures on topics that are provided as "
+                "inputs to this component."
+            )
 
-            # Define a single frame interceptor function
-            frames = []
+        # if target is a trigger, issue a warning
+        is_trigger = topic_name in trig_dict
+        if is_trigger:
+            self.get_logger().warning(
+                f"Capturing image from trigger '{topic_name}'. Inference paused momentarily."
+            )
+        # save callback state
+        original_callback = target_callback._extra_callback
+        original_get_processed = target_callback._get_processed
 
-            # extra callback for capturing image
-            def single_frame_interceptor(msg, topic, output=None):
-                if output is not None and not frames:
-                    frames.append(output.copy())
+        # Define a single frame interceptor function
+        frames = []
 
-            # Swap extracallback, wait and restore
-            try:
+        # extra callback for capturing image
+        def single_frame_interceptor(msg, topic, output=None):
+            if output is not None and not frames:
+                frames.append(output.copy())
+
+        # Swap extracallback, wait and restore
+        try:
+            target_callback.on_callback_execute(
+                single_frame_interceptor, get_processed=True
+            )
+
+            start_time = time.time()
+            while (time.time() - start_time) < timeout and not frames:
+                time.sleep(0.01)  # Check frequently
+
+        finally:
+            # Always restore the original callback state
+            if original_callback:
                 target_callback.on_callback_execute(
-                    single_frame_interceptor, get_processed=True
+                    original_callback, get_processed=original_get_processed
                 )
+            else:
+                target_callback._extra_callback = None
 
-                start_time = time.time()
-                while (time.time() - start_time) < timeout and not frames:
-                    time.sleep(0.01)  # Check frequently
+        if not frames:
+            raise TimeoutError(
+                f"Timeout: No image received on '{topic_name}' within {timeout}s."
+            )
 
-            finally:
-                # Always restore the original callback state
-                if original_callback:
-                    target_callback.on_callback_execute(
-                        original_callback, get_processed=original_get_processed
-                    )
-                else:
-                    target_callback._extra_callback = None
+        # Save Image
+        timestamp = int(time.time() * 1000)
+        filename = f"capture_{topic_name}_{timestamp}.jpg"
+        full_path = os.path.join(save_path, filename)
 
-            if not frames:
-                self.get_logger().warning(
-                    f"Timeout: No image received on '{topic_name}'."
-                )
-                return False
+        # Ensure BGR for OpenCV saving
+        save_img = cv2.cvtColor(frames[0], cv2.COLOR_RGB2BGR)
+        cv2.imwrite(full_path, save_img)
+        self.get_logger().info(f"Saved picture to {full_path}")
 
-            # Save Image
-            timestamp = int(time.time() * 1000)
-            filename = f"capture_{topic_name}_{timestamp}.jpg"
-            full_path = os.path.join(save_path, filename)
-
-            # Ensure BGR for OpenCV saving
-            save_img = cv2.cvtColor(frames[0], cv2.COLOR_RGB2BGR)
-            cv2.imwrite(full_path, save_img)
-            self.get_logger().info(f"Saved picture to {full_path}")
-
-            return True
-
-        except Exception as e:
-            self.get_logger().error(f"Failed to take picture: {e}")
-            return False
+        return f"Picture from '{topic_name}' saved to {full_path}"
 
     @component_action(
         description={
@@ -339,7 +333,7 @@ class Vision(ModelComponent):
         duration: float = 5.0,
         save_path: str = "~/emos/videos",
         fps: int = 30,
-    ) -> bool:
+    ) -> str:
         """
         Record a video from a specific input topic for a set duration.
 
@@ -355,70 +349,71 @@ class Vision(ModelComponent):
         :type save_path: str
         :param fps: The frames per second for the recording. Defaults to 20.
         :type fps: int
-        :return: True if the recording thread started successfully, False otherwise.
-        :rtype: bool
-        :raises ValueError: If the topic_name is not registered.
+        :return: A confirmation message describing the started recording.
+        :rtype: str
+        :raises ValueError: If the topic is not one of the component inputs.
         """
-        try:
-            # Preflight checks for timed components
-            if self.run_type == ComponentRunType.TIMED:
-                if self.config.loop_rate < fps:
-                    self.get_logger().warning(
-                        f"Warning: Requested {fps} FPS, but the component's trigger period is {1 / self.config.loop_rate}s "
-                        f"(~{self.config.loop_rate:.2f} FPS max). The recorded video will heavily repeat frames or play too fast. Consider running the component faster or reduce the fps"
-                    )
-
-                if duration < 1 / self.config.loop_rate:
-                    self.get_logger().warning(
-                        f"Warning: Recording duration ({duration}s) is shorter than the component's loop period "
-                        f"({1 / self.config.loop_rate}s). You are likely to capture 0 frames. Consider running the component faster or increase duration."
-                    )
-            # Expand user path
-            save_path = os.path.expanduser(save_path)
-            os.makedirs(save_path, exist_ok=True)
-
-            trig_dict = getattr(self, "trig_callbacks", {})
-            target_callback = trig_dict.get(topic_name) or self.callbacks.get(
-                topic_name
-            )
-            # Identify callback type
-            if not target_callback:
-                self.get_logger().error(
-                    f"Topic '{topic_name}' is not one of the component inputs. You can only record videos on topics that are provided as inputs to this component."
-                )
-                return False
-
-            # if target is a trigger, issue a warning
-            is_trigger = topic_name in trig_dict
-            if is_trigger:
+        # Preflight checks for timed components
+        if self.run_type == ComponentRunType.TIMED:
+            if self.config.loop_rate < fps:
                 self.get_logger().warning(
-                    f"Recording video on trigger topic '{topic_name}'. "
-                    f"Detection or tracking will be PAUSED for {duration} seconds!"
+                    f"Warning: Requested {fps} FPS, but the component's trigger period is {1 / self.config.loop_rate}s "
+                    f"(~{self.config.loop_rate:.2f} FPS max). The recorded video will heavily repeat frames or play too fast. Consider running the component faster or reduce the fps"
                 )
 
-            # Spawn the background thread
-            recording_thread = threading.Thread(
-                target=self._record_video_thread,
-                kwargs={
-                    "target_callback": target_callback,
-                    "topic_name": topic_name,
-                    "duration": duration,
-                    "save_path": save_path,
-                    "fps": fps,
-                    "is_trigger": is_trigger,
-                },
-                daemon=True,
-            )
-            recording_thread.start()
-            self.get_logger().info(
-                f"Started recording video on topic '{topic_name}' for {duration} seconds."
+            if duration < 1 / self.config.loop_rate:
+                self.get_logger().warning(
+                    f"Warning: Recording duration ({duration}s) is shorter than the component's loop period "
+                    f"({1 / self.config.loop_rate}s). You are likely to capture 0 frames. Consider running the component faster or increase duration."
+                )
+        # Expand user path
+        save_path = os.path.expanduser(save_path)
+        os.makedirs(save_path, exist_ok=True)
+
+        trig_dict = getattr(self, "trig_callbacks", {})
+        target_callback = trig_dict.get(topic_name) or self.callbacks.get(topic_name)
+        # Identify callback type
+        if not target_callback:
+            raise ValueError(
+                f"Topic '{topic_name}' is not one of the component inputs. "
+                "You can only record videos on topics that are provided as "
+                "inputs to this component."
             )
 
-            return True
+        # if target is a trigger, issue a warning
+        is_trigger = topic_name in trig_dict
+        if is_trigger:
+            self.get_logger().warning(
+                f"Recording video on trigger topic '{topic_name}'. "
+                f"Detection or tracking will be PAUSED for {duration} seconds!"
+            )
 
-        except Exception as e:
-            self.get_logger().error(f"Failed to start recording: {e}")
-            return False
+        # Spawn the background thread
+        recording_thread = threading.Thread(
+            target=self._record_video_thread,
+            kwargs={
+                "target_callback": target_callback,
+                "topic_name": topic_name,
+                "duration": duration,
+                "save_path": save_path,
+                "fps": fps,
+                "is_trigger": is_trigger,
+            },
+            daemon=True,
+        )
+        recording_thread.start()
+        self.get_logger().info(
+            f"Started recording video on topic '{topic_name}' for {duration} seconds."
+        )
+        # NOTE: We do not wait to join the video recording thread, any failures
+        # will be silent. This can be changed when action execution
+        # infrastructure is in place to allow for monitoring and returning
+        # results from async actions.
+
+        return (
+            f"Started recording {duration}s video from '{topic_name}' at {fps} FPS. "
+            f"Video will be saved to {save_path}."
+        )
 
     @component_action(
         description={
@@ -446,7 +441,7 @@ class Vision(ModelComponent):
             },
         }
     )
-    def track(self, label: str) -> bool:
+    def track(self, label: str) -> str:
         """Start tracking objects matching the given label.
 
         Configures the remote model server to enable ByteTrack trackers
@@ -456,8 +451,10 @@ class Vision(ModelComponent):
 
         :param label: Object label to track (e.g. 'person', 'cup').
         :type label: str
-        :return: True if tracking was started successfully, False otherwise.
-        :rtype: bool
+        :return: A confirmation message describing the started tracking.
+        :rtype: str
+        :raises RuntimeError: If the component does not have a remote
+            RoboML model client or a Tracking output topic.
         """
         from ..clients.roboml import RoboMLHTTPClient, RoboMLRESPClient
 
@@ -465,42 +462,38 @@ class Vision(ModelComponent):
         if not self.model_client or not isinstance(
             self.model_client, (RoboMLHTTPClient, RoboMLRESPClient)
         ):
-            self.get_logger().error(
+            raise RuntimeError(
                 "Tracking requires a RoboML model client. "
                 "Local models do not support tracking."
             )
-            return False
 
         # must have a Tracking output topic
         has_tracking_output = any(
             t.msg_type in (Trackings, TrackingsMultiSource) for t in self.out_topics
         )
         if not has_tracking_output:
-            self.get_logger().error(
+            raise RuntimeError(
                 "Tracking requires at least one output topic of type "
                 "Trackings or TrackingsMultiSource."
             )
-            return False
 
-        try:
-            with self.safe_restart():
-                init_params = self.model_client.model_init_params
-                # Enable trackers on the model if not already set up
-                if not init_params.get("setup_trackers"):
-                    init_params["setup_trackers"] = True
-                init_params["num_trackers"] = len(self.in_topics)
+        with self.safe_restart():
+            init_params = self.model_client.model_init_params
+            # Enable trackers on the model if not already set up
+            if not init_params.get("setup_trackers"):
+                init_params["setup_trackers"] = True
+            init_params["num_trackers"] = len(self.in_topics)
 
-            self.get_logger().info("Trackers initialized on remote model server.")
+        self.get_logger().info("Trackers initialized on remote model server.")
 
-            # Set the label to track
-            self.config.labels_to_track = [label]
-            self.inference_params = self.config._get_inference_params()
-            self.get_logger().info(f"Now tracking: '{label}'")
-            return True
-
-        except Exception as e:
-            self.get_logger().error(f"Failed to start tracking: {e}")
-            return False
+        # Set the label to track
+        self.config.labels_to_track = [label]
+        self.inference_params = self.config._get_inference_params()
+        self.get_logger().info(f"Now tracking: '{label}'")
+        return (
+            f"Tracking started for label '{label}'. Tracking results are now "
+            "being published on the component's Tracking output topics."
+        )
 
     def _record_video_thread(
         self,

@@ -20,28 +20,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install system dependencies
+      - name: Install pip
         run: |
           apt-get update
-          apt-get install -y python3-pip python3-pytest
-
-      - name: Install ROS package dependencies
-        run: |
-          . /opt/ros/${{ matrix.ros_distro }}/setup.sh
-          apt-get install -y python3-rosdep
-          rosdep update || true
-          rosdep install --from-paths . -y --ignore-src || true
+          apt-get install -y python3-pip
 
       - name: Build workspace
         run: |
           . /opt/ros/${{ matrix.ros_distro }}/setup.sh
           mkdir -p /ws/src
           ln -s $GITHUB_WORKSPACE /ws/src/embodied_agents
-          # Clone and build ros_sugar dependency
           git clone https://github.com/automatika-robotics/sugarcoat /ws/src/sugarcoat
           cd /ws
-          pip install numpy 'attrs>=23.2.0' jinja2 httpx \
-                      msgpack msgpack-numpy setproctitle platformdirs tqdm websockets
+          # All Python deps installed via pip, covers sugarcoat and embodied-agents
+          pip install --ignore-installed pytest opencv-python-headless \
+                      'attrs>=23.2.0' jinja2 httpx msgpack msgpack-numpy \
+                      setproctitle pyyaml toml platformdirs tqdm websockets \
+                      emem
           colcon build --symlink-install
         shell: bash
 

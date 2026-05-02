@@ -246,7 +246,7 @@ class SpeechToText(ModelComponent):
         """
         assert frames == self.config._block_size
         if status:
-            self.get_logger().warn(f"Status: {status}")
+            self.get_logger().warning(f"Status: {status}")
         try:
             import pyaudio
         except ModuleNotFoundError as e:

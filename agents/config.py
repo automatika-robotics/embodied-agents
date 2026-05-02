@@ -16,6 +16,7 @@ __all__ = [
     "TextToSpeechConfig",
     "SemanticRouterConfig",
     "MapConfig",
+    "MemoryConfig",
     "VideoMessageMakerConfig",
     "VisionConfig",
 ]
@@ -174,8 +175,11 @@ class CortexConfig(LLMConfig):
        this phase. Controlled by ``max_planning_steps``.
     2. **Execution** — Each planned step is executed sequentially. Before each
        step, a brief LLM confirmation call decides: EXECUTE, SKIP, or ABORT,
-       based on the original plan and results so far. Controlled by
-       ``max_execution_steps``.
+       based on the original plan and results so far. After a plan is fully
+       executed, Cortex feeds the results back to the planner and may produce
+       a follow-up plan, repeating the plan-execute loop until the planner
+       signals completion. Both the per-plan length and the number of
+       plan-execute iterations are capped by ``max_execution_steps``.
 
     The ``chat_history`` and ``stream`` fields are enforced by the component
     (``chat_history=True``, ``stream=False``) and cannot be overridden.
@@ -183,20 +187,27 @@ class CortexConfig(LLMConfig):
     :param max_planning_steps: Maximum number of LLM calls allowed during the
         planning phase (e.g. inspect_component calls). Default is 10.
     :type max_planning_steps: int
-    :param max_execution_steps: Maximum number of action steps allowed in the
-        execution plan. Plans with more steps are truncated. Default is 10.
+    :param max_execution_steps: Caps two things at once: (1) the maximum
+        number of action steps allowed in any single execution plan, plans
+        with more steps are truncated; and (2) the maximum number of
+        plan-execute iterations Cortex will run before giving up if the
+        planner never signals completion. The worst-case total number of
+        actions executed for one task is therefore ``max_execution_steps²``.
+        Default is 10.
     :type max_execution_steps: int
     :param confirmation_temperature: Temperature for the per-step confirmation LLM
-        calls. Lower values give more deterministic responses. Default is 0.2.
+        calls. Used for both the decision and resolving tool call arguments
+        from prior step results. Default is 0.3.
     :type confirmation_temperature: float
     :param confirmation_max_tokens: Maximum tokens for confirmation responses.
-        Kept low since only EXECUTE/SKIP/ABORT is expected. Default is 100.
+        Must be large enough to accommodate a tool call with resolved arguments
+        when the LLM returns EXECUTE. Default is 500.
     :type confirmation_max_tokens: int
     :param temperature: Temperature used for the planning LLM call.
         Default is 0.8 and must be greater than 0.0.
     :type temperature: float
     :param max_new_tokens: The maximum number of new tokens to generate during planning.
-        Default is 500 and must be greater than 0.
+        Default is 1000 (inherited from LLMConfig) and must be greater than 0.
     :type max_new_tokens: int
     :param enable_rag: Enable Retrieval Augmented Generation to provide context
         during planning. Requires a ``db_client`` to be passed to the Cortex component.
@@ -227,9 +238,9 @@ class CortexConfig(LLMConfig):
     max_planning_steps: int = field(default=10, validator=base_validators.gt(0))
     max_execution_steps: int = field(default=10, validator=base_validators.gt(0))
     confirmation_temperature: float = field(
-        default=0.2, validator=base_validators.gt(0.0)
+        default=0.3, validator=base_validators.gt(0.0)
     )
-    confirmation_max_tokens: int = field(default=1000, validator=base_validators.gt(0))
+    confirmation_max_tokens: int = field(default=500, validator=base_validators.gt(0))
     monitoring_interval: float = field(default=2.0, validator=base_validators.gt(0.0))
 
     def _get_inference_params(self) -> Dict:
@@ -853,6 +864,101 @@ class MapConfig(BaseComponentConfig):
     )
     _map_topic: Optional[Topic] = field(
         default=None, converter=_get_optional_topic, alias="_map_topic"
+    )
+
+
+@define(kw_only=True)
+class MemoryConfig(BaseComponentConfig):
+    """Configuration for the Memory component.
+
+    :param db_path: Path to the eMEM SQLite database file.
+    :type db_path: str
+    :param embedding_checkpoint: Model name for sentence-transformers fallback. Only used when no ``embedding_client`` is provided to the Memory component.
+    :type embedding_checkpoint: str
+    :param auto_store: Automatically store layer data on each execution step. If False, storage only happens via the ``store`` component action.
+    :type auto_store: bool
+    :param working_memory_size: Max observations held in the in-process buffer before the oldest are dropped. Observations are flushed to persistent storage well before this limit via ``flush_batch_size`` and ``flush_interval``.
+    :type working_memory_size: int
+    :param flush_interval: Seconds between auto-flushes of the working memory buffer to persistent storage. Lower values mean observations become searchable faster but increase write frequency.
+    :type flush_interval: float
+    :param flush_batch_size: Number of observations accumulated before an automatic flush is triggered, regardless of ``flush_interval``.
+    :type flush_batch_size: int
+    :param consolidation_window: Maximum temporal gap in seconds between consecutive observations within the same consolidation chunk. When an episode is consolidated, observations separated by more than this gap produce separate gist summaries. For example, 1800 (30 min) means a multi-session episode spanning days will get one gist per session, not one monolithic summary.
+    :type consolidation_window: float
+    :param consolidation_spatial_eps: DBSCAN epsilon in meters for spatial clustering during time-window consolidation. Observations farther apart than this are placed in separate clusters and produce separate gists. Only applies to non-episodic consolidation.
+    :type consolidation_spatial_eps: float
+    :param consolidation_min_samples: Minimum number of observations required to form a spatial cluster during time-window consolidation. Clusters smaller than this are left in short-term memory.
+    :type consolidation_min_samples: int
+    :param archive_after_seconds: How long (in seconds) observations remain in long-term memory (with full text preserved) before archival drops their text and embeddings, leaving only the gist searchable. Set higher to keep raw observations searchable longer at the cost of storage.
+    :type archive_after_seconds: float
+    :param entity_extract_flush_interval: Trigger entity extraction every N working-memory flushes.
+    :type entity_extract_flush_interval: int
+    :param entity_extract_time_interval: Trigger entity extraction every N seconds, whichever comes first with ``entity_extract_flush_interval``.
+    :type entity_extract_time_interval: float
+    :param entity_similarity_threshold: Cosine similarity threshold (0-1) for merging a newly detected entity with an existing one. Higher values require closer name matches before merging (e.g. 0.85 means "red chair" and "chair" may merge, but "chair" and "table" won't).
+    :type entity_similarity_threshold: float
+    :param entity_spatial_radius: Maximum distance in meters between an existing entity and a new detection for them to be considered the same object. Only entities within this radius AND above the similarity threshold are merged.
+    :type entity_spatial_radius: float
+    :param recency_weight: Alpha multiplier for recency-weighted semantic search. When > 0, recent observations are boosted over older ones at equal semantic distance. Set to 0.0 (default) for pure semantic ordering.
+    :type recency_weight: float
+    :param recency_halflife: Time constant in seconds for recency decay. An observation this many seconds old receives half the recency boost. Only effective when ``recency_weight`` > 0.
+    :type recency_halflife: float
+    :param hnsw_ef_construction: HNSW index build-time quality parameter. Higher values produce a better quality index but take longer to build. Default (200) is suitable for most use cases.
+    :type hnsw_ef_construction: int
+    :param hnsw_m: Number of bidirectional links per node in the HNSW graph. Higher values improve recall but increase memory usage. Default (16) is suitable for most use cases.
+    :type hnsw_m: int
+    :param hnsw_ef_search: HNSW search-time quality parameter. Higher values improve recall at the cost of query latency. Default (50) is suitable for most use cases.
+    :type hnsw_ef_search: int
+    :param hnsw_max_elements: Maximum number of vectors the HNSW index can hold. Should be set higher than the expected total number of observations + gists + entities over the system's lifetime.
+    :type hnsw_max_elements: int
+
+    Example of usage:
+    ```python
+    config = MemoryConfig(db_path="/tmp/robot_memory.db")
+    ```
+    """
+
+    # Memory component specific
+    db_path: str = field(default="memory.db")
+    embedding_checkpoint: str = field(default="all-MiniLM-L6-v2")
+    auto_store: bool = field(default=True)
+    # eMEM config parameters (mirrors emem.SpatioTemporalMemoryConfig)
+    working_memory_size: int = field(default=50, validator=base_validators.gt(0))
+    flush_interval: float = field(default=2.0, validator=base_validators.gt(0.0))
+    flush_batch_size: int = field(default=5, validator=base_validators.gt(0))
+    consolidation_window: float = field(
+        default=1800.0, validator=base_validators.gt(0.0)
+    )
+    consolidation_spatial_eps: float = field(
+        default=3.0, validator=base_validators.gt(0.0)
+    )
+    consolidation_min_samples: int = field(default=3, validator=base_validators.gt(0))
+    archive_after_seconds: float = field(
+        default=3600.0, validator=base_validators.gt(0.0)
+    )
+    entity_extract_flush_interval: int = field(
+        default=10, validator=base_validators.gt(0)
+    )
+    entity_extract_time_interval: float = field(
+        default=60.0, validator=base_validators.gt(0.0)
+    )
+    entity_similarity_threshold: float = field(
+        default=0.85,
+        validator=base_validators.in_range(min_value=0.0, max_value=1.0),
+    )
+    entity_spatial_radius: float = field(default=5.0, validator=base_validators.gt(0.0))
+    recency_weight: float = field(
+        default=0.0,
+        validator=base_validators.in_range(min_value=0.0, max_value=1.0),
+    )
+    recency_halflife: float = field(default=3600.0, validator=base_validators.gt(0.0))
+    hnsw_ef_construction: int = field(default=200, validator=base_validators.gt(0))
+    hnsw_m: int = field(default=16, validator=base_validators.gt(0))
+    hnsw_ef_search: int = field(default=50, validator=base_validators.gt(0))
+    hnsw_max_elements: int = field(default=100_000, validator=base_validators.gt(0))
+    # internal - serialized topic
+    _position: Optional[Topic] = field(
+        default=None, converter=_get_optional_topic, alias="_position"
     )
 
 

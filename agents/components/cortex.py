@@ -87,10 +87,17 @@ class Cortex(ModelComponent, Monitor):
         "You are a task planning agent on a robot. "
         "Given a task, first use inspect_component to research the available "
         "components and discover their capabilities, topics, and actions. "
-        "Once you have enough information, create a plan by calling the "
-        "appropriate actions in sequence. "
-        "Return ALL actions needed as tool calls in a single response. "
-        "Each tool call is one step. Order them in execution sequence. "
+        "Once you have enough information, break down the task into subtasks"
+        " and create a plan by calling the appropriate actions in sequence.\n"
+        "IMPORTANT: Always return ALL actions needed as tool calls in a "
+        "single response. Each tool call is one step. Order them in execution "
+        "sequence. Fill in arguments you already know (e.g. topic names from "
+        "inspection). For arguments that depend on the output of a previous "
+        'step, use a placeholder like "<output from step 1>" — this is '
+        "expected and correct. The arguments will be automatically resolved "
+        "at execution time using actual results from prior steps. "
+        "Never return fewer tool calls than needed — always include every "
+        "step in the plan even if some arguments are not yet known. "
         "If the task requires no actions, respond with text only."
     )
 
@@ -103,7 +110,13 @@ class Cortex(ModelComponent, Monitor):
         "  ABORT - abort the entire plan\n"
         "  CONTINUE - wait for ongoing async actions to complete before proceeding\n"
         "Use CONTINUE when there are active async actions that should finish "
-        "before moving on. Optionally follow with a brief reason after a colon."
+        "before moving on. Optionally follow with a brief reason after a colon.\n\n"
+        "When you respond EXECUTE, you may also return a tool call for the next "
+        "action with updated arguments based on the results of previous steps. "
+        "For example, if a previous step produced text output, use that text as "
+        "the argument for the next step instead of the placeholder from the plan."
+        " But this is not just limited to text outputs, you can also use structured"
+        " outputs from previous steps to fill input parameters of next steps."
     )
 
     @validate_func_args
@@ -137,12 +150,16 @@ class Cortex(ModelComponent, Monitor):
         self.model_client = model_client
         self.db_client = db_client if db_client else None
 
+        # Effective planning prompt; augmented in custom_on_activate
+        # based on discovered managed components (e.g. to handle Memory)
+        self._effective_planning_prompt = self._PLANNING_PROMPT
+
         # Initialize messages buffer
         self.messages: List[Dict] = [
-            {"role": "system", "content": self._PLANNING_PROMPT}
+            {"role": "system", "content": self._effective_planning_prompt}
         ]
 
-        # Tool registries — separated into planning and execution phases.
+        # Tool registries separated into planning and execution phases.
         # Planning tools (e.g. inspect_component) gather information.
         # Execution tools (actions, system tools) are what the plan consists of.
         self._planning_tools: Set = set()
@@ -155,9 +172,9 @@ class Cortex(ModelComponent, Monitor):
         self._service_request_tools: Dict[str, Tuple[str, str, Any]] = {}
 
         # Behavioral actions: dispatched via internal event system
+        self._behavioral_actions = actions
         self._pure_internal_events = []
         self._additional_internal_actions = {}
-        self._setup_internal_action_events(actions)
 
         # Planning output buffer for failed plans
         self._planning_output: Optional[str] = None
@@ -250,6 +267,7 @@ class Cortex(ModelComponent, Monitor):
             activation_attempt_time=activation_attempt_time,
         )
         self.config = _config
+        self._setup_internal_action_events(self._behavioral_actions)
 
     def _setup_internal_action_events(self, actions: Optional[List[Action]]) -> None:
         """Create internal event topics and tool descriptions for each action."""
@@ -293,6 +311,7 @@ class Cortex(ModelComponent, Monitor):
         if self._components_to_monitor:
             Monitor.activate(self)
             self._register_system_tools()
+            self._augment_planning_prompt_for_memory()
 
         # Display all the tools registered
         planning_names = [
@@ -303,6 +322,128 @@ class Cortex(ModelComponent, Monitor):
         ]
         self.get_logger().debug(f"Cortex planning tools: {planning_names}")
         self.get_logger().debug(f"Cortex execution tools: {execution_names}")
+
+    def _augment_planning_prompt_for_memory(self) -> None:
+        """Append memory-aware guidance to the planning prompt when a
+        Memory component is present in the managed recipe.
+
+        Detects the Memory component by class name, verifies it exposes
+        the expected episode/body-status tools, and builds an addendum
+        instructing the planner to wrap tasks in episodes, check body
+        status during planning, and use memory retrieval tools.
+        """
+        # Find a managed Memory component
+        memory_comp = None
+        for comp in self._managed_components.values():
+            if type(comp).__name__ == "Memory":
+                memory_comp = comp
+                break
+
+        if memory_comp is None:
+            return
+
+        prefix = f"{memory_comp.node_name}."
+        start_ep_tool = f"{prefix}start_episode"
+        end_ep_tool = f"{prefix}end_episode"
+        body_status_tool = f"{prefix}body_status"
+        store_note_tool = f"{prefix}store_specific_memory"
+
+        # Only augment if the expected tools are actually registered
+        required = {start_ep_tool, end_ep_tool}
+        if not required.issubset(self._execution_tools):
+            return
+
+        # Perception retrieval tools (planning phase), excluding body_status
+        perception_retrieval_tools = sorted(
+            name
+            for name in self._planning_tools
+            if name.startswith(prefix) and name != body_status_tool
+        )
+        perception_str = (
+            ", ".join(perception_retrieval_tools)
+            if perception_retrieval_tools
+            else "(none)"
+        )
+
+        # Pre-compute memory component inspection so layer names are in
+        # the prompt directly — the planner doesn't need to spend a round
+        # trip calling inspect_component on memory
+        try:
+            memory_inspection = memory_comp.inspect_component()
+        except Exception as e:
+            self.get_logger().warning(
+                f"Failed to inspect memory component for prompt augmentation: {e}"
+            )
+            memory_inspection = ""
+
+        addendum = (
+            "\n\n=== Memory Guidance ===\n"
+            f"A spatio-temporal memory component '{memory_comp.node_name}' is "
+            "available. It has TWO distinct retrieval surfaces you must "
+            "distinguish between:\n"
+            f"  - Perception memory: past external observations (what the "
+            f"robot saw, detected, or was told). Retrieved via: {perception_str}.\n"
+            f"  - Interoception / body state: the robot's own internal "
+            f"readings (battery, temperature, joint health, fault flags). "
+            f"Retrieved via '{body_status_tool}' ONLY — internal state is "
+            f"NOT returned by perception retrieval tools.\n\n"
+            + (
+                f"Memory component inspection (use these layer names as "
+                f"'layer' / 'layers' filters on retrieval tools):\n"
+                f"{memory_inspection}\n\n"
+                if memory_inspection
+                else ""
+            )
+            + "TASK CLASSIFICATION — decide which type of task you have:\n"
+            "  (A) PERCEPTION QUERY: user is asking about past external "
+            "observations (e.g. 'what happened in the last episode?', "
+            "'where did you see the cup?', 'what did you do today?').\n"
+            "  (B) BODY QUERY: user is asking about the robot's internal "
+            "state (e.g. 'are you low on battery?', 'is anything wrong?', "
+            "'what is your current temperature?').\n"
+            "  (C) ACTION TASK: user wants the robot to do something in "
+            "the world (e.g. 'take a picture and describe it', "
+            "'navigate to the kitchen').\n\n"
+            "FOR PERCEPTION QUERY TASKS:\n"
+            f"  - Call one or more perception retrieval tools during "
+            f"planning: {perception_str}.\n"
+            "  - Respond with a text answer summarizing what you found.\n"
+            "  - DO NOT return any execution tool calls. DO NOT start or "
+            "end an episode — query tasks do not generate new observations.\n\n"
+            "FOR BODY QUERY TASKS:\n"
+            f"  - Call '{body_status_tool}' during planning (optionally "
+            f"filtered by an internal-state layer name listed above).\n"
+            "  - Respond with a text answer summarizing the readings.\n"
+            "  - DO NOT return execution tool calls. DO NOT start or end "
+            "an episode.\n\n"
+            "FOR ACTION TASKS:\n"
+            f"  1. Call '{body_status_tool}' during planning to read the "
+            "robot's current internal state. If readings indicate a "
+            "problem (very low battery, fault, overheating), abort the task "
+            "with a clear text explanation instead of proceeding.\n"
+            "  2. Optionally call perception retrieval tools during "
+            f"planning to ground the task in past memory (e.g. use "
+            f"'{memory_comp.node_name}.locate' to find a known object's "
+            "position).\n"
+            f"  3. Begin your execution plan with '{start_ep_tool}' using a "
+            "short, descriptive episode name derived from the task.\n"
+            "  4. Execute the task steps.\n"
+            f"  5. If during the task you derive a fact worth remembering "
+            f"(e.g. a VLM description you want to persist, an operator "
+            f"instruction, a decision), include '{store_note_tool}' in the "
+            f"plan to record it.\n"
+            f"  6. End your execution plan with '{end_ep_tool}' to "
+            "consolidate observations from this task into long-term memory.\n"
+            f"  Episodes are mandatory for ACTION tasks — always wrap the "
+            f"plan between '{start_ep_tool}' and '{end_ep_tool}'."
+        )
+
+        self._effective_planning_prompt = self._PLANNING_PROMPT + addendum
+        self.config._system_prompt = self._effective_planning_prompt
+        self.messages = [{"role": "system", "content": self._effective_planning_prompt}]
+        self.get_logger().info(
+            f"Planning prompt augmented for Memory component '{memory_comp.node_name}'."
+        )
 
     def custom_on_deactivate(self):
         if self.db_client:
@@ -473,7 +614,7 @@ class Cortex(ModelComponent, Monitor):
                 user_content = f"Context:\n{rag_context}\n\nTask: {task}"
 
         return [
-            {"role": "system", "content": self._PLANNING_PROMPT},
+            {"role": "system", "content": self._effective_planning_prompt},
             {"role": "user", "content": user_content},
         ]
 
@@ -502,10 +643,10 @@ class Cortex(ModelComponent, Monitor):
         for i, tc in enumerate(planning_calls):
             fn_name = tc["function"]["name"]
             fn_args = self._parse_tool_args(tc["function"].get("arguments", {}))
-            tool_result = self._execute_planning_tool(fn_name, fn_args)
             self.get_logger().debug(
-                f"[Planning step {step + 1}] {fn_name} -> {tool_result[:200]}"
+                f"[Planning step {step + 1}] calling {fn_name}({fn_args})"
             )
+            tool_result = self._execute_planning_tool(fn_name, fn_args)
             messages.append({
                 "role": "tool",
                 "tool_call_id": f"plan_{step}_{i}",
@@ -524,7 +665,9 @@ class Cortex(ModelComponent, Monitor):
         self.get_logger().info(f"Got plan: {plan}")
         return plan
 
-    def _plan_task(self, task: str) -> Optional[List[Dict]]:
+    def _plan_task(
+        self, task: str, messages: Optional[List[Dict]] = None
+    ) -> Tuple[Optional[List[Dict]], List[Dict]]:
         """Multi-step planning loop that researches components before producing a plan.
 
         The LLM is given both planning tools and execution tools.
@@ -535,11 +678,25 @@ class Cortex(ModelComponent, Monitor):
         - Respond with text only — no actions needed, loop ends.
 
         :param task: The high-level task description
-        :returns: List of tool_call dicts (the plan), or None if no actions needed
+        :param messages: Optional pre-existing planning messages to continue
+            from (e.g. after feeding back execution results). If None, a
+            fresh conversation is started.
+        :returns: Tuple of (plan, planning_messages). plan is a list of
+            tool_call dicts or None if no actions needed. planning_messages
+            is the conversation history, preserved so execution results can
+            be fed back for continued planning.
         """
         all_tools = self._planning_tool_descriptions + self._execution_tool_descriptions
-        messages = self._build_planning_messages(task)
+        if messages is None:
+            messages = self._build_planning_messages(task)
         output = ""
+
+        self.get_logger().debug(
+            f"[Planning] starting task={task!r} with "
+            f"{len(self._planning_tool_descriptions)} planning tools, "
+            f"{len(self._execution_tool_descriptions)} execution tools, "
+            f"max_steps={self.config.max_planning_steps}"
+        )
 
         for step in range(self.config.max_planning_steps):
             inference_input = {
@@ -549,12 +706,16 @@ class Cortex(ModelComponent, Monitor):
             if all_tools:
                 inference_input["tools"] = all_tools
 
+            self.get_logger().debug(
+                f"[Planning step {step + 1}/{self.config.max_planning_steps}] "
+                "invoking planner LLM"
+            )
             result = self._call_inference(inference_input)
             if not result:
                 self.get_logger().error(
                     f"Inference failed during planning step {step + 1}."
                 )
-                return None
+                return None, messages
 
             output = result.get("output") or ""
             if self.config.strip_think_tokens:
@@ -562,8 +723,12 @@ class Cortex(ModelComponent, Monitor):
 
             tool_calls = result.get("tool_calls")
             if not tool_calls:
+                self.get_logger().debug(
+                    f"[Planning step {step + 1}] planner returned no tool calls; "
+                    "ending loop"
+                )
                 self._planning_output = output
-                return None
+                return None, messages
 
             # Separate planning tool calls from execution tool calls
             planning_calls = [
@@ -576,23 +741,77 @@ class Cortex(ModelComponent, Monitor):
                 for tc in tool_calls
                 if tc["function"]["name"] not in self._planning_tools
             ]
+
+            self.get_logger().debug(
+                f"[Planning step {step + 1}] planner requested "
+                f"{len(planning_calls)} planning call(s) "
+                f"{[tc['function']['name'] for tc in planning_calls]} and "
+                f"{len(execution_calls)} execution call(s) "
+                f"{[tc['function']['name'] for tc in execution_calls]}"
+            )
+
             if planning_calls:
                 self._process_planning_calls(planning_calls, messages, output, step)
 
             if execution_calls:
-                return self._finalize_plan(execution_calls)
+                self.get_logger().debug(
+                    f"[Planning] producing plan with {len(execution_calls)} "
+                    f"step(s) after {step + 1} planning iteration(s)"
+                )
+                return self._finalize_plan(execution_calls), messages
 
         self.get_logger().warning(
             f"Planning reached max steps ({self.config.max_planning_steps}) "
             "without producing an execution plan."
         )
         self._planning_output = output
-        return None
+        return None, messages
+
+    def _append_execution_results_to_planning(
+        self,
+        messages: List[Dict],
+        plan: List[Dict],
+        executed_results: List[Dict],
+    ) -> None:
+        """Append executed plan steps and their results to the planning
+        conversation so the LLM can continue planning with context.
+
+        Each executed step is added as an assistant tool_call followed by
+        a tool response message with the result.
+        """
+        tool_calls_msg = []
+        for i, step in enumerate(plan):
+            tool_calls_msg.append({
+                "id": f"exec_{i}",
+                "type": "function",
+                "function": step["function"],
+            })
+
+        messages.append({
+            "role": "assistant",
+            "content": "",
+            "tool_calls": tool_calls_msg,
+        })
+
+        for i, result in enumerate(executed_results):
+            messages.append({
+                "role": "tool",
+                "tool_call_id": f"exec_{i}",
+                "content": result["result"],
+            })
 
     def _execute_planning_tool(self, tool_name: str, args: Dict) -> str:
-        """Execute a planning-phase tool (e.g. inspect_component)."""
+        """Execute a planning-phase tool.
+
+        Handles the built-in ``inspect_component`` tool plus any component
+        action that was registered into the planning toolset (actions
+        decorated with ``phase=ActionPhase.PLANNING`` or ``BOTH``).
+        """
         if tool_name == "inspect_component":
             return self._inspect_component(args.get("component", ""))
+        if tool_name in self._planning_tools and "." in tool_name:
+            parsed_args = self._parse_tool_args(args)
+            return self._call_component_action(tool_name, parsed_args)
         return f"Error: Unknown planning tool '{tool_name}'."
 
     # =========================================================================
@@ -648,13 +867,20 @@ class Cortex(ModelComponent, Monitor):
         plan: List[Dict],
         executed_results: List[Dict],
         step_index: int,
-    ) -> str:
+    ) -> Tuple[str, Optional[Dict]]:
         """Ask the LLM whether the next planned step should be executed.
+
+        The confirmation call includes execution tools so the LLM can
+        return a tool call with resolved arguments (e.g. using output
+        from a previous step as input to the next).
 
         :param plan: Full list of planned tool_calls
         :param executed_results: Results of already-executed steps
         :param step_index: Index of the next step to confirm
-        :returns: "EXECUTE", "SKIP", "ABORT", or "CONTINUE"
+        :returns: Tuple of (decision, resolved_step) where decision is
+            one of "EXECUTE", "SKIP", "ABORT", "CONTINUE" and
+            resolved_step is a tool_call dict with updated arguments
+            (or None to use the pre-planned arguments)
         """
         user_message = self._build_confirmation_message(
             plan, executed_results, step_index
@@ -670,23 +896,36 @@ class Cortex(ModelComponent, Monitor):
             "stream": False,
         }
 
+        # Include execution tools so the LLM can return a tool call
+        # with arguments resolved from prior step results
+        if self._execution_tool_descriptions:
+            inference_input["tools"] = self._execution_tool_descriptions
+
         result = self._call_inference(inference_input)
-        self.get_logger().debug(f"Got confirm step result = {result}")
         if not result:
             self.get_logger().warning(
                 "Confirmation inference failed; defaulting to EXECUTE."
             )
-            return "EXECUTE"
+            return "EXECUTE", None
 
         output = (result.get("output") or "").strip()
         if self.config.strip_think_tokens:
             output = strip_think_tokens(output).strip()
 
+        # Check for a tool call with resolved arguments
+        resolved_step = None
+        if tool_calls := result.get("tool_calls"):
+            resolved_step = tool_calls[0]
+            self.get_logger().debug(
+                f"Confirmation returned resolved tool call: {resolved_step}"
+            )
+
         upper = output.upper()
-        for token in ("ABORT", "SKIP", "CONTINUE", "EXECUTE"):
+        for token in ("ABORT", "SKIP", "CONTINUE"):
             if upper.startswith(token):
-                return token
-        return "EXECUTE"
+                return token, None
+        # EXECUTE, either explicitly stated or implied by a tool call
+        return "EXECUTE", resolved_step
 
     def _execute_action_step(self, step: Dict) -> str:
         """Execute a single planned step via the appropriate dispatch mechanism."""
@@ -806,86 +1045,94 @@ class Cortex(ModelComponent, Monitor):
     })
 
     def _register_component_actions(self):
-        """Discover @component_action/@component_fallback methods on all
-        managed components and register them as callable LLM tools.
+        """Discover LLM tools on managed components.
 
-        Uses ``get_methods_with_decorator`` from sugarcoat to find decorated
-        methods. Tool names are namespaced as ``{component_name}.{method_name}``.
-        These are execution-phase tools. Lifecycle management methods
-        (start, stop, restart, etc.) are excluded.
+        For each managed component, registers:
+          1. Its ``@component_action`` / ``@component_fallback`` methods
+             (routed to the planning or execution toolset based on the
+             ``_action_phase`` tag from ``agents.ros.component_action``).
+          2. Its additional ROS services as tools.
+          3. Its additional ROS action servers as tools.
+
+        Lifecycle management methods (start, stop, restart, ...) are
+        excluded. Tool names are namespaced as ``{component_name}.{method_name}``.
         """
         for comp_name, comp in self._managed_components.items():
-            # Collect all action/fallback method names
-            action_methods = get_methods_with_decorator(comp, "component_action")
-            fallback_methods = get_methods_with_decorator(comp, "component_fallback")
+            self._register_component_methods_as_tools(comp_name, comp)
+            self._register_component_entrypoints_as_tools(comp_name, comp)
 
-            for attr_name in action_methods + fallback_methods:
-                if attr_name in self._LIFECYCLE_METHODS:
-                    continue
+    def _register_component_methods_as_tools(self, comp_name: str, comp: Any) -> None:
+        """Register decorated action/fallback methods on one component.
 
-                try:
-                    tool_name = f"{comp_name}.{attr_name}"
-                    # Check if already registered
-                    if tool_name in self._execution_tools:
-                        continue
+        For each method:
+          1. Parse the raw ``_action_description`` into OpenAI tool format
+             (falling back to a docstring stub if not valid JSON).
+          2. Read the ``_action_phase`` tag (default ``execution``) and
+             add the tool to the planning set, execution set, or both.
+        """
+        action_methods = get_methods_with_decorator(comp, "component_action")
+        fallback_methods = get_methods_with_decorator(comp, "component_fallback")
 
-                    # Get the description from the decorator attribute
-                    class_attr = getattr(type(comp), attr_name, None)
-                    desc_raw = (
-                        getattr(class_attr, "_action_description", None)
-                        if class_attr
-                        else None
-                    )
+        for attr_name in action_methods + fallback_methods:
+            if attr_name in self._LIFECYCLE_METHODS:
+                continue
 
-                    # Not the decorator we were looking for
-                    if not desc_raw:
-                        continue
+            class_attr = getattr(type(comp), attr_name, None)
+            desc_raw = (
+                getattr(class_attr, "_action_description", None) if class_attr else None
+            )
+            if not desc_raw:
+                continue
 
-                    # Build tool description from OpenAI-format JSON or docstring
-                    try:
-                        parsed = json.loads(desc_raw)
-                        tool_desc = {
-                            "type": "function",
-                            "function": {
-                                **parsed["function"],
-                                "name": tool_name,
-                            },
-                        }
-                    except (json.JSONDecodeError, TypeError, KeyError):
-                        tool_desc = {
-                            "type": "function",
-                            "function": {
-                                "name": tool_name,
-                                "description": desc_raw[:200],
-                                "parameters": {
-                                    "type": "object",
-                                    "properties": {},
-                                    "required": [],
-                                },
-                            },
-                        }
+            tool_name = f"{comp_name}.{attr_name}"
+            try:
+                parsed = json.loads(desc_raw)
+                tool_desc = {
+                    "type": "function",
+                    "function": {**parsed["function"], "name": tool_name},
+                }
+            except (json.JSONDecodeError, TypeError, KeyError):
+                tool_desc = {
+                    "type": "function",
+                    "function": {
+                        "name": tool_name,
+                        "description": desc_raw[:200],
+                        "parameters": {
+                            "type": "object",
+                            "properties": {},
+                            "required": [],
+                        },
+                    },
+                }
 
-                    self._execution_tools.add(tool_name)
-                    self._execution_tool_descriptions.append(tool_desc)
-                except Exception:
-                    continue
-            # Register component additional entry points (Actions & Services)
-            entrypoints: Dict[str, Dict] = comp.get_ros_entrypoints()
-            # Register additional services as tools
-            srv_entrypoints = entrypoints.get("services", {})
-            for srv_name, srv_type in srv_entrypoints.items():
-                self.__register_service_client_as_tool(
-                    component_name=comp_name, srv_name=srv_name, srv_type=srv_type
-                )
+            phase = getattr(class_attr, "_action_phase", "execution")
+            if phase in ("planning", "both") and tool_name not in self._planning_tools:
+                self._planning_tools.add(tool_name)
+                self._planning_tool_descriptions.append(tool_desc)
+            if (
+                phase in ("execution", "both")
+                and tool_name not in self._execution_tools
+            ):
+                self._execution_tools.add(tool_name)
+                self._execution_tool_descriptions.append(tool_desc)
 
-            # Register additional Action Servers as tools
-            actions_entrypoints = entrypoints.get("actions", {})
-            for action_name, action_type in actions_entrypoints.items():
-                self.__register_action_client_as_tool(
-                    component_name=comp_name,
-                    action_name=action_name,
-                    action_type=action_type,
-                )
+    def _register_component_entrypoints_as_tools(
+        self, comp_name: str, comp: Any
+    ) -> None:
+        """Register a component's additional ROS services and action servers."""
+        entrypoints: Dict[str, Dict] = comp.get_ros_entrypoints()
+
+        for srv_name, srv_type in entrypoints.get("services", {}).items():
+            self.__register_service_client_as_tool(
+                component_name=comp_name, srv_name=srv_name, srv_type=srv_type
+            )
+
+        for action_name, action_type in entrypoints.get("actions", {}).items():
+            self.__register_action_client_as_tool(
+                component_name=comp_name,
+                action_name=action_name,
+                action_type=action_type,
+            )
 
     def _send_action_goal_from_dict(
         self,
@@ -988,18 +1235,56 @@ class Cortex(ModelComponent, Monitor):
             return f"Error calling {tool_name}: {e}"
 
     def _call_component_action(self, tool_name: str, args: Dict) -> str:
-        """Call a component action method directly, as a service."""
+        """Call a component action method via its ExecuteMethod service.
+
+        Returns the method's output as a string, suitable to feed back to
+        an LLM as a tool result:
+
+        - On failure (``response.success == False``) returns
+          ``"Error: ..."`` built from ``response.error_msg``.
+        - On success with no return value (method returned ``None`` or
+          ``True``) returns a short confirmation string.
+        - On success with a return value, decodes ``response.response_json``.
+          Plain strings are returned as-is (preserving multi-line
+          formatting from retrieval tools); structured values are
+          re-serialized to JSON.
+        """
         self.get_logger().info(
             f"Calling component action {tool_name} with args: {args}"
         )
         try:
-            comp_name, method_name = tool_name.split(".")
+            comp_name, method_name = tool_name.split(".", 1)
+        except ValueError as e:
+            return f"Error: Could not parse tool name for {tool_name}: {e}"
+
+        try:
             response = self.execute_component_method(comp_name, method_name, args)
-            if response.success:
-                return f"{tool_name} executed successfully"
-            return f"Error: {tool_name} failed with error: {response.error_msg}"
         except Exception as e:
-            return f"Error: Could not parse tool name for {tool_name}. Failed with error: {e}"
+            return f"Error calling {tool_name}: {e}"
+
+        if not response.success:
+            return f"Error: {tool_name} failed with error: {response.error_msg}"
+
+        # Success. Unpack the return value from response_json if present.
+        raw = getattr(response, "response_json", "") or ""
+        if not raw:
+            return f"{tool_name} executed successfully"
+        try:
+            result = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            # Server produced invalid JSON. Return the raw payload rather
+            # than losing it.
+            return raw
+
+        # True/None are both "method ran, nothing to report"
+        if result is True or result is None:
+            return f"{tool_name} executed successfully"
+        # Plain strings pass through unmolested so newlines and formatting are
+        # preserved for the LLM
+        if isinstance(result, str):
+            return result
+        # Structured data — re-serialize for the LLM
+        return json.dumps(result)
 
     def _inspect_component(self, component_name: str) -> str:
         """Return a text description of a component's structure.
@@ -1139,15 +1424,15 @@ class Cortex(ModelComponent, Monitor):
 
     def _wait_for_active_clients(
         self, goal_handle, feedback_msg, plan, executed_results, step_index, label: str
-    ) -> str:
+    ) -> Tuple[str, Optional[Dict]]:
         """Poll active async actions until the LLM stops returning CONTINUE.
 
-        :returns: Final decision (EXECUTE, SKIP, or ABORT)
+        :returns: Tuple of (decision, resolved_step)
         """
-        decision = self._confirm_step(plan, executed_results, step_index)
+        decision, resolved_step = self._confirm_step(plan, executed_results, step_index)
         while decision == "CONTINUE":
             if goal_handle.is_cancel_requested:
-                return "ABORT"
+                return "ABORT", None
             self._send_feedback(
                 goal_handle,
                 feedback_msg,
@@ -1155,12 +1440,20 @@ class Cortex(ModelComponent, Monitor):
                 f"{label}: waiting for async actions to complete...",
             )
             time.sleep(self.config.monitoring_interval)
-            decision = self._confirm_step(plan, executed_results, step_index)
+            decision, resolved_step = self._confirm_step(
+                plan, executed_results, step_index
+            )
             self.get_logger().info(f"[{label}] re-check -> {decision}")
-        return decision
+        return decision, resolved_step
 
     def _execute_plan(self, plan, goal_handle, feedback_msg) -> Tuple[List[Dict], bool]:
         """Execute plan steps with per-step confirmation.
+
+        The confirmation call includes execution tools so the LLM can
+        return a tool call with arguments resolved from prior step results.
+        For example, if step 1 (vlm.describe) returns a description, the
+        LLM can fill step 2 (tts.say) with that text instead of the
+        placeholder from the original plan.
 
         :returns: (executed_results, aborted)
         """
@@ -1176,11 +1469,11 @@ class Cortex(ModelComponent, Monitor):
                 return executed_results, True
 
             fn_name = step["function"]["name"]
-            fn_args = step["function"].get("arguments", {})
             label = f"Step {i + 1}/{total} ({fn_name})"
 
-            # Confirm (may wait for async actions via CONTINUE)
-            decision = self._wait_for_active_clients(
+            # Confirm (may wait for async actions via CONTINUE).
+            # The LLM may also return a tool call with resolved arguments.
+            decision, resolved_step = self._wait_for_active_clients(
                 goal_handle, feedback_msg, plan, executed_results, i, label
             )
             self.get_logger().info(f"[{label}] -> {decision}")
@@ -1202,13 +1495,18 @@ class Cortex(ModelComponent, Monitor):
                 )
                 continue
 
+            # Use resolved arguments from the confirmation call if available,
+            # otherwise fall back to the pre-planned arguments
+            effective_step = resolved_step if resolved_step else step
+            fn_args = effective_step["function"].get("arguments", {})
+
             # EXECUTE
             args_str = f" with {fn_args}" if fn_args else ""
             self._send_feedback(
                 goal_handle, feedback_msg, i + 1, f"Executing {label}{args_str}"
             )
 
-            step_result = self._execute_action_step(step)
+            step_result = self._execute_action_step(effective_step)
             executed_results.append({
                 "step": i,
                 "action": fn_name,
@@ -1222,7 +1520,7 @@ class Cortex(ModelComponent, Monitor):
 
         # Wait for any remaining async actions after the last step
         if self._monitor_active_clients():
-            decision = self._wait_for_active_clients(
+            decision, _ = self._wait_for_active_clients(
                 goal_handle,
                 feedback_msg,
                 plan,
@@ -1242,46 +1540,75 @@ class Cortex(ModelComponent, Monitor):
         return executed_results, False
 
     def _finalize_goal(
-        self, goal_handle, feedback_msg, result_msg, executed_results, plan_len, aborted
+        self,
+        goal_handle,
+        feedback_msg,
+        result_msg,
+        executed_results,
+        plan_len,
+        aborted,
+        voluntarily_stopped: bool = False,
     ) -> None:
-        """Set the final goal status based on execution results."""
-        summary = "; ".join(f"{r['action']}: {r['result']}" for r in executed_results)
+        """Set the final goal status based on execution results.
+
+        Success criterion: the planning loop ended voluntarily (the LLM
+        returned no more tool calls), meaning the LLM considered the task
+        complete. Earlier per-step errors are tolerated as long as the
+        loop recovered — the LLM had the chance to continue if needed.
+        """
         has_failures = any(r.get("failed") for r in executed_results)
+        had_recovery = has_failures and voluntarily_stopped
+
+        # If the goal is already in a terminal state e.g on client cancellation,
+        # don't attempt another state transition.
+        if not goal_handle.is_active:
+            self._cancel_all_active_clients()
+            return
 
         if aborted:
             with self._main_goal_lock:
                 self._cancel_all_active_clients()
                 goal_handle.abort()
-        elif has_failures:
-            self._send_feedback(
-                goal_handle,
-                feedback_msg,
-                plan_len,
-                f"Plan finished with errors. {summary}",
-                completed=True,
-            )
-            self.get_logger().warning(f"Task finished with errors: {summary}")
-            with self._main_goal_lock:
-                self._cancel_all_active_clients()
-                goal_handle.abort()
-        else:
+        elif voluntarily_stopped:
             result_msg.success = True
+            if had_recovery:
+                feedback = "Plan finished despite errors along the way."
+                self.get_logger().info(feedback)
+            else:
+                feedback = f"All {plan_len} steps completed."
+                self.get_logger().info(
+                    f"Task completed: {len(executed_results)} steps executed."
+                )
             self._send_feedback(
-                goal_handle,
-                feedback_msg,
-                plan_len,
-                f"All {plan_len} steps completed.",
-                completed=True,
-            )
-            self.get_logger().info(
-                f"Task completed: {len(executed_results)} steps executed."
+                goal_handle, feedback_msg, plan_len, feedback, completed=True
             )
             with self._main_goal_lock:
                 self._cancel_all_active_clients()
                 goal_handle.succeed()
+        else:
+            # Loop exhausted without the LLM voluntarily stopping
+            self._send_feedback(
+                goal_handle,
+                feedback_msg,
+                plan_len,
+                f"Plan did not finish: reached max_execution_steps "
+                f"({self.config.max_execution_steps}).",
+                completed=True,
+            )
+            self.get_logger().warning(
+                "Task exhausted max_execution_steps without voluntary completion."
+            )
+            with self._main_goal_lock:
+                self._cancel_all_active_clients()
+                goal_handle.abort()
 
     def main_action_callback(self, goal_handle):
-        """Action server callback. Runs two-phase planning and execution.
+        """Action server callback. Iterative plan-execute loop.
+
+        Plans a batch of steps, executes them, then feeds the results back
+        into the planning conversation so the LLM can continue with
+        additional steps if needed. The loop ends when the planner returns
+        no more tool calls or an abort/failure occurs.
 
         :param goal_handle: Incoming action goal
         :return: Action result
@@ -1297,51 +1624,89 @@ class Cortex(ModelComponent, Monitor):
             goal_handle, feedback_msg, 0, f"Received task. Creating a plan for: {task}"
         )
 
-        # Phase 1: Planning
-        plan = self._plan_task(task)
+        all_executed_results: List[Dict] = []
+        total_steps = 0
+        planning_messages = None
+        voluntarily_stopped = False
 
-        if plan is None:
-            text_output = self._planning_output or ""
-            if text_output:
-                result_msg.success = True
-                self._send_feedback(
+        for _ in range(self.config.max_execution_steps):
+            # Plan (or continue planning with prior results)
+            plan, planning_messages = self._plan_task(task, planning_messages)
+
+            if plan is None:
+                # No more actions needed
+                if all_executed_results:
+                    # We already executed some steps — LLM signalled done
+                    voluntarily_stopped = True
+                    break
+                # First iteration, no plan at all
+                text_output = self._planning_output or ""
+                if text_output:
+                    result_msg.success = True
+                    self._send_feedback(
+                        goal_handle,
+                        feedback_msg,
+                        0,
+                        f"[No actions needed]. {text_output}",
+                        completed=True,
+                    )
+                    self._publish(result={"output": text_output})
+                    with self._main_goal_lock:
+                        goal_handle.succeed()
+                else:
+                    self._send_feedback(
+                        goal_handle,
+                        feedback_msg,
+                        0,
+                        "Planning failed: no response from model.",
+                        completed=True,
+                    )
+                    with self._main_goal_lock:
+                        goal_handle.abort()
+                return result_msg
+
+            plan_description = ", ".join(s["function"]["name"] for s in plan)
+            self._send_feedback(
+                goal_handle,
+                feedback_msg,
+                total_steps,
+                f"Plan: {plan_description}",
+            )
+            self.get_logger().info(f"Plan: {plan_description}")
+
+            # Execute this batch
+            executed_results, aborted = self._execute_plan(
+                plan, goal_handle, feedback_msg
+            )
+            all_executed_results.extend(executed_results)
+            total_steps += len(plan)
+
+            if aborted:
+                self._finalize_goal(
                     goal_handle,
                     feedback_msg,
-                    0,
-                    f"[No actions needed]. {text_output}",
-                    completed=True,
+                    result_msg,
+                    all_executed_results,
+                    total_steps,
+                    aborted=True,
                 )
-                # publish planning output if there is an output topic
-                self._publish(result={"output": text_output})
-                with self._main_goal_lock:
-                    goal_handle.succeed()
-            else:
-                self._send_feedback(
-                    goal_handle,
-                    feedback_msg,
-                    0,
-                    "Planning failed: no response from model.",
-                    completed=True,
-                )
-                with self._main_goal_lock:
-                    goal_handle.abort()
-            return result_msg
+                return result_msg
 
-        plan_description = ", ".join(s["function"]["name"] for s in plan)
-        self._send_feedback(
+            # Feed execution results back into the planning conversation
+            # so the LLM can continue with the next steps
+            self._append_execution_results_to_planning(
+                planning_messages, plan, executed_results
+            )
+
+        # Loop exited — either voluntarily (LLM stopped) or exhausted
+        self._finalize_goal(
             goal_handle,
             feedback_msg,
-            0,
-            f"Plan created with {len(plan)} steps: {plan_description}",
-        )
-        self.get_logger().info(f"Plan: {plan_description}")
-
-        # Phase 2: Execution
-        executed_results, aborted = self._execute_plan(plan, goal_handle, feedback_msg)
-
-        # Finalize
-        self._finalize_goal(
-            goal_handle, feedback_msg, result_msg, executed_results, len(plan), aborted
+            result_msg,
+            all_executed_results,
+            total_steps,
+            aborted=False,
+            voluntarily_stopped=voluntarily_stopped,
         )
         return result_msg
 
