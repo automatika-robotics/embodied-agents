@@ -2,8 +2,8 @@
 Changelog for package automatika_embodied_agents
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+0.7.1 (2026-05-02)
+------------------
 * (chore) Bumps minimum sugarcoat version
 * (chore) Adds test for memory component
 * (chore) Adds an example recipe for using cortex with memory
