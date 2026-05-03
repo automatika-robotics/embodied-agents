@@ -650,10 +650,23 @@ class Memory(Component):
         memory.register_tools_on(llm, tools=["semantic_search", "locate", "get_current_context"])
         ```
         """
-        for fn, desc in self.memory.get_tools_for_registration():
-            name = desc["function"]["name"]
-            if tools is None or name in tools:
-                llm.register_tool(fn, desc, send_tool_response_to_model)
+        # Build the descriptions from the static schemas and defer the dispatch
+        # lookup to call time so registration works before the lifecycle has run
+        for tool_name, _ in _EMEM_TOOL_SCHEMAS.items():
+            if tools is not None and tool_name not in tools:
+                continue
+            desc = _tool(tool_name)
+
+            def _make_dispatch(name):
+                def _dispatch(**kwargs):
+                    return self.memory.dispatch_tool_call(name, kwargs)
+
+                _dispatch.__name__ = name
+                return _dispatch
+
+            llm.register_tool(
+                _make_dispatch(tool_name), desc, send_tool_response_to_model
+            )
 
     def _update_cmd_args_list(self):
         """
