@@ -1,60 +1,56 @@
-from typing import Optional
-from agents.components import MapEncoding, Vision, MLLM
-from agents.models import VisionModel, OllamaModel
-from agents.clients import RoboMLRESPClient, ChromaClient, OllamaClient
-from agents.ros import Topic, MapLayer, Launcher, FixedInput
-from agents.vectordbs import ChromaDB
-from agents.config import MapConfig, VisionConfig
+"""Semantic map built with the Memory component."""
 
-# Define the image input topic
+from typing import Optional
+
+from agents.clients import OllamaClient, RoboMLRESPClient
+from agents.components import VLM, Memory, Vision
+from agents.config import MemoryConfig, VisionConfig
+from agents.models import OllamaModel, VisionModel
+from agents.ros import FixedInput, Launcher, MemLayer, Topic
+
+
+# -- Vision component: object detection --
 image0 = Topic(name="image_raw", msg_type="Image")
-# Create a detection topic
 detections_topic = Topic(name="detections", msg_type="Detections")
 
-# Add an object detection model
 object_detection = VisionModel(
     name="object_detection", checkpoint="PekingU/rtdetr_r50vd_coco_o365"
 )
 roboml_detection = RoboMLRESPClient(object_detection)
 
-# Initialize the Vision component
-detection_config = VisionConfig(threshold=0.5)
 vision = Vision(
     inputs=[image0],
     outputs=[detections_topic],
     trigger=image0,
-    config=detection_config,
+    config=VisionConfig(threshold=0.5),
     model_client=roboml_detection,
     component_name="detection_component",
 )
 
 
-# Define a model client (working with Ollama in this case)
+# -- VLM component: introspection (room classification) --
 qwen_vl = OllamaModel(name="qwen_vl", checkpoint="qwen2.5vl:latest")
 qwen_client = OllamaClient(qwen_vl)
 
-# Define a fixed input for the component
 introspection_query = FixedInput(
     name="introspection_query",
     msg_type="String",
-    fixed="What kind of a room is this? Is it an office, a bedroom or a kitchen? Give a one word answer, out of the given choices",
+    fixed=(
+        "What kind of a room is this? Is it an office, a bedroom or a "
+        "kitchen? Give a one word answer, out of the given choices"
+    ),
 )
-# Define output of the component
 introspection_answer = Topic(name="introspection_answer", msg_type="String")
 
-# Start a timed (periodic) component using the mllm model defined earlier
-# This component answers the same question after every 15 seconds
-introspector = MLLM(
-    inputs=[introspection_query, image0],  # we use the image0 topic defined earlier
+introspector = VLM(
+    inputs=[introspection_query, image0],
     outputs=[introspection_answer],
     model_client=qwen_client,
-    trigger=15.0,  # we provide the time interval as a float value to the trigger parameter
+    trigger=15.0,
     component_name="introspector",
 )
 
 
-# Define an arbitrary function to validate the output of the introspective component
-# before publication.
 def introspection_validation(output: str) -> Optional[str]:
     for option in ["office", "bedroom", "kitchen"]:
         if option in output.lower():
@@ -63,32 +59,33 @@ def introspection_validation(output: str) -> Optional[str]:
 
 introspector.add_publisher_preprocessor(introspection_answer, introspection_validation)
 
-# Object detection output from vision component
-layer1 = MapLayer(subscribes_to=detections_topic, temporal_change=True)
-# Introspection output from mllm component
-layer2 = MapLayer(subscribes_to=introspection_answer, resolution_multiple=3)
 
-# Initialize mandatory topics defining the robots localization in space
-position = Topic(name="odom", msg_type="Odometry")
-map_topic = Topic(name="map", msg_type="OccupancyGrid")
+# -- Memory component --
+# Two perception layers: detections (high temporal change) and scene labels.
+detections_layer = MemLayer(subscribes_to=detections_topic, temporal_change=True)
+scene_layer = MemLayer(subscribes_to=introspection_answer)
 
-# Initialize a vector DB that will store our semantic map
-chroma = ChromaDB()
-chroma_client = ChromaClient(db=chroma)
-
-# Create the map component
-map_conf = MapConfig(map_name="map")  # We give our map a name
-map = MapEncoding(
-    layers=[layer1, layer2],
-    position=position,
-    map_topic=map_topic,
-    config=map_conf,
-    db_client=chroma_client,
-    trigger=15.0,
-    component_name="map_encoding",
+# Memory uses real-world coordinates from Odometry directly.
+# For embeddings we use a small Ollama embedding model; if no
+# embedding_client is provided, Memory falls back to sentence-transformers.
+embedding_client = OllamaClient(
+    OllamaModel(name="embeddings", checkpoint="nomic-embed-text-v2-moe:latest")
 )
 
-# Launch the components
+position = Topic(name="odom", msg_type="Odometry")
+
+memory = Memory(
+    layers=[detections_layer, scene_layer],
+    position=position,
+    model_client=qwen_client,  # used for episodic consolidation / summarization
+    embedding_client=embedding_client,
+    config=MemoryConfig(db_path="/tmp/semantic_map.db"),
+    trigger=15.0,
+    component_name="memory",
+)
+
+
+# -- Launch --
 launcher = Launcher()
-launcher.add_pkg(components=[vision, introspector, map])
+launcher.add_pkg(components=[vision, introspector, memory])
 launcher.bringup()
