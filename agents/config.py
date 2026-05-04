@@ -139,6 +139,9 @@ class LLMConfig(ModelComponentConfig):
     _tool_response_flags: Dict[str, bool] = field(
         default=Factory(dict), alias="_tool_response_flags"
     )
+    _component_tool_names: List[str] = field(
+        default=Factory(list), alias="_component_tool_names"
+    )
     # Only used when LLM is used as a router
     _default_route: Optional[str] = field(default=None, alias="_default_route")
 

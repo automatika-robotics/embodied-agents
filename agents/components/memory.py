@@ -662,6 +662,9 @@ class Memory(Component):
                     return self.memory.dispatch_tool_call(name, kwargs)
 
                 _dispatch.__name__ = name
+                # Add memory component as self so LLM knows its a component
+                # method
+                _dispatch.__self__ = self
                 return _dispatch
 
             llm.register_tool(

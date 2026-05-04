@@ -47,6 +47,9 @@ from ros_sugar.base_clients import ServiceClientHandler, ActionClientHandler
 
 from .launcher import Launcher
 
+# SUGATCOAT INTERFACES
+from automatika_ros_sugar.srv import ExecuteMethod
+
 # AGENTS TYPES
 from automatika_embodied_agents.msg import (
     Point2D,

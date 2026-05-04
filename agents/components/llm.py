@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 from typing import Any, Optional, Union, Callable, List, Dict, MutableMapping
+from functools import partial
 import msgpack
 import msgpack_numpy as m_pack
 
@@ -17,8 +18,16 @@ from ..ros import (
     DetectionsMultiSource,
     Detections,
     StreamingString,
+    BaseComponent,
+    ServiceClientHandler,
+    ExecuteMethod,
 )
-from ..utils import get_prompt_template, validate_func_args, strip_think_tokens
+from ..utils import (
+    get_prompt_template,
+    validate_func_args,
+    strip_think_tokens,
+    execute_method_response_to_str,
+)
 from .model_component import ModelComponent
 from .component_base import ComponentRunType
 
@@ -126,6 +135,9 @@ class LLM(ModelComponent):
             else []
         )
 
+        # Mapping for service clients used for calling component actions as tools
+        self._component_clients: Dict[str, ServiceClientHandler] = {}
+
         super().__init__(
             inputs,
             outputs,
@@ -195,6 +207,48 @@ class LLM(ModelComponent):
 
         # deactivate the rest
         super().custom_on_deactivate()
+
+    def create_all_service_clients(self):
+        """Override create all clients in the LLM"""
+        super().create_all_service_clients()
+
+        # Add custom clients to external processors for tool calling on
+        # component methods
+        for tool_name in self.config._component_tool_names:
+            comp_name, method_name = tool_name.split(".")
+            # Add the tool
+            self._external_processors[method_name] = (
+                [partial(self._execute_component_method, comp_name, method_name)],
+                "tool",
+            )
+            # Create a service client only if it doesnt exist for a node
+            if not self._component_clients.get(comp_name):
+                self._component_clients[comp_name] = ServiceClientHandler(
+                    self, srv_name=f"{comp_name}/execute_method", srv_type=ExecuteMethod
+                )
+
+    def destroy_all_service_clients(self):
+        """Override destroy all clients in the LLM"""
+        super().destroy_all_service_clients()
+        for client in self._component_clients.values():
+            self.destroy_client(client.client)
+
+    def _execute_component_method(
+        self,
+        component_name: str,
+        method_name: str,
+        **kwargs: Dict,
+    ) -> str:
+        tool_name = f"{component_name}.{method_name}"
+        srv_client: ServiceClientHandler = self._component_clients[component_name]
+        srv_request = ExecuteMethod.Request()
+        srv_request.name = method_name
+        srv_request.kwargs_json = json.dumps(kwargs)
+        try:
+            response = srv_client.send_request(req_msg=srv_request)
+        except Exception as e:
+            return f"Error calling {tool_name}: {e}"
+        return execute_method_response_to_str(tool_name, response)
 
     @validate_func_args
     def add_documents(
@@ -698,10 +752,18 @@ class LLM(ModelComponent):
             raise TypeError(
                 "Tools cannot be registered for a component with streaming output. Please set stream option to False."
             )
-        self._external_processors[tool_description["function"]["name"]] = (
-            [tool],
-            "tool",
-        )
+        # Check if tool is a component action
+        if hasattr(tool, "__self__") and isinstance(tool.__self__, BaseComponent):
+            component_name = tool.__self__.node_name  # type: ignore
+            self.config._component_tool_names.append(
+                f"{component_name}.{tool.__name__}"
+            )
+
+        else:
+            self._external_processors[tool_description["function"]["name"]] = (
+                [tool],
+                "tool",
+            )
         self.config._tool_descriptions.append(tool_description)
         self.config._tool_response_flags[tool_description["function"]["name"]] = (
             send_tool_response_to_model
