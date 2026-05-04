@@ -286,6 +286,34 @@ def strip_think_tokens(text: str) -> str:
     return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
 
+def execute_method_response_to_str(tool_name: str, response) -> str:
+    """Convert an ``ExecuteMethod`` service response into a string suitable
+    as an LLM tool-call result.
+
+    - On failure (``response.success == False``): ``"Error: <tool_name>
+      failed with error: <error_msg>"``.
+    - On success with no return value (method returned ``None`` or ``True``,
+      or the server omitted ``response_json``): a short confirmation string.
+    - On success with a return value: decode ``response.response_json``;
+      plain strings pass through unmolested (preserving multi-line
+      formatting); structured values are re-serialized to JSON.
+    """
+    if not response.success:
+        return f"Error: {tool_name} failed with error: {response.error_msg}"
+    raw = getattr(response, "response_json", "") or ""
+    if not raw:
+        return f"{tool_name} executed successfully"
+    try:
+        result = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return raw
+    if result is True or result is None:
+        return f"{tool_name} executed successfully"
+    if isinstance(result, str):
+        return result
+    return json.dumps(result)
+
+
 class VADStatus(Enum):
     """VAD Status for start and end of detected speech"""
 

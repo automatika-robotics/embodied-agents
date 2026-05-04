@@ -23,7 +23,11 @@ from ..ros import (
     ros_msg_to_str,
     get_methods_with_decorator,
 )
-from ..utils import validate_func_args, strip_think_tokens
+from ..utils import (
+    validate_func_args,
+    strip_think_tokens,
+    execute_method_response_to_str,
+)
 from ..utils.actions import goal_type_to_json_properties
 from .model_component import ModelComponent
 
@@ -1262,29 +1266,7 @@ class Cortex(ModelComponent, Monitor):
         except Exception as e:
             return f"Error calling {tool_name}: {e}"
 
-        if not response.success:
-            return f"Error: {tool_name} failed with error: {response.error_msg}"
-
-        # Success. Unpack the return value from response_json if present.
-        raw = getattr(response, "response_json", "") or ""
-        if not raw:
-            return f"{tool_name} executed successfully"
-        try:
-            result = json.loads(raw)
-        except (json.JSONDecodeError, TypeError):
-            # Server produced invalid JSON. Return the raw payload rather
-            # than losing it.
-            return raw
-
-        # True/None are both "method ran, nothing to report"
-        if result is True or result is None:
-            return f"{tool_name} executed successfully"
-        # Plain strings pass through unmolested so newlines and formatting are
-        # preserved for the LLM
-        if isinstance(result, str):
-            return result
-        # Structured data — re-serialize for the LLM
-        return json.dumps(result)
+        return execute_method_response_to_str(tool_name, response)
 
     def _inspect_component(self, component_name: str) -> str:
         """Return a text description of a component's structure.
