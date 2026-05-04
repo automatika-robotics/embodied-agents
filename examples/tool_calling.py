@@ -61,7 +61,8 @@ goto = LLM(
 goto.set_component_prompt(
     template=(
         "The user asks you to go to a place. Call the "
-        "``find_location_coordinates`` tool with the place's name."
+        "``find_location_coordinates`` tool with the place's name. "
+        "User asked: {{goto_in}}"
     )
 )
 

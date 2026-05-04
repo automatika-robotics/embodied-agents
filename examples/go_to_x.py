@@ -55,7 +55,7 @@ goto = LLM(
     outputs=[goal_point],
     model_client=qwen_client,
     trigger=goto_in,
-    config=LLMConfig(),
+    config=LLMConfig(log_level="debug"),
     component_name="go_to_x",
 )
 
@@ -63,7 +63,7 @@ goto.set_component_prompt(
     template=(
         "The user asks you to go to a place. Use the available tools to "
         "look up the place's location in memory. Pass the place name to "
-        "the locate tool as the ``concept`` argument."
+        "the locate tool as the ``concept`` argument. User said: {{goto_in}}"
     )
 )
 
@@ -79,6 +79,7 @@ _LOCATION_RE = re.compile(r"Location:\s*\(([^)]+)\)")
 
 def locate_text_to_goal_point(output: str) -> Optional[np.ndarray]:
     """Pull the centroid coordinates out of Memory.locate's text output."""
+    print("Output: ", output)
     match = _LOCATION_RE.search(output)
     if not match:
         return  # no match means no publish
