@@ -2,8 +2,8 @@
 Changelog for package automatika_embodied_agents
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+0.7.2 (2026-05-06)
+------------------
 * (chore) Updates complete agent recipes
 * (chore) Updates tool calling and go to x recipes to use memory
 * (feature) Enables passing component actions as tools to the llm component
