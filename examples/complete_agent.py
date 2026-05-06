@@ -1,45 +1,58 @@
-import numpy as np
-import json
+"""Complete in-process agent: speech I/O + vision + Memory + go-to-X + router"""
+
+import re
 from typing import Optional
+
+import numpy as np
+
+from agents.clients import (
+    ChromaClient,
+    OllamaClient,
+    RoboMLHTTPClient,
+    RoboMLRESPClient,
+)
 from agents.components import (
+    LLM,
     MLLM,
+    Memory,
+    SemanticRouter,
     SpeechToText,
     TextToSpeech,
-    LLM,
     Vision,
-    MapEncoding,
-    SemanticRouter,
 )
-from agents.config import TextToSpeechConfig
-from agents.clients import RoboMLHTTPClient, RoboMLRESPClient
-from agents.clients import ChromaClient
-from agents.clients import OllamaClient
-from agents.models import Whisper, TransformersTTS, VisionModel, OllamaModel
+from agents.config import (
+    LLMConfig,
+    MemoryConfig,
+    SemanticRouterConfig,
+    TextToSpeechConfig,
+    VisionConfig,
+)
+from agents.models import OllamaModel, TransformersTTS, VisionModel, Whisper
+from agents.ros import FixedInput, Launcher, MemLayer, Route, Topic
 from agents.vectordbs import ChromaDB
-from agents.config import VisionConfig, LLMConfig, MapConfig, SemanticRouterConfig
-from agents.ros import Topic, Launcher, FixedInput, MapLayer, Route
 
 
-### Setup our models and vectordb ###
-whisper = Whisper(name="whisper")
-whisper_client = RoboMLHTTPClient(whisper)
-tts = TransformersTTS(name="tts")
-tts_client = RoboMLHTTPClient(tts)
-object_detection_model = VisionModel(
-    name="rtdetr", checkpoint="PekingU/rtdetr_r50vd_coco_o365"
+### Models and shared clients ###
+whisper_client = RoboMLHTTPClient(Whisper(name="whisper"))
+tts_client = RoboMLHTTPClient(TransformersTTS(name="tts"))
+detection_client = RoboMLRESPClient(
+    VisionModel(name="rtdetr", checkpoint="PekingU/rtdetr_r50vd_coco_o365")
 )
-detection_client = RoboMLRESPClient(object_detection_model)
-qwen_vl = OllamaModel(name="qwen_vl", checkpoint="qwen2.5vl:latest")
-qwen_client = OllamaClient(qwen_vl)
-qwen = OllamaModel(name="qwen", checkpoint="qwen3:0.6b")
-qwen_client = OllamaClient(qwen)
-chroma = ChromaDB()
-chroma_client = ChromaClient(db=chroma, port=8080)
+qwen_vl_client = OllamaClient(
+    OllamaModel(name="qwen_vl", checkpoint="qwen2.5vl:latest")
+)
+qwen_client = OllamaClient(OllamaModel(name="qwen", checkpoint="qwen3:0.6b"))
+embedding_client = OllamaClient(
+    OllamaModel(name="embeddings", checkpoint="nomic-embed-text-v2-moe:latest")
+)
+# ChromaDB is still used by SemanticRouter.
+chroma_client = ChromaClient(db=ChromaDB(), port=8080)
 
-### Setup our components ###
-# Setup a speech to text component
+
+### Speech I/O ###
 audio_in = Topic(name="audio0", msg_type="Audio")
 query_topic = Topic(name="question", msg_type="String")
+query_answer = Topic(name="answer", msg_type="String")
 
 speech_to_text = SpeechToText(
     inputs=[audio_in],
@@ -49,62 +62,62 @@ speech_to_text = SpeechToText(
     component_name="speech_to_text",
 )
 
-# Setup a text to speech component
-query_answer = Topic(name="answer", msg_type="String")
-
-t2s_config = TextToSpeechConfig(play_on_device=True)
-
 text_to_speech = TextToSpeech(
     inputs=[query_answer],
     trigger=query_answer,
     model_client=tts_client,
-    config=t2s_config,
+    config=TextToSpeechConfig(play_on_device=True),
     component_name="text_to_speech",
 )
 
-# Setup a vision component for object detection
+
+### Vision (object detection) ###
 image0 = Topic(name="image_raw", msg_type="Image")
 detections_topic = Topic(name="detections", msg_type="Detections")
 
-detection_config = VisionConfig(threshold=0.5)
 vision = Vision(
     inputs=[image0],
     outputs=[detections_topic],
     trigger=image0,
-    config=detection_config,
+    config=VisionConfig(threshold=0.5),
     model_client=detection_client,
     component_name="object_detection",
 )
 
-# Define a generic mllm component for vqa
+
+### VQA MLLM ###
 mllm_query = Topic(name="mllm_query", msg_type="String")
 
 mllm = MLLM(
     inputs=[mllm_query, image0, detections_topic],
     outputs=[query_answer],
-    model_client=qwen_client,
+    model_client=qwen_vl_client,
     trigger=mllm_query,
     component_name="visual_q_and_a",
 )
-
 mllm.set_component_prompt(
-    template="""Imagine you are a robot.
-    This image has following items: {{ detections }}.
-    Answer the following about this image: {{ text0 }}"""
+    template=(
+        "Imagine you are a robot. This image has the following items: "
+        "{{ detections }}. Answer the following about this image: {{ text0 }}"
+    )
 )
 
-# Define a fixed input mllm component that does introspection
+
+### Introspection MLLM (room classification feeding the memory) ###
 introspection_query = FixedInput(
     name="introspection_query",
     msg_type="String",
-    fixed="What kind of a room is this? Is it an office, a bedroom or a kitchen? Give a one word answer, out of the given choices",
+    fixed=(
+        "What kind of a room is this? Is it an office, a bedroom or a "
+        "kitchen? Give a one word answer, out of the given choices"
+    ),
 )
 introspection_answer = Topic(name="introspection_answer", msg_type="String")
 
 introspector = MLLM(
     inputs=[introspection_query, image0],
     outputs=[introspection_answer],
-    model_client=qwen_client,
+    model_client=qwen_vl_client,
     trigger=15.0,
     component_name="introspector",
 )
@@ -118,25 +131,25 @@ def introspection_validation(output: str) -> Optional[str]:
 
 introspector.add_publisher_preprocessor(introspection_answer, introspection_validation)
 
-# Define a semantic map using MapEncoding component
-layer1 = MapLayer(subscribes_to=detections_topic, temporal_change=True)
-layer2 = MapLayer(subscribes_to=introspection_answer, resolution_multiple=3)
 
+### Memory (replaces MapEncoding) ###
 position = Topic(name="odom", msg_type="Odometry")
-map_topic = Topic(name="map", msg_type="OccupancyGrid")
 
-map_conf = MapConfig(map_name="map")
-map = MapEncoding(
-    layers=[layer1, layer2],
+memory = Memory(
+    layers=[
+        MemLayer(subscribes_to=detections_topic, temporal_change=True),
+        MemLayer(subscribes_to=introspection_answer),
+    ],
     position=position,
-    map_topic=map_topic,
-    config=map_conf,
-    db_client=chroma_client,
+    model_client=qwen_client,
+    embedding_client=embedding_client,
+    config=MemoryConfig(db_path="/tmp/complete_agent.db"),
     trigger=15.0,
-    component_name="map_encoder",
+    component_name="memory",
 )
 
-# Define a generic LLM component
+
+### Generic LLM (general Q&A) ###
 llm_query = Topic(name="llm_query", msg_type="String")
 
 llm = LLM(
@@ -147,59 +160,53 @@ llm = LLM(
     component_name="general_q_and_a",
 )
 
-# Define a Go-to-X component using LLM
+
+### Go-to-X using LLM tool calling on Memory.locate ###
 goto_query = Topic(name="goto_query", msg_type="String")
 goal_point = Topic(name="goal_point", msg_type="PoseStamped")
-
-goto_config = LLMConfig(
-    enable_rag=True,
-    collection_name="map",
-    distance_func="l2",
-    n_results=1,
-    add_metadata=True,
-)
 
 goto = LLM(
     inputs=[goto_query],
     outputs=[goal_point],
     model_client=qwen_client,
-    config=goto_config,
-    db_client=chroma_client,
     trigger=goto_query,
+    config=LLMConfig(),
     component_name="go_to_x",
 )
-
 goto.set_component_prompt(
-    template="""From the given metadata, extract coordinates and provide
-    the coordinates in the following json format:\n {"position": coordinates}"""
+    template=(
+        "The user asks you to go to a place. Use the available tools to "
+        "look up the place's location in memory. Pass the place name to "
+        "the locate tool as the ``concept`` argument. "
+        "The user said: {{goto_query}}"
+    )
 )
+memory.register_tools_on(goto, tools=["locate"], send_tool_response_to_model=False)
 
 
-# pre-process the output before publishing to a topic of msg_type PoseStamped
-def llm_answer_to_goal_point(output: str) -> Optional[np.ndarray]:
-    # extract the json part of the output string (including brackets)
-    # one can use sophisticated regex parsing here but we'll keep it simple
-    json_string = output[output.find("{") : output.rfind("}") + 1]
-    # load the string as a json and extract position coordinates
-    # if there is an error, return None, i.e. no output would be published to goal_point
-    try:
-        json_dict = json.loads(json_string)
-        coordinates = np.fromstring(json_dict["position"], sep=",", dtype=np.float64)
-        print("Coordinates Extracted:", coordinates)
-        if coordinates.shape[0] < 2 or coordinates.shape[0] > 3:
-            return
-        elif (
-            coordinates.shape[0] == 2
-        ):  # sometimes LLMs avoid adding the zeros of z-dimension
-            coordinates = np.append(coordinates, 0)
-        return coordinates
-    except Exception:
+_LOCATION_RE = re.compile(r"Location:\s*\(([^)]+)\)")
+
+
+def locate_text_to_goal_point(output: str) -> Optional[np.ndarray]:
+    """Pull the centroid coordinates out of Memory.locate's text output."""
+    match = _LOCATION_RE.search(output)
+    if not match:
         return
+    try:
+        coords = np.fromstring(match.group(1), sep=",", dtype=np.float64)
+    except ValueError:
+        return
+    if coords.shape[0] == 2:
+        coords = np.append(coords, 0.0)
+    if coords.shape[0] != 3:
+        return
+    return coords
 
 
-goto.add_publisher_preprocessor(goal_point, llm_answer_to_goal_point)
+goto.add_publisher_preprocessor(goal_point, locate_text_to_goal_point)
 
-# Define a semantic router between a generic LLM component, VQA MLLM component and Go-to-X component
+
+### Semantic router (uses ChromaDB for the route embeddings) ###
 goto_route = Route(
     routes_to=goto_query,
     samples=[
@@ -210,7 +217,6 @@ goto_route = Route(
         "Go to hallway",
     ],
 )
-
 llm_route = Route(
     routes_to=llm_query,
     samples=[
@@ -221,7 +227,6 @@ llm_route = Route(
         "Whats up?",
     ],
 )
-
 mllm_route = Route(
     routes_to=mllm_query,
     samples=[
@@ -235,18 +240,17 @@ mllm_route = Route(
     ],
 )
 
-router_config = SemanticRouterConfig(router_name="go-to-router", distance_func="l2")
-# Initialize the router component
 router = SemanticRouter(
     inputs=[query_topic],
     routes=[llm_route, goto_route, mllm_route],
     default_route=llm_route,
-    config=router_config,
+    config=SemanticRouterConfig(router_name="go-to-router", distance_func="l2"),
     db_client=chroma_client,
     component_name="router",
 )
 
-# Launch the components
+
+### Launch (single process so goto can call memory in-process) ###
 launcher = Launcher()
 launcher.add_pkg(
     components=[
@@ -254,7 +258,7 @@ launcher.add_pkg(
         llm,
         goto,
         introspector,
-        map,
+        memory,
         router,
         speech_to_text,
         text_to_speech,
