@@ -2,6 +2,19 @@
 Changelog for package automatika_embodied_agents
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+* (chore) Updates complete agent recipes
+* (chore) Updates tool calling and go to x recipes to use memory
+* (feature) Enables passing component actions as tools to the llm component
+  - Executed through service calls
+* (refactor) Makes response handling from component action execution a utility
+* (chore) Updates go to x recipe to use the memory component
+* (fix) Fixes registering memory tools with llms before lifecycle configuration
+* (chore) Updates tool calling recipe to use the memory component
+* (chore) Updates semantic map recipes to use the memory component
+* Contributors: ahr
+
 0.7.1 (2026-05-02)
 ------------------
 * (chore) Bumps minimum sugarcoat version
