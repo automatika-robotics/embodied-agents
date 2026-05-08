@@ -173,6 +173,24 @@ class Component(BaseComponent):
 
         self.trig_source: Union[Topic, List[Topic], float, Event, None] = trigger
 
+    def _match_msg_type(
+        topic: Type[SupportedType],
+        all_types: List[Type[SupportedType]],
+    ) -> bool:
+        """Matches a topic against a set of allowed types
+
+        :param topic: _description_
+        :type topic: Union[Topic, FixedInput]
+        :param all_types: _description_
+        :type all_types: List[Union[Type[SupportedType], List[Type[SupportedType]]]]
+        :return: _description_
+        :rtype: bool
+        """
+        return any(issubclass(topic, allowed_t) for allowed_t in all_types) or any(
+            issubclass(allowed_t.get_ros_type(), topic.get_ros_type())
+            for allowed_t in all_types
+        )
+
     def _validate_topics(
         self,
         topics: Sequence[Union[Topic, FixedInput]],
@@ -206,9 +224,7 @@ class Component(BaseComponent):
             (
                 topic
                 for topic in all_msg_types
-                if not any(
-                    issubclass(topic, allowed_t) for allowed_t in all_topic_types
-                )
+                if not self._match_msg_type(topic, all_topic_types)
             ),
             None,
         ):
