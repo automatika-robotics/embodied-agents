@@ -311,8 +311,9 @@ class Memory(Component):
             ) from e
 
         all_topics = [layer.subscribes_to for layer in layers] + [self.config._position]
+        parsed_topics = self._reparse_inputs_callbacks(all_topics)
         self.callbacks = {
-            input.name: input.msg_type.callback(input) for input in all_topics
+            input.name: input.msg_type.callback(input) for input in parsed_topics
         }
 
     def _store_layers(self, position, time_stamp) -> None:
