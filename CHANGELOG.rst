@@ -2,6 +2,13 @@
 Changelog for package automatika_embodied_agents
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+* (fix) Fixes the helper method typo
+* (fix) Fixes validate topics check to include comparing the associated ROS2 message type, resolves `#30 <https://github.com/automatika-robotics/embodied-agents/issues/30>`_
+* (fix) Runs callback disambiguation on layers topics using Sugarcoat reparse_inputs_callbacks, resolves `#31 <https://github.com/automatika-robotics/embodied-agents/issues/31>`_
+* Contributors: ahr, mkabtoul
+
 0.7.2 (2026-05-06)
 ------------------
 * (chore) Updates complete agent recipes
