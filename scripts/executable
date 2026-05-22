@@ -107,6 +107,11 @@ def _parse_args() -> Tuple[argparse.Namespace, List[str]]:
         type=str,
         help="Additional type modules from derived packages",
     )
+    parser.add_argument(
+        "--robot_plugin",
+        type=str,
+        help="Serialized robot plugin spec and feedback-bus endpoint",
+    )
 
     return parser.parse_known_args()
 
@@ -270,6 +275,10 @@ def _setup_component_post_init(component: Any, args: argparse.Namespace) -> None
     # Set external processors
     if args.external_processors:
         component._external_processors_json = args.external_processors
+
+    # Rebuild the robot plugin and connect it to the HOST feedback bus
+    if args.robot_plugin:
+        component._robot_plugin_json = args.robot_plugin
 
     # Set additional model clients if any
     component.additional_model_clients = (
