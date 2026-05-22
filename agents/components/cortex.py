@@ -22,6 +22,7 @@ from ..ros import (
     ServiceClientHandler,
     ros_msg_to_str,
     get_methods_with_decorator,
+    get_logger
 )
 from ..utils import (
     validate_func_args,
@@ -329,7 +330,7 @@ class Cortex(ModelComponent, Monitor):
         for tool_desc in tool_descriptions:
             tool_name = tool_desc["function"]["name"]
             if tool_name in self._execution_tools:
-                self.get_logger().warning(
+                get_logger('cortex').warning(
                     f"Plugin action '{tool_name}' collides with an existing "
                     "tool; skipping."
                 )
@@ -341,7 +342,7 @@ class Cortex(ModelComponent, Monitor):
             try:
                 action = factory()
             except Exception as e:
-                self.get_logger().error(
+                get_logger('cortex').error(
                     f"Failed to materialize plugin action '{tool_name}': {e}"
                 )
                 continue
@@ -357,7 +358,7 @@ class Cortex(ModelComponent, Monitor):
             registered.append(tool_name)
 
         if registered:
-            self.get_logger().info(
+            get_logger('cortex').info(
                 f"Registered {len(registered)} plugin action(s) from '{ns}' "
                 f"as Cortex execution tools: {registered}"
             )
@@ -378,7 +379,7 @@ class Cortex(ModelComponent, Monitor):
         try:
             desc = plugin.describe()
         except Exception as e:
-            self.get_logger().error(f"Failed to read robot plugin description: {e}")
+            get_logger('cortex').error(f"Failed to read robot plugin description: {e}")
             return
 
         meta = desc.get("metadata", {})
@@ -423,7 +424,7 @@ class Cortex(ModelComponent, Monitor):
         )
 
         self._compose_planning_prompt()
-        self.get_logger().info(
+        get_logger('cortex').info(
             f"Planning prompt augmented with robot identity for '{name}'."
         )
 
