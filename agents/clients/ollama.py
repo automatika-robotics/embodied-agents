@@ -59,7 +59,7 @@ class OllamaClient(ModelClient):
         # Ping remote server to check connection
         self.logger.info("Checking connection with remote_host Ollama")
         try:
-            httpx.get(f"http://{self.host}:{self.port}").raise_for_status()
+            httpx.get(f"{self.host}:{self.port}").raise_for_status()
         except Exception:
             self.logger.error(
                 f"""Failed to connect to Ollama server at {self.host}:{self.port}

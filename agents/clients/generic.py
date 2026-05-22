@@ -72,7 +72,7 @@ class GenericHTTPClient(ModelClient):
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
         header = {} if not self.api_key else {"Authorization": f"Bearer {self.api_key}"}
 
-        self.url = f"http://{self.host}:{self.port}"
+        self.url = f"{self.host}:{self.port}"
 
         # Create a synchronous httpx client
         self.client = httpx.Client(

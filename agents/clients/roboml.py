@@ -63,7 +63,7 @@ class RoboMLHTTPClient(ModelClient):
             logging_level=logging_level,
             **kwargs,
         )
-        self.url = f"http://{self.host}:{self.port}"
+        self.url = f"{self.host}:{self.port}"
 
         # create httpx client
         self.client = httpx.Client(base_url=self.url, timeout=self.inference_timeout)
