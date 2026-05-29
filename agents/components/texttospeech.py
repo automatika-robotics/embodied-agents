@@ -422,15 +422,16 @@ class TextToSpeech(ModelComponent):
         :param text: The text to be spoken out loud.
         :type text: str
         """
-        try:
-            # Stop current playback if active, so new speech isn't queued
-            # behind stale audio
-            if self._playback_thread and self._playback_thread.is_alive():
-                self.stop_playback()
-            self._execution_step(text=text)
-            return True
-        except Exception:
-            return False
+        # Stop current playback if active, so new speech isn't queued
+        # behind stale audio
+        if (
+            hasattr(self, "_playback_thread")
+            and self._playback_thread
+            and self._playback_thread.is_alive()
+        ):
+            self.stop_playback()
+        self._execution_step(text=text)
+        return True
 
     def _handle_websocket_streaming(self) -> Optional[List]:
         """Handle streaming output from a websocket client"""
