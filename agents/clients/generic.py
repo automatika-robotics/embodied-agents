@@ -41,7 +41,11 @@ class GenericHTTPClient(ModelClient):
         Initializes the Client.
         :param model: The model to be used for inference.
         :type model: Union[Model, Dict]
-        :param host: The hostname of the API server.
+        :param host: The hostname of the API server. May include a scheme to
+                     target a TLS endpoint (e.g. ``https://api.openai.com/v1``),
+                     in which case it is used verbatim and ``port`` is ignored;
+                     a bare host (the default ``127.0.0.1``) is prefixed with
+                     ``http`` and the ``port`` appended.
         :type host: str
         :param port: The port of the API server.
         :type port: Optional[int]
@@ -72,7 +76,7 @@ class GenericHTTPClient(ModelClient):
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
         header = {} if not self.api_key else {"Authorization": f"Bearer {self.api_key}"}
 
-        self.url = f"http://{self.host}:{self.port}"
+        self.url = self._build_url()
 
         # Create a synchronous httpx client
         self.client = httpx.Client(

@@ -22,6 +22,7 @@ from ..ros import (
     ServiceClientHandler,
     ros_msg_to_str,
     get_methods_with_decorator,
+    get_logger
 )
 from ..utils import (
     validate_func_args,
@@ -157,6 +158,11 @@ class Cortex(ModelComponent, Monitor):
         # Effective planning prompt; augmented in custom_on_activate
         # based on discovered managed components (e.g. to handle Memory)
         self._effective_planning_prompt = self._PLANNING_PROMPT
+
+        # Planning-prompt addenda. The effective planning prompt is always
+        # _PLANNING_PROMPT + _robot_description + _memory_addendum
+        self._robot_description = ""   # set by set_robot_description()
+        self._memory_addendum = ""     # set by _augment_planning_prompt_for_memory()
 
         # Initialize messages buffer
         self.messages: List[Dict] = [
@@ -298,6 +304,146 @@ class Cortex(ModelComponent, Monitor):
             self._execution_tools.add(name)
             self._execution_tool_descriptions.append(tool_description)
 
+    def add_plugin_actions(self, plugin: Any) -> None:
+        """Expose a robot plugin's actions to cortex as execution tools.
+
+        Each `robot.ActionRegistry` factory on ``plugin`` is
+        materialized once, namespaced as ``{plugin_ns}.{action_name}`` and gets
+        added as a behavioral action.
+
+        :param plugin: A `robot.RobotPlugin` instance with
+            an ``actions`` registry. Plugins without actions are a no-op.
+        """
+        if plugin is None or not getattr(plugin, "actions", None):
+            return
+
+        # Namespace: plugin display name lowercased, spaces -> underscores;
+        # falls back to "robot" if the plugin author left metadata.name empty.
+        metadata_name = getattr(getattr(plugin, "metadata", None), "name", "") or ""
+        ns = metadata_name.strip().lower().replace(" ", "_") or "robot"
+
+        tool_descriptions = plugin.actions.tool_descriptions(namespace=ns)
+        if not tool_descriptions:
+            return
+
+        registered: List[str] = []
+        for tool_desc in tool_descriptions:
+            tool_name = tool_desc["function"]["name"]
+            if tool_name in self._execution_tools:
+                get_logger('cortex').warning(
+                    f"Plugin action '{tool_name}' collides with an existing "
+                    "tool; skipping."
+                )
+                continue
+
+            # Materialize the Action from the factory
+            local_name = tool_name.split(".", 1)[1]
+            factory = getattr(plugin.actions, local_name)
+            try:
+                action = factory()
+            except Exception as e:
+                get_logger('cortex').error(
+                    f"Failed to materialize plugin action '{tool_name}': {e}"
+                )
+                continue
+            action.action_name = tool_name
+            if not action.description:
+                action._description = tool_desc["function"].get("description", "")
+
+            Monitor.add_internal_event_action_pair(
+                self, event_id=tool_name, action=action
+            )
+            self._execution_tools.add(tool_name)
+            self._execution_tool_descriptions.append(tool_desc)
+            registered.append(tool_name)
+
+        if registered:
+            get_logger('cortex').info(
+                f"Registered {len(registered)} plugin action(s) from '{ns}' "
+                f"as Cortex execution tools: {registered}"
+            )
+
+    def set_robot_description(self, plugin: Any) -> None:
+        """Augment the planning prompt with the attached robot's identity.
+
+        When a robot plugin is attached, Cortex is embodied in a specific
+        physical robot. This builds a compact identity addendum from the
+        plugin's metadata and prepends it to the planning prompt, so the agent
+        can answer "who/what are you" questions about its own body instead of
+        hallucinating a generic robot.
+
+        :param plugin: A `robot.RobotPlugin` instance, or ``None``.
+        """
+        if plugin is None:
+            return
+        try:
+            desc = plugin.describe()
+        except Exception as e:
+            get_logger('cortex').error(f"Failed to read robot plugin description: {e}")
+            return
+
+        meta = desc.get("metadata", {})
+        name = meta.get("name", "") or "Unknown"
+        vendor = meta.get("vendor", "") or "unknown vendor"
+        version = meta.get("version", "") or "unspecified"
+        blurb = meta.get("description", "") or "(no description provided)"
+
+        feedback_keys = [f["key"] for f in desc.get("feedbacks", [])]
+        command_keys = [c["key"] for c in desc.get("commands", [])]
+        action_names = [a["name"] for a in desc.get("actions", [])]
+
+        # Namespace the plugin actions get registered under as execution tools
+        ns = name.strip().lower().replace(" ", "_") or "robot"
+
+        def _join(items: List[str]) -> str:
+            return ", ".join(items) if items else "(none)"
+
+        if action_names:
+            action_hint = (
+                f"The robot actions above are available to you as execution "
+                f"tools (named '{ns}.<action>', e.g. '{ns}.{action_names[0]}'); "
+                "use them when a task calls for a physical behaviour."
+            )
+        else:
+            action_hint = ""
+
+        self._robot_description = (
+            "\n\n=== Robot Identity ===\n"
+            "You are not a disembodied assistant -- you are the intelligence "
+            "of a physical robot. Answer questions about who or what you are "
+            "based on the following, never on guesswork:\n"
+            f"  - Name: {name}\n"
+            f"  - Vendor: {vendor}\n"
+            f"  - Version: {version}\n"
+            f"  - Description: {blurb}\n"
+            "Capabilities exposed through your robot body:\n"
+            f"  - Sensor feedback you receive: {_join(feedback_keys)}\n"
+            f"  - Commands you can issue: {_join(command_keys)}\n"
+            f"  - Built-in robot actions: {_join(action_names)}\n"
+            + action_hint
+        )
+
+        self._compose_planning_prompt()
+        get_logger('cortex').info(
+            f"Planning prompt augmented with robot identity for '{name}'."
+        )
+
+    def _compose_planning_prompt(self) -> None:
+        """Rebuild the effective planning prompt from the base prompt plus
+        every active addendum (robot identity, memory guidance).
+
+        Single source of truth and Idempotent.
+        """
+        self._effective_planning_prompt = (
+            self._PLANNING_PROMPT
+            + self._robot_description
+            + self._memory_addendum
+        )
+        self.config._system_prompt = self._effective_planning_prompt
+        self.messages = [
+            {"role": "system", "content": self._effective_planning_prompt}
+        ]
+
     # =========================================================================
     # Lifecycle
     # =========================================================================
@@ -316,6 +462,10 @@ class Cortex(ModelComponent, Monitor):
             Monitor.activate(self)
             self._register_system_tools()
             self._augment_planning_prompt_for_memory()
+        # Always (re)compose so the planning prompt reflects every addendum
+        # set so far -- robot identity, memory guidance, or neither --
+        # regardless of which augmentation paths ran.
+        self._compose_planning_prompt()
 
         # Display all the tools registered
         planning_names = [
@@ -442,9 +592,8 @@ class Cortex(ModelComponent, Monitor):
             f"plan between '{start_ep_tool}' and '{end_ep_tool}'."
         )
 
-        self._effective_planning_prompt = self._PLANNING_PROMPT + addendum
-        self.config._system_prompt = self._effective_planning_prompt
-        self.messages = [{"role": "system", "content": self._effective_planning_prompt}]
+        self._memory_addendum = addendum
+        self._compose_planning_prompt()
         self.get_logger().info(
             f"Planning prompt augmented for Memory component '{memory_comp.node_name}'."
         )

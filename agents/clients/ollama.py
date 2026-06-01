@@ -24,8 +24,6 @@ class OllamaClient(ModelClient):
     ):
         try:
             from ollama import Client
-
-            self.client = Client(host=f"{host}:{port}")
         except ModuleNotFoundError as e:
             raise ModuleNotFoundError(
                 "In order to use the OllamaClient, you need ollama-python package installed. You can install it with 'pip install ollama'"
@@ -43,6 +41,7 @@ class OllamaClient(ModelClient):
             logging_level=logging_level,
             **kwargs,
         )
+        self.client = Client(host=self._build_url())
         self._check_connection()
 
     @property
@@ -59,7 +58,7 @@ class OllamaClient(ModelClient):
         # Ping remote server to check connection
         self.logger.info("Checking connection with remote_host Ollama")
         try:
-            httpx.get(f"http://{self.host}:{self.port}").raise_for_status()
+            httpx.get(self._build_url()).raise_for_status()
         except Exception:
             self.logger.error(
                 f"""Failed to connect to Ollama server at {self.host}:{self.port}

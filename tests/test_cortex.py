@@ -410,3 +410,292 @@ class TestNoLLMMethods:
         )
         assert not hasattr(comp, "register_tool")
         assert not hasattr(comp, "set_component_prompt")
+
+
+def _make_mock_plugin(name="Lite3", action_names=("sit_stand", "stop")):
+    """Mock a `~ros_sugar.robot.RobotPlugin` exposing two zero-arg actions.
+
+    Mirrors the real surface that `Cortex.add_plugin_actions` consumes:
+    ``plugin.metadata.name`` for the namespace, ``plugin.actions`` with a
+    ``tool_descriptions(namespace=...)`` method and per-name factories
+    accessed via ``getattr(plugin.actions, name)``.
+    """
+    plugin = MagicMock()
+    plugin.metadata = MagicMock()
+    plugin.metadata.name = name
+
+    plugin.actions = MagicMock()
+    plugin.actions.tool_descriptions.side_effect = lambda namespace=None: [
+        {
+            "type": "function",
+            "function": {
+                "name": f"{namespace}.{n}" if namespace else n,
+                "description": f"Do {n}",
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                },
+            },
+        }
+        for n in action_names
+    ]
+    # Each factory call returns a fresh mock Action (so action_name can be set
+    # independently per registration).
+    plugin.actions.configure_mock(**{
+        n: MagicMock(return_value=_make_mock_action(name=n, description=f"Do {n}"))
+        for n in action_names
+    })
+    return plugin
+
+
+class TestCortexPluginActions:
+    """The plugin-action bridge: factories on a `RobotPlugin` registered as
+    namespaced execution tools, dispatchable via the same internal-event
+    path as constructor-supplied behavioral actions."""
+
+    def test_register_plugin_actions(self, rclpy_init, mock_model_client):
+        plugin = _make_mock_plugin(name="Lite3", action_names=("sit_stand", "stop"))
+        comp = Cortex(
+            outputs=[Topic(name="out", msg_type="String")],
+            actions=[],
+            model_client=mock_model_client,
+            config=CortexConfig(),
+            component_name="test_cortex_plugin",
+        )
+
+        mock_component_internals(comp)
+        comp.add_plugin_actions(plugin)
+
+        assert "lite3.sit_stand" in comp._execution_tools
+        assert "lite3.stop" in comp._execution_tools
+        assert "lite3.sit_stand" in comp._additional_internal_actions
+        assert "lite3.stop" in comp._additional_internal_actions
+        names = [t["function"]["name"] for t in comp._execution_tool_descriptions]
+        assert "lite3.sit_stand" in names
+        assert "lite3.stop" in names
+
+    def test_namespace_falls_back_to_robot_when_metadata_name_empty(
+        self, rclpy_init, mock_model_client
+    ):
+        plugin = _make_mock_plugin(name="", action_names=("dock",))
+        comp = Cortex(
+            outputs=[Topic(name="out", msg_type="String")],
+            actions=[],
+            model_client=mock_model_client,
+            config=CortexConfig(),
+            component_name="test_cortex_plugin_default_ns",
+        )
+
+        mock_component_internals(comp)
+        comp.add_plugin_actions(plugin)
+
+        assert "robot.dock" in comp._execution_tools
+
+    def test_namespace_normalizes_whitespace(self, rclpy_init, mock_model_client):
+        plugin = _make_mock_plugin(name="My Robot", action_names=("dock",))
+        comp = Cortex(
+            outputs=[Topic(name="out", msg_type="String")],
+            actions=[],
+            model_client=mock_model_client,
+            config=CortexConfig(),
+            component_name="test_cortex_plugin_ns_norm",
+        )
+
+        mock_component_internals(comp)
+        comp.add_plugin_actions(plugin)
+
+        assert "my_robot.dock" in comp._execution_tools
+
+    def test_does_not_double_register_on_collision(
+        self, rclpy_init, mock_model_client
+    ):
+        plugin = _make_mock_plugin(name="Lite3", action_names=("stop",))
+        comp = Cortex(
+            outputs=[Topic(name="out", msg_type="String")],
+            actions=[],
+            model_client=mock_model_client,
+            config=CortexConfig(),
+            component_name="test_cortex_plugin_collision",
+        )
+
+        mock_component_internals(comp)
+        comp.add_plugin_actions(plugin)
+        comp.add_plugin_actions(plugin)  # second call should skip with a warning
+
+        assert sum(
+            1
+            for t in comp._execution_tool_descriptions
+            if t["function"]["name"] == "lite3.stop"
+        ) == 1
+
+    def test_none_plugin_is_noop(self, rclpy_init, mock_model_client):
+        comp = Cortex(
+            outputs=[Topic(name="out", msg_type="String")],
+            actions=[],
+            model_client=mock_model_client,
+            config=CortexConfig(),
+            component_name="test_cortex_plugin_none",
+        )
+
+        comp.add_plugin_actions(None)
+
+        assert len(comp._execution_tools) == 0
+        assert len(comp._execution_tool_descriptions) == 0
+
+    def test_plugin_without_actions_is_noop(self, rclpy_init, mock_model_client):
+        plugin = MagicMock()
+        plugin.actions = None
+        comp = Cortex(
+            outputs=[Topic(name="out", msg_type="String")],
+            actions=[],
+            model_client=mock_model_client,
+            config=CortexConfig(),
+            component_name="test_cortex_plugin_no_actions",
+        )
+
+        mock_component_internals(comp)
+        comp.add_plugin_actions(plugin)
+
+        assert len(comp._execution_tools) == 0
+        assert len(comp._execution_tool_descriptions) == 0
+
+    def test_factory_failure_logged_and_skipped(
+        self, rclpy_init, mock_model_client
+    ):
+        plugin = _make_mock_plugin(name="Lite3", action_names=("ok", "broken"))
+        plugin.actions.broken.side_effect = RuntimeError("boom")
+        comp = Cortex(
+            outputs=[Topic(name="out", msg_type="String")],
+            actions=[],
+            model_client=mock_model_client,
+            config=CortexConfig(),
+            component_name="test_cortex_plugin_factory_fail",
+        )
+
+        mock_component_internals(comp)
+        comp.add_plugin_actions(plugin)
+
+        assert "lite3.ok" in comp._execution_tools
+        assert "lite3.broken" not in comp._execution_tools
+
+
+def _make_mock_plugin_with_describe(
+    name="Lite3",
+    vendor="DeepRobotics",
+    version="1.0",
+    description="A four-legged quadruped robot.",
+):
+    """Mock a `RobotPlugin` exposing the ``describe()`` surface that
+    ``Cortex.set_robot_description`` consumes."""
+    plugin = MagicMock()
+    plugin.describe.return_value = {
+        "metadata": {
+            "name": name,
+            "vendor": vendor,
+            "version": version,
+            "description": description,
+        },
+        "feedbacks": [{"key": "Odometry"}, {"key": "Imu"}, {"key": "Float64"}],
+        "commands": [{"key": "Twist"}],
+        "actions": [{"name": "sit_stand"}, {"name": "stop"}],
+        "events": [{"name": "low_battery"}],
+    }
+    return plugin
+
+
+class TestCortexRobotDescription:
+    """``set_robot_description`` augments the planning prompt with the
+    attached robot's identity so the agent answers "who are you" correctly."""
+
+    def test_description_augments_planning_prompt(
+        self, rclpy_init, mock_model_client
+    ):
+        plugin = _make_mock_plugin_with_describe(
+            name="Lite3", description="A nimble quadruped."
+        )
+        comp = Cortex(
+            outputs=[Topic(name="out", msg_type="String")],
+            actions=[],
+            model_client=mock_model_client,
+            config=CortexConfig(),
+            component_name="test_cortex_robot_desc",
+        )
+        mock_component_internals(comp)
+
+        comp.set_robot_description(plugin)
+
+        prompt = comp._effective_planning_prompt
+        assert "Robot Identity" in prompt
+        assert "Lite3" in prompt
+        assert "DeepRobotics" in prompt
+        assert "A nimble quadruped." in prompt
+        # Capability overview is summarized
+        assert "Odometry" in prompt and "Twist" in prompt
+        # The base planning prompt is preserved
+        assert comp._PLANNING_PROMPT in prompt
+        # config + messages buffer kept in sync
+        assert comp.config._system_prompt == prompt
+        assert comp.messages[0]["content"] == prompt
+
+    def test_none_plugin_is_noop(self, rclpy_init, mock_model_client):
+        comp = Cortex(
+            outputs=[Topic(name="out", msg_type="String")],
+            actions=[],
+            model_client=mock_model_client,
+            config=CortexConfig(),
+            component_name="test_cortex_robot_desc_none",
+        )
+        mock_component_internals(comp)
+
+        comp.set_robot_description(None)
+
+        assert comp._robot_description == ""
+        assert comp._effective_planning_prompt == comp._PLANNING_PROMPT
+
+    def test_memory_augmentation_preserves_robot_description(
+        self, rclpy_init, mock_model_client
+    ):
+        """``_augment_planning_prompt_for_memory`` composes on top of the
+        robot identity rather than clobbering it."""
+        plugin = _make_mock_plugin_with_describe(name="Lite3")
+        comp = Cortex(
+            outputs=[Topic(name="out", msg_type="String")],
+            actions=[],
+            model_client=mock_model_client,
+            config=CortexConfig(),
+            component_name="test_cortex_robot_desc_memory",
+        )
+        mock_component_internals(comp)
+        comp.set_robot_description(plugin)
+
+        # No Memory component -> _augment_planning_prompt_for_memory early-returns;
+        # the robot identity must survive untouched.
+        comp._managed_components = {}
+        comp._augment_planning_prompt_for_memory()
+        assert "Robot Identity" in comp._effective_planning_prompt
+
+    def test_compose_is_single_source_of_truth(
+        self, rclpy_init, mock_model_client
+    ):
+        """Both addendum slots compose into the prompt regardless of which
+        augmentation ran -- the composer always rebuilds from both."""
+        plugin = _make_mock_plugin_with_describe(name="Lite3")
+        comp = Cortex(
+            outputs=[Topic(name="out", msg_type="String")],
+            actions=[],
+            model_client=mock_model_client,
+            config=CortexConfig(),
+            component_name="test_cortex_compose",
+        )
+        mock_component_internals(comp)
+
+        # Memory addendum set first, robot description second
+        comp._memory_addendum = "\n\n=== Memory Guidance ===\nstub"
+        comp._compose_planning_prompt()
+        comp.set_robot_description(plugin)
+
+        prompt = comp._effective_planning_prompt
+        assert comp._PLANNING_PROMPT in prompt
+        assert "Robot Identity" in prompt
+        assert "Memory Guidance" in prompt
