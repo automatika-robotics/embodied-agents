@@ -29,6 +29,37 @@ from jinja2.environment import Template
 from .pluralize import pluralize
 
 
+def build_url(
+    host: Optional[str], port: Optional[int] = None, default_scheme: str = "http"
+) -> str:
+    """Construct a connection URL from a host and port.
+
+    If ``host`` already carries a scheme (e.g. ``https://`` or ``ws://``), it is
+    respected verbatim, allowing a client to be pointed at a TLS endpoint. If
+    ``host`` is a bare hostname/IP, ``default_scheme`` is prepended and ``port``
+    (when given) appended, preserving the historical ``http://127.0.0.1:8000``
+    style defaults.
+
+    :param host: Hostname/IP, optionally scheme-prefixed. Falls back to
+        ``127.0.0.1`` when falsy.
+    :type host: Optional[str]
+    :param port: Port to append for a bare host. Ignored when ``host`` already
+        carries a scheme (a full endpoint is assumed). Defaults to None.
+    :type port: Optional[int]
+    :param default_scheme: Scheme to prepend to a bare host, e.g. ``http`` or
+        ``ws``. Defaults to ``http``.
+    :type default_scheme: str
+    :returns: A fully-qualified URL.
+    :rtype: str
+    """
+    host = (host or "127.0.0.1").strip().rstrip("/")
+    if "://" in host:
+        # Full endpoint provided: respect it verbatim.
+        return host
+    base = f"{default_scheme}://{host}"
+    return f"{base}:{port}" if port is not None else base
+
+
 def draw_detection_bounding_boxes(
     img: np.ndarray, bounding_boxes: List, labels: List, handle_bbox2d_msg: bool = True
 ) -> np.ndarray:

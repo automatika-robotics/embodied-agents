@@ -36,7 +36,7 @@ class ChromaClient(DBClient):
             logging_level=logging_level,
             **kwargs,
         )
-        self.url = f"{self.host}:{self.port}/api/v2"
+        self.url = f"{self._build_url()}/api/v2"
 
         # create httpx client
         self.client = httpx.Client(base_url=self.url, timeout=self.response_timeout)

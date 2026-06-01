@@ -14,6 +14,7 @@ from .utils import (
     load_model,
     load_model_repo,
     flatten,
+    build_url,
     build_lerobot_features_from_dataset_info,
     find_missing_values,
     _LANGUAGE_CODES,
@@ -22,6 +23,7 @@ from .utils import (
 __all__ = [
     "_LANGUAGE_CODES",
     "build_lerobot_features_from_dataset_info",
+    "build_url",
     "find_missing_values",
     "flatten",
     "create_detection_context",

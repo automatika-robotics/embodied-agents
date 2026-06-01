@@ -4,7 +4,7 @@ from typing import Any, Optional, Dict, Union
 from rclpy import logging
 
 from ..vectordbs import DB
-from ..utils import validate_func_args
+from ..utils import validate_func_args, build_url
 
 
 class DBClient(ABC):
@@ -24,7 +24,10 @@ class DBClient(ABC):
         """__init__.
         :param db:
         :type db: DB
-        :param host:
+        :param host: Hostname or IP of the database server. May include a scheme
+            (e.g. ``https://my-endpoint.com``) to target a TLS endpoint, in
+            which case it is used verbatim; a bare host (the default
+            ``127.0.0.1``) is prefixed with ``http`` and the ``port`` appended.
         :type host: Optional[str]
         :param port:
         :type port: Optional[int]
@@ -51,6 +54,15 @@ class DBClient(ABC):
             self.db_type, logging.get_logging_severity_from_string(logging_level)
         )
         self.response_timeout = response_timeout
+
+    def _build_url(self, default_scheme: str = "http") -> str:
+        """Construct the connection URL from ``host`` and ``port``.
+
+        :param default_scheme: Scheme to use for a bare host. Defaults to ``http``.
+        :type default_scheme: str
+        :rtype: str
+        """
+        return build_url(self.host, self.port, default_scheme)
 
     def serialize(self) -> Dict:
         """Get client json
