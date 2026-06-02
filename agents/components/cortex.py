@@ -1162,6 +1162,7 @@ class Cortex(ModelComponent, Monitor):
             payload={
                 "system": self._CONFIRMATION_PROMPT,
                 "user": user_message,
+                "tools": self._execution_tool_descriptions,
                 "output": output,
                 "decision": decision,
                 "resolved_step": resolved_step,
