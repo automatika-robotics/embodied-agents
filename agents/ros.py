@@ -56,6 +56,7 @@ from automatika_embodied_agents.msg import (
     Bbox2D,
     Detections2D,
     Detections2DMultiSource,
+    CortexTrace,
 )
 from automatika_embodied_agents.msg import (
     StreamingString as ROSStreamingString,
@@ -116,6 +117,8 @@ __all__ = [
     "component_fallback",
     "component_action",
     "VisionLanguageAction",
+    "ExecuteMethod",
+    "CortexTrace",
     "run_external_processor",
     "ServiceClientHandler",
     "ActionClientHandler",

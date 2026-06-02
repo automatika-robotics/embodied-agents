@@ -2,6 +2,7 @@ from copy import copy
 import json
 import os
 import time
+import uuid
 from typing import Optional, List, Dict, Set, Any, Tuple
 
 from ..clients.model_base import ModelClient
@@ -15,6 +16,7 @@ from ..ros import (
     Event,
     ComponentRunType,
     VisionLanguageAction,
+    CortexTrace,
     Monitor,
     BaseComponent,
     BaseComponentConfig,
@@ -22,7 +24,7 @@ from ..ros import (
     ServiceClientHandler,
     ros_msg_to_str,
     get_methods_with_decorator,
-    get_logger
+    get_logger,
 )
 from ..utils import (
     validate_func_args,
@@ -161,8 +163,8 @@ class Cortex(ModelComponent, Monitor):
 
         # Planning-prompt addenda. The effective planning prompt is always
         # _PLANNING_PROMPT + _robot_description + _memory_addendum
-        self._robot_description = ""   # set by set_robot_description()
-        self._memory_addendum = ""     # set by _augment_planning_prompt_for_memory()
+        self._robot_description = ""  # set by set_robot_description()
+        self._memory_addendum = ""  # set by _augment_planning_prompt_for_memory()
 
         # Initialize messages buffer
         self.messages: List[Dict] = [
@@ -188,6 +190,10 @@ class Cortex(ModelComponent, Monitor):
 
         # Planning output buffer for failed plans
         self._planning_output: Optional[str] = None
+
+        # Data-collection tracing: publisher created on activation (opt-in)
+        self._trace_pub = None
+        self._current_episode_id: Optional[str] = None
 
         # Monitor-side: Launcher populates these when it detects Cortex
         self._components_to_monitor: List[str] = []
@@ -330,7 +336,7 @@ class Cortex(ModelComponent, Monitor):
         for tool_desc in tool_descriptions:
             tool_name = tool_desc["function"]["name"]
             if tool_name in self._execution_tools:
-                get_logger('cortex').warning(
+                get_logger("cortex").warning(
                     f"Plugin action '{tool_name}' collides with an existing "
                     "tool; skipping."
                 )
@@ -342,7 +348,7 @@ class Cortex(ModelComponent, Monitor):
             try:
                 action = factory()
             except Exception as e:
-                get_logger('cortex').error(
+                get_logger("cortex").error(
                     f"Failed to materialize plugin action '{tool_name}': {e}"
                 )
                 continue
@@ -358,7 +364,7 @@ class Cortex(ModelComponent, Monitor):
             registered.append(tool_name)
 
         if registered:
-            get_logger('cortex').info(
+            get_logger("cortex").info(
                 f"Registered {len(registered)} plugin action(s) from '{ns}' "
                 f"as Cortex execution tools: {registered}"
             )
@@ -379,7 +385,7 @@ class Cortex(ModelComponent, Monitor):
         try:
             desc = plugin.describe()
         except Exception as e:
-            get_logger('cortex').error(f"Failed to read robot plugin description: {e}")
+            get_logger("cortex").error(f"Failed to read robot plugin description: {e}")
             return
 
         meta = desc.get("metadata", {})
@@ -419,12 +425,11 @@ class Cortex(ModelComponent, Monitor):
             "Capabilities exposed through your robot body:\n"
             f"  - Sensor feedback you receive: {_join(feedback_keys)}\n"
             f"  - Commands you can issue: {_join(command_keys)}\n"
-            f"  - Built-in robot actions: {_join(action_names)}\n"
-            + action_hint
+            f"  - Built-in robot actions: {_join(action_names)}\n" + action_hint
         )
 
         self._compose_planning_prompt()
-        get_logger('cortex').info(
+        get_logger("cortex").info(
             f"Planning prompt augmented with robot identity for '{name}'."
         )
 
@@ -435,14 +440,10 @@ class Cortex(ModelComponent, Monitor):
         Single source of truth and Idempotent.
         """
         self._effective_planning_prompt = (
-            self._PLANNING_PROMPT
-            + self._robot_description
-            + self._memory_addendum
+            self._PLANNING_PROMPT + self._robot_description + self._memory_addendum
         )
         self.config._system_prompt = self._effective_planning_prompt
-        self.messages = [
-            {"role": "system", "content": self._effective_planning_prompt}
-        ]
+        self.messages = [{"role": "system", "content": self._effective_planning_prompt}]
 
     # =========================================================================
     # Lifecycle
@@ -476,6 +477,9 @@ class Cortex(ModelComponent, Monitor):
         ]
         self.get_logger().debug(f"Cortex planning tools: {planning_names}")
         self.get_logger().debug(f"Cortex execution tools: {execution_names}")
+
+        # Set up the Cortex trace publisher for data collection
+        self._setup_tracing()
 
     def _augment_planning_prompt_for_memory(self) -> None:
         """Append memory-aware guidance to the planning prompt when a
@@ -597,6 +601,60 @@ class Cortex(ModelComponent, Monitor):
         self.get_logger().info(
             f"Planning prompt augmented for Memory component '{memory_comp.node_name}'."
         )
+
+    def _setup_tracing(self) -> None:
+        """Create the CortexTrace publisher used for data collection.
+
+        Opt-in via ``config.enable_tracing`` (default True). Reliable +
+        transient-local QoS (depth 50) so a late-binding recorder still captures
+        the opening events of an episode.
+        """
+        if not self.config.enable_tracing or self._trace_pub is not None:
+            return
+        from rclpy.qos import (
+            QoSDurabilityPolicy,
+            QoSHistoryPolicy,
+            QoSProfile,
+            QoSReliabilityPolicy,
+        )
+
+        trace_qos = QoSProfile(
+            depth=50,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            reliability=QoSReliabilityPolicy.RELIABLE,
+            durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+        )
+        self._trace_pub = self.create_publisher(CortexTrace, "~/trace", trace_qos)
+        self.get_logger().debug("Cortex tracing enabled (~/trace)")
+
+    def _trace(
+        self,
+        event_type: str,
+        *,
+        payload: Optional[Dict] = None,
+        tool_name: str = "",
+        task: str = "",
+        step_index: int = 0,
+    ) -> None:
+        """Publish a CortexTrace event. Failure-safe: never raises into the loop."""
+        pub = self._trace_pub
+        if pub is None:
+            return
+        try:
+            msg = CortexTrace()
+            msg.header.stamp = self.get_clock().now().to_msg()
+            msg.episode_id = self._current_episode_id or ""
+            msg.component_node = self.get_name()
+            msg.event_type = event_type
+            msg.step_index = int(step_index)
+            msg.task = task or ""
+            msg.tool_name = tool_name or ""
+            msg.payload_json = (
+                json.dumps(payload, default=str) if payload is not None else ""
+            )
+            pub.publish(msg)
+        except Exception as e:
+            self.get_logger().debug(f"[cortex.trace] emit failed: {e}")
 
     def custom_on_deactivate(self):
         if self.db_client:
@@ -875,6 +933,20 @@ class Cortex(ModelComponent, Monitor):
                 output = strip_think_tokens(output)
 
             tool_calls = result.get("tool_calls")
+
+            # PLAN_GENERATED: one trace per planning LLM call, carrying the FULL
+            # tool catalog at planning time.
+            self._trace(
+                CortexTrace.PLAN_GENERATED,
+                step_index=step,
+                payload={
+                    "messages": messages,
+                    "tools": all_tools,
+                    "output": output,
+                    "tool_calls": tool_calls,
+                },
+            )
+
             if not tool_calls:
                 self.get_logger().debug(
                     f"[Planning step {step + 1}] planner returned no tool calls; "
@@ -1074,11 +1146,29 @@ class Cortex(ModelComponent, Monitor):
             )
 
         upper = output.upper()
+        decision = "EXECUTE"
         for token in ("ABORT", "SKIP", "CONTINUE"):
             if upper.startswith(token):
-                return token, None
-        # EXECUTE, either explicitly stated or implied by a tool call
-        return "EXECUTE", resolved_step
+                decision = token
+                resolved_step = None
+                break
+
+        self._trace(
+            CortexTrace.CONFIRMATION,
+            step_index=step_index,
+            tool_name=(
+                plan[step_index]["function"]["name"] if step_index < len(plan) else ""
+            ),
+            payload={
+                "system": self._CONFIRMATION_PROMPT,
+                "user": user_message,
+                "output": output,
+                "decision": decision,
+                "resolved_step": resolved_step,
+            },
+        )
+        # EXECUTE is either explicitly stated or implied by a tool call
+        return decision, resolved_step
 
     def _execute_action_step(self, step: Dict) -> str:
         """Execute a single planned step via the appropriate dispatch mechanism."""
@@ -1637,13 +1727,27 @@ class Cortex(ModelComponent, Monitor):
                 goal_handle, feedback_msg, i + 1, f"Executing {label}{args_str}"
             )
 
+            self._trace(
+                CortexTrace.STEP_EXECUTING,
+                step_index=i,
+                tool_name=fn_name,
+                payload={"arguments": fn_args},
+            )
+
             step_result = self._execute_action_step(effective_step)
+            failed = step_result.startswith("Error")
             executed_results.append({
                 "step": i,
                 "action": fn_name,
                 "result": step_result,
-                "failed": step_result.startswith("Error"),
+                "failed": failed,
             })
+            self._trace(
+                CortexTrace.STEP_FAILED if failed else CortexTrace.STEP_COMPLETED,
+                step_index=i,
+                tool_name=fn_name,
+                payload={"arguments": fn_args, "result": step_result},
+            )
             self._send_feedback(
                 goal_handle, feedback_msg, i + 1, f"{label} completed: {step_result}"
             )
@@ -1689,6 +1793,21 @@ class Cortex(ModelComponent, Monitor):
         """
         has_failures = any(r.get("failed") for r in executed_results)
         had_recovery = has_failures and voluntarily_stopped
+
+        # EPISODE_COMPLETE / EPISODE_ABORTED: one terminal trace per task.
+        self._trace(
+            CortexTrace.EPISODE_COMPLETE
+            if (voluntarily_stopped and goal_handle.is_active and not aborted)
+            else CortexTrace.EPISODE_ABORTED,
+            step_index=plan_len,
+            payload={
+                "executed_results": executed_results,
+                "plan_len": plan_len,
+                "aborted": aborted,
+                "voluntarily_stopped": voluntarily_stopped,
+                "had_failures": has_failures,
+            },
+        )
 
         # If the goal is already in a terminal state e.g on client cancellation,
         # don't attempt another state transition.
@@ -1746,6 +1865,9 @@ class Cortex(ModelComponent, Monitor):
         """
         task: str = goal_handle.request.task
         self.get_logger().info(f"Received task: {task}")
+
+        self._current_episode_id = uuid.uuid4().hex
+        self._trace(CortexTrace.TASK_RECEIVED, task=task, payload={"task": task})
 
         feedback_msg = VisionLanguageAction.Feedback()
         result_msg = VisionLanguageAction.Result()

@@ -226,6 +226,11 @@ class CortexConfig(LLMConfig):
     :type ncpu_local_model: int
     :param local_model_path: HuggingFace repository ID for a GGUF model (default: ``Qwen/Qwen3-0.6B-GGUF``), or a local path to a ``.gguf`` file.
     :type local_model_path: Optional[str]
+    :param enable_tracing: Emit ``CortexTrace`` events (planning, confirmation,
+        per-step, and episode boundaries) on the ``~/trace`` topic for data
+        collection. The generic recorder captures them; overhead is negligible.
+        Default is True.
+    :type enable_tracing: bool
 
     Example of usage:
     ```python
@@ -245,6 +250,7 @@ class CortexConfig(LLMConfig):
     )
     confirmation_max_tokens: int = field(default=500, validator=base_validators.gt(0))
     monitoring_interval: float = field(default=2.0, validator=base_validators.gt(0.0))
+    enable_tracing: bool = field(default=True)
 
     def _get_inference_params(self) -> Dict:
         """get_inference_params.
