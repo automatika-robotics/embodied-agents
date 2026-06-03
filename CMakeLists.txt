@@ -36,4 +36,10 @@ scripts/executable
 DESTINATION lib/${PROJECT_NAME}
 )
 
+# Dataset builder executable (offline: recording -> finetuning dataset)
+install(PROGRAMS
+scripts/dataset_builder
+DESTINATION lib/${PROJECT_NAME}
+)
+
 ament_package()

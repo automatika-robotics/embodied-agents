@@ -1,0 +1,14 @@
+#!/usr/bin/env python3
+"""Dataset builder executable.
+
+Turns a recorded ``CortexTrace`` stream into a Cortex finetuning dataset. Run it
+with ``ros2 run``::
+
+    ros2 run automatika_embodied_agents dataset_builder <recording_dir> --format jsonl   -o out.jsonl
+    ros2 run automatika_embodied_agents dataset_builder <recording_dir> --format parquet -o ./hfds
+"""
+
+from agents.recording.build import main
+
+if __name__ == "__main__":
+    raise SystemExit(main())
