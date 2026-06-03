@@ -605,7 +605,7 @@ class Cortex(ModelComponent, Monitor):
     def _setup_tracing(self) -> None:
         """Create the CortexTrace publisher used for data collection.
 
-        Opt-in via ``config.enable_tracing`` (default True). Reliable +
+        Opt-in via ``config.enable_tracing`` (default False). Reliable +
         transient-local QoS (depth 50) so a late-binding recorder still captures
         the opening events of an episode.
         """
