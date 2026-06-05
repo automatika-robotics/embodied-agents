@@ -2,6 +2,17 @@
 Changelog for package automatika_embodied_agents
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+* (chore) Bumps up sugarcoat version
+* (refactor) Adds build url helper for building url schema if none provided
+* (fix) Allows say method to raise exceptions to be handled by parent 'execute_method' and fixes attribute check
+* (feature) Adds robot plugin serialization/deserialization to the executable
+* (fix) Adds using pre-init logger in methods executed before activation
+* (fix) Fixes an error where TLS endpoints couldnt be called by clients
+* (feature) Adds plugin actions to actions available to cortex and augments planning prompt with robot description from the plugin
+* Contributors: ahr, mkabtoul
+
 0.7.3 (2026-05-08)
 ------------------
 * (fix) Fixes the helper method typo
