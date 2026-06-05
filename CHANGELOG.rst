@@ -2,8 +2,8 @@
 Changelog for package automatika_embodied_agents
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+0.7.4 (2026-06-05)
+------------------
 * (chore) Bumps up sugarcoat version
 * (refactor) Adds build url helper for building url schema if none provided
 * (fix) Allows say method to raise exceptions to be handled by parent 'execute_method' and fixes attribute check
