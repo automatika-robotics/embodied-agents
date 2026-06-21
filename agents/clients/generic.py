@@ -57,7 +57,18 @@ class GenericHTTPClient(ModelClient):
         :param logging_level: The logging level.
         :type logging_level: str
         """
-        if not isinstance(model, (GenericLLM, GenericSTT, GenericTTS, TransformersLLM)):
+        if isinstance(model, Model):
+            ok = isinstance(model, (GenericLLM, GenericSTT, GenericTTS, TransformersLLM))
+        else:
+            ok = model.get("model_type") in (
+                "GenericLLM",
+                "GenericMLLM",
+                "GenericSTT",
+                "GenericTTS",
+                "TransformersLLM",
+                "TransformersMLLM",
+            )
+        if not ok:
             raise TypeError(
                 "A generic client can only take models of type GenericLLM, GenericTTS, GenericSTT, GenericMLLM, TransformersLLM and TransformersMLLM"
             )
