@@ -45,5 +45,5 @@ jobs:
           . /opt/ros/${{ matrix.ros_distro }}/setup.sh
           . /ws/install/setup.sh
           cd $GITHUB_WORKSPACE
-          python3 -m pytest tests/ -v --ignore=tests/test_clients.py -k "not local_only"
+          python3 -m pytest tests/ -v -p no:launch_testing --ignore=tests/test_clients.py -k "not local_only"
         shell: bash
