@@ -12,6 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PIP_BREAK_SYSTEM_PACKAGES: "1"
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
     strategy:
       matrix:
         ros_distro: [humble, jazzy, kilted, rolling]
@@ -45,5 +46,5 @@ jobs:
           . /opt/ros/${{ matrix.ros_distro }}/setup.sh
           . /ws/install/setup.sh
           cd $GITHUB_WORKSPACE
-          python3 -m pytest tests/ -v -p no:launch_testing --ignore=tests/test_clients.py -k "not local_only"
+          python3 -m pytest tests/ -v --ignore=tests/test_clients.py -k "not local_only"
         shell: bash
