@@ -73,6 +73,9 @@ class GenericHTTPClient(ModelClient):
                 "A generic client can only take models of type GenericLLM, GenericTTS, GenericSTT, GenericMLLM, TransformersLLM and TransformersMLLM"
             )
 
+        # init_on_activation is not user-configurable for the generic client (no
+        # model-loading step). Force it True and drop any serialized value
+        kwargs.pop("init_on_activation", None)
         super().__init__(
             model=model,
             host=host,
