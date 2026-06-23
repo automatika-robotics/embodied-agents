@@ -666,8 +666,18 @@ class Cortex(ModelComponent, Monitor):
     # Helpers
     # =========================================================================
 
-    def _parse_tool_args(self, fn_args: Dict) -> Dict:
+    def _parse_tool_args(self, fn_args) -> Dict:
         """Parse tool arguments, deserializing JSON strings where needed."""
+        # OpenAI-compatible endpoints return tool-call arguments as a
+        # JSON string; Ollama returns a dict. Normalize to a dict first.
+        if isinstance(fn_args, str):
+            fn_args = fn_args.strip()
+            try:
+                fn_args = json.loads(fn_args) if fn_args else {}
+            except json.JSONDecodeError:
+                fn_args = {}
+        if not isinstance(fn_args, dict):
+            return {}
         parsed_args = {}
         for key, arg in fn_args.items():
             if isinstance(arg, str):
