@@ -62,7 +62,7 @@ introspector.add_publisher_preprocessor(introspection_answer, introspection_vali
 
 # -- Memory component --
 # Two perception layers: detections (high temporal change) and scene labels.
-detections_layer = MemLayer(subscribes_to=detections_topic, temporal_change=True)
+detections_layer = MemLayer(subscribes_to=detections_topic)
 scene_layer = MemLayer(subscribes_to=introspection_answer)
 
 # Memory uses real-world coordinates from Odometry directly.

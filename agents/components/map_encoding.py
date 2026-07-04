@@ -14,6 +14,7 @@ from ..ros import (
     Detections,
     DetectionsMultiSource,
     MapLayer,
+    PriorMemory,
     component_action,
 )
 from ..utils import validate_func_args
@@ -54,8 +55,8 @@ class MapEncoding(Component):
     map_topic = Topic(name="map", msg_type="OccupancyGrid")
     config = MapConfig(map_name="map")
     db_client = DBClient(db=ChromaDB("database_name"))
-    layers = [MapLayer(subscribes_to=text1, resolution_multiple=3),
-              MapLayer(subscribes_to=detections1, temporal_change=True)]  # text1 and detections1 are String topics that are being published on by other components
+    layers = [MapLayer(subscribes_to=text1),
+              MapLayer(subscribes_to=detections1)]  # text1 and detections1 are String topics that are being published on by other components
     map_encoding_component = MapEncoding(
         layers=layers,
         position=position_topic,
@@ -116,8 +117,8 @@ class MapEncoding(Component):
 
         # fill out pre-defined points in layers
         for layer in self.layers_dict.values():
-            if layer.pre_defined and len(layer.pre_defined) > 0:
-                self._fill_out_pre_defined(layer, layer.pre_defined)
+            if layer.prior_memories and len(layer.prior_memories) > 0:
+                self._fill_out_prior_memories(layer, layer.prior_memories)
 
     def custom_on_deactivate(self):
         """deactivate."""
@@ -125,17 +126,17 @@ class MapEncoding(Component):
         self.db_client.check_connection()
         self.db_client.deinitialize()
 
-    def _fill_out_pre_defined(
+    def _fill_out_prior_memories(
         self,
         layer: MapLayer,
-        points: Union[List[Tuple[np.ndarray, str]], Tuple[np.ndarray, str]],
+        points: Union[List[PriorMemory], PriorMemory],
     ) -> None:
         """Fill out any pre-defined points in the MapLayer.
 
         :param layer:
         :type layer: MapLayer
         :param points:
-        :type points: list[tuple[np.ndarray, str]] | tuple[np.ndarray, str]
+        :type points: list[PriorMemory] | PriorMemory
         :rtype: None
         """
         self.get_logger().info(
@@ -157,24 +158,23 @@ class MapEncoding(Component):
         if not isinstance(points, List):
             points = [points]
 
-        # add pre_defined points
+        # add prior_memories points
         for data in points:
-            coordinates_string = np.array2string(data[0], separator=",")[1:-1]
+            position = data.position if data.position is not None else (0.0, 0.0, 0.0)
+            coordinates_string = np.array2string(np.array(position), separator=",")[
+                1:-1
+            ]
             # Create metadata
             metadata = {
                 "layer_name": layer_name,
                 "coordinates": coordinates_string,
                 "timestamp": time_stamp,
-                "temporal_change": layer.temporal_change,
+                "temporal_change": False,
             }
 
-            id = (
-                f"{layer_name}:{coordinates_string}:0"
-                if not layer.temporal_change
-                else f"{layer_name}:{coordinates_string}:{time_stamp}"
-            )
+            id = f"{layer_name}:{coordinates_string}:0"
             to_be_added["ids"].append(id)
-            to_be_added["documents"].append(data[1])
+            to_be_added["documents"].append(data.text)
             to_be_added["metadatas"].append(metadata)
 
         self.db_client.add(to_be_added)
@@ -210,29 +210,18 @@ class MapEncoding(Component):
                 # create layer metadata
                 metadata = {}
                 metadata["layer_name"] = name
-                # set layer specific space coordinate based on resolution multiple
-                relative_coordinates = map_coordinates // layer.resolution_multiple
                 # convert ndarray to string for serialization and vectordb storage
-                coordinates_string = np.array2string(
-                    relative_coordinates, separator=","
-                )[1:-1]
+                coordinates_string = np.array2string(map_coordinates, separator=",")[
+                    1:-1
+                ]
                 metadata["coordinates"] = coordinates_string
-                # set time_stamp and temporal_change flag
-                metadata["temporal_change"] = layer.temporal_change
+                metadata["temporal_change"] = False
                 metadata["time_stamp"] = time_stamp
 
-                # create ids and assign to appropriate dict based on temporal_change
-                if layer.temporal_change:
-                    to_be_added["ids"].append(
-                        f"{name}:{coordinates_string}:{time_stamp}"
-                    )
-                    to_be_added["metadatas"].append(metadata)
-                    to_be_added["documents"].append(item)
-                else:
-                    # time value remains 0 if layer assumed to be temporary static
-                    to_be_checked["ids"].append(f"{name}:{coordinates_string}:0")
-                    to_be_checked["metadatas"].append(metadata)
-                    to_be_checked["documents"].append(item)
+                # time value remains 0 as layers are treated as temporally static
+                to_be_checked["ids"].append(f"{name}:{coordinates_string}:0")
+                to_be_checked["metadatas"].append(metadata)
+                to_be_checked["documents"].append(item)
 
         # check for null
         if not to_be_added["ids"]:
@@ -338,17 +327,17 @@ class MapEncoding(Component):
             },
         }
     )
-    def add_point(self, layer: MapLayer, point: Tuple[np.ndarray, str]) -> None:
+    def add_point(self, layer: MapLayer, point: PriorMemory) -> None:
         """Component action to add a user defined point to the map collection.
         This action can be executed on an event.
 
         :param layer: Layer to which the point should be added
         :type layer: MapLayer
-        :param point: A tuple of position (numpy array) and text data (str)
-        :type point: tuple[np.ndarray, str]
+        :param point: A pre-defined observation carrying text and an optional position
+        :type point: PriorMemory
         :rtype: None
         """
-        self._fill_out_pre_defined(layer, point)
+        self._fill_out_prior_memories(layer, point)
 
     def _update_cmd_args_list(self):
         """

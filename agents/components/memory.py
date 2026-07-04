@@ -88,8 +88,11 @@ class Memory(Component):
     room_type = Topic(name="room_type", msg_type="String")
     battery = Topic(name="battery_state", msg_type="BatteryState")
 
-    layer1 = MemLayer(subscribes_to=detections, temporal_change=True)
-    layer2 = MemLayer(subscribes_to=room_type, resolution_multiple=3)
+    layer1 = MemLayer(subscribes_to=detections)
+    layer2 = MemLayer(
+        subscribes_to=room_type,
+        prior_memories=[PriorMemory(text="kitchen", position=(2.0, 1.0, 0.0))],
+    )
     layer3 = MemLayer(subscribes_to=battery, is_internal_state=True)
 
     memory = Memory(
@@ -214,6 +217,35 @@ class Memory(Component):
             embedding_provider=embedding_provider,
             llm_client=llm_client,
         )
+
+        # Seed any pre-defined observations configured on the layers
+        self._seed_prior_memories()
+
+    def _seed_prior_memories(self) -> None:
+        """Seed memory with each layer's pre-defined observations.
+
+        Runs once after eMEM is initialized. Each observation uses its own
+        position and timestamp when provided, otherwise the origin and
+        the component's current time.
+        """
+        for name, layer in self.layers_dict.items():
+            for obs in layer.prior_memories:
+                if not obs.text:
+                    continue
+                x, y, z = obs.position if obs.position is not None else (0.0, 0.0, 0.0)
+                ts = (
+                    obs.timestamp
+                    if obs.timestamp is not None
+                    else float(self.get_ros_time().sec)
+                )
+                if layer.is_internal_state:
+                    self.memory.add_body_state(
+                        text=obs.text, layer_name=name, x=x, y=y, z=z, timestamp=ts
+                    )
+                else:
+                    self.memory.add(
+                        text=obs.text, x=x, y=y, z=z, layer_name=name, timestamp=ts
+                    )
 
     def custom_on_deactivate(self):
         """Close eMEM and deinitialize clients."""

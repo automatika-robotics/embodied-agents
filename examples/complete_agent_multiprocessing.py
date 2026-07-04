@@ -137,7 +137,7 @@ position = Topic(name="odom", msg_type="Odometry")
 
 memory = Memory(
     layers=[
-        MemLayer(subscribes_to=detections_topic, temporal_change=True),
+        MemLayer(subscribes_to=detections_topic),
         MemLayer(subscribes_to=introspection_answer),
     ],
     position=position,
