@@ -247,6 +247,7 @@ class Video(SupportedType):
 
     _ros_type = ROSVideo
     callback = VideoCallback
+    _ui_rate_sampled = True  # lists of continuous frames
 
     @classmethod
     def convert(
@@ -283,6 +284,7 @@ class Detections(SupportedType):
 
     _ros_type = Detections2D
     callback = DetectionsCallback
+    _ui_rate_sampled = True  # camera-rate frames + bbox drawing/JPEG encode
 
     @classmethod
     def convert(
@@ -343,6 +345,7 @@ class DetectionsMultiSource(SupportedType):
 
     _ros_type = Detections2DMultiSource
     callback = DetectionsMultiSourceCallback
+    _ui_rate_sampled = True  # camera-rate frames + bbox drawing/JPEG encode
 
     @classmethod
     def convert(cls, output: List, images: List, **_) -> Detections2DMultiSource:
@@ -371,6 +374,7 @@ class PointsOfInterest(SupportedType):
 
     _ros_type = ROSPointsOfInterest
     callback = PointsOfInterestCallback  # not defined
+    _ui_rate_sampled = True  # camera-rate frames + point drawing/JPEG encode
 
     @classmethod
     def convert(
@@ -525,6 +529,7 @@ class RGBD(SupportedType):
     """
 
     callback = RGBDCallback
+    _ui_rate_sampled = True  # camera-rate RGB-D frames
 
     @classmethod
     def get_ros_type(cls) -> type:

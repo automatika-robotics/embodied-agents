@@ -28,6 +28,24 @@ __all__ = ["GenericCallback", "TextCallback"]
 
 
 class StreamingStringCallback(TextCallback):
+    def __init__(self, input_topic, node_name: str = "") -> None:
+        super().__init__(input_topic, node_name)
+        # Full text of the current stream, accumulated across chunks
+        self._stream_text: str = ""
+
+    def callback(self, msg) -> None:
+        # self.msg is still the previous message here unless the stream is new or
+        # completed
+        if getattr(self.msg, "done", True):
+            self._stream_text = ""
+        self._stream_text += msg.data
+        super().callback(msg)
+
+    def _get_ui_content(self, **_) -> str:
+        """Full text of the current stream, so latest-value readers never miss
+        coalesced chunks."""
+        return self._stream_text
+
     def _get_output(self, **_) -> Optional[str]:
         """Gets text.
         :rtype: str | None
@@ -410,5 +428,5 @@ class JointStateCallback(GenericCallback):
             joints_names=self.msg.name,
             positions=np.array(self.msg.position),
             velocities=np.array(self.msg.velocity),
-            efforts=np.array(self.msg.effort)
+            efforts=np.array(self.msg.effort),
         )
