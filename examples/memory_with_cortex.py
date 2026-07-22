@@ -103,7 +103,7 @@ embedding_model = OllamaModel(
 )
 embedding_client = OllamaClient(embedding_model)
 
-detections_layer = MemLayer(subscribes_to=detections_out, temporal_change=True)
+detections_layer = MemLayer(subscribes_to=detections_out)
 scene_layer = MemLayer(subscribes_to=scene_description)
 
 # Add an interoception layer

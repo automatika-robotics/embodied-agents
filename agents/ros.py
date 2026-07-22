@@ -108,6 +108,7 @@ __all__ = [
     "Monitor",
     "MemLayer",
     "MapLayer",
+    "PriorMemory",
     "Route",
     "MutuallyExclusiveCallbackGroup",
     "Event",
@@ -247,6 +248,7 @@ class Video(SupportedType):
 
     _ros_type = ROSVideo
     callback = VideoCallback
+    _ui_rate_sampled = True  # lists of continuous frames
 
     @classmethod
     def convert(
@@ -283,6 +285,7 @@ class Detections(SupportedType):
 
     _ros_type = Detections2D
     callback = DetectionsCallback
+    _ui_rate_sampled = True  # camera-rate frames + bbox drawing/JPEG encode
 
     @classmethod
     def convert(
@@ -343,6 +346,7 @@ class DetectionsMultiSource(SupportedType):
 
     _ros_type = Detections2DMultiSource
     callback = DetectionsMultiSourceCallback
+    _ui_rate_sampled = True  # camera-rate frames + bbox drawing/JPEG encode
 
     @classmethod
     def convert(cls, output: List, images: List, **_) -> Detections2DMultiSource:
@@ -371,6 +375,7 @@ class PointsOfInterest(SupportedType):
 
     _ros_type = ROSPointsOfInterest
     callback = PointsOfInterestCallback  # not defined
+    _ui_rate_sampled = True  # camera-rate frames + point drawing/JPEG encode
 
     @classmethod
     def convert(
@@ -525,6 +530,7 @@ class RGBD(SupportedType):
     """
 
     callback = RGBDCallback
+    _ui_rate_sampled = True  # camera-rate RGB-D frames
 
     @classmethod
     def get_ros_type(cls) -> type:
@@ -825,52 +831,102 @@ def _get_topic_or_action(
     return Topic(**entity)
 
 
-def _get_np_coordinates(
-    pre_defined: List[Union[List, Tuple[np.ndarray, str]]],
-) -> List[Union[List, Tuple[np.ndarray, str]]]:
-    pre_defined_list = []
-    for item in pre_defined:
-        pre_defined_list.append((np.array(item[0]), item[1]))
-    return pre_defined_list
+def _to_position(
+    value: Optional[Union[List[float], Tuple[float, ...]]],
+) -> Optional[Tuple[float, float, float]]:
+    """Normalize a position into an ``(x, y, z)`` float tuple (or ``None``)."""
+    if value is None:
+        return None
+    coords = tuple(float(v) for v in value)
+    if len(coords) != 3:
+        raise ValueError(
+            f"PriorMemory position must have 3 coordinates (x, y, z), got {len(coords)}"
+        )
+    return coords
+
+
+@define(kw_only=True)
+class PriorMemory(BaseAttrs):
+    """A piece of prior knowledge used to seed a ``Memory`` layer at startup,
+    before any live data arrives on the layer's topic.
+
+    :param text: The memory text to store.
+    :type text: str
+    :param position: Optional world-frame ``(x, y, z)`` coordinates in
+        meters. If omitted, the memory is stored at the origin
+        ``(0.0, 0.0, 0.0)``.
+    :type position: Optional[tuple[float, float, float]]
+    :param timestamp: Optional POSIX timestamp in seconds to tag the
+        memory with. If omitted, the component's current time is used
+        when the memory is seeded.
+    :type timestamp: Optional[float]
+
+    Example of usage:
+    ```python
+    PriorMemory(text="charging dock", position=(1.5, 0.0, 0.0))
+    ```
+    """
+
+    text: str = field()
+    position: Optional[Tuple[float, float, float]] = field(
+        default=None, converter=_to_position
+    )
+    timestamp: Optional[float] = field(default=None)
+
+
+def _get_prior_memories(
+    value: List[Union["PriorMemory", Dict]],
+) -> List["PriorMemory"]:
+    """Converter to rebuild ``PriorMemory`` items from dicts."""
+    memories = []
+    for item in value:
+        if isinstance(item, PriorMemory):
+            memories.append(item)
+        elif isinstance(item, dict):
+            memories.append(PriorMemory(**item))
+        else:
+            raise TypeError(
+                "prior_memories items must be a PriorMemory or a dict, got "
+                f"{type(item).__name__}"
+            )
+    return memories
 
 
 @define(kw_only=True)
 class MemLayer(BaseAttrs):
-    """A MemLayer represents a single input layer for a ``Memory`` or
-    ``MapEncoding`` component. It subscribes to a topic whose callback
-    produces a string representation (via ``_get_ui_content``) that can be
-    stored as an observation.
+    """A MemLayer represents a single input layer for a ``Memory`` component.
+    It subscribes to a topic whose callback produces a string representation
+    that is stored as an observation.
 
     :param subscribes_to: The topic that this layer is subscribed to.
     :type subscribes_to: Topic
-    :param temporal_change: Indicates whether the map should store changes over time for the same position. Defaults to False. (``MapEncoding`` only.)
-    :type temporal_change: bool
-    :param resolution_multiple: A positive multiplication factor for the base resolution of the map grid, for fine or coarse graining the map. Defaults to 1. (``MapEncoding`` only.)
-    :type resolution_multiple: int
-    :param pre_defined: An optional list of pre-defined data points in the layer. Each datapoint is a tuple of [position, text], where position is a numpy array of coordinates.
-    :type pre_defined: list[tuple[np.ndarray, str]]
+    :param prior_memories: An optional list of PriorMemory entries
+        used to seed the layer with prior knowledge at startup, before any
+        live data arrives on the topic. Each entry carries the memory text,
+        an optional world-frame ``(x, y, z)`` position, and an optional
+        timestamp.
+    :type prior_memories: list[PriorMemory]
     :param is_internal_state: If True, observations from this layer are
         treated as internal state (interoception) by ``Memory``: they are
         written via ``add_body_state`` and are retrieved through the
         ``body_status`` tool rather than the perception tools. Use this
         for robot-internal signals like battery, temperature, or joint
-        health. Defaults to False. (``Memory`` only.)
+        health. Defaults to False.
     :type is_internal_state: bool
 
     Example of usage:
     ```python
-    my_layer = MemLayer(subscribes_to='my_topic', temporal_change=True)
+    my_layer = MemLayer(
+        subscribes_to='my_topic',
+        prior_memories=[PriorMemory(text="entrance", position=(0.0, 0.0, 0.0))],
+    )
     battery_layer = MemLayer(subscribes_to='battery_state', is_internal_state=True)
     ```
     """
 
     subscribes_to: Topic = field(converter=_get_topic)
-    temporal_change: bool = field(default=False)
-    resolution_multiple: int = field(
-        default=1, validator=base_validators.in_range(min_value=0.1, max_value=10)
-    )
-    pre_defined: List[Union[List, Tuple[np.ndarray, str]]] = field(
-        default=Factory(list), converter=_get_np_coordinates
+    prior_memories: List[PriorMemory] = field(
+        default=Factory(list), converter=_get_prior_memories
     )
     is_internal_state: bool = field(default=False)
 

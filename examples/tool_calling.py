@@ -33,7 +33,7 @@ embedding_client = OllamaClient(
 )
 
 memory = Memory(
-    layers=[MemLayer(subscribes_to=detections_topic, temporal_change=True)],
+    layers=[MemLayer(subscribes_to=detections_topic)],
     position=position,
     embedding_client=embedding_client,
     config=MemoryConfig(db_path="/tmp/tool_calling.db"),

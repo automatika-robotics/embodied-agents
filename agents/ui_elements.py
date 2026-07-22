@@ -8,14 +8,18 @@ from .ros import (
 from ros_sugar.ui_node.elements import (
     _out_image_element,
     _log_text_element,
-    augment_text_in_logging_card,
+    replace_text_in_logging_card,
 )
 
 
 def _log_streaming_string_element(logging_card, output: str, data_src: str):
-    """Render StreamingString output in the logging card"""
+    """Render StreamingString output in the logging card.
+
+    ``output`` is the full text of the current stream, so the entry text is
+    replaced on each update rather than appended.
+    """
     if getattr(logging_card.children[-1], "id", None) == "streaming-text":
-        return augment_text_in_logging_card(
+        return replace_text_in_logging_card(
             logging_card, output, target_id="streaming-text"
         )
     else:
