@@ -6,7 +6,6 @@ modality validation matrix, the motion state machine, and the image/cloud
 processing paths with mocked publishers.
 """
 
-import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -291,6 +290,9 @@ class TestValidationMatrix:
             )
         assert isinstance(component, MotionDetector)
 
+    def test_deprecated_config_alias(self, rclpy_init):
+        assert VideoMessageMakerConfig is MotionDetectorConfig
+
     def test_position_recovered_from_inputs(self, rclpy_init):
         # multiprocess re-instantiation path: the position topic arrives as a
         # plain input and is identified by its Odometry type
@@ -311,12 +313,6 @@ class TestValidationMatrix:
         )
         assert sum(t.name == "odom" for t in component.in_topics) == 1
 
-    def test_config_alias_and_serialization(self, rclpy_init):
-        assert VideoMessageMakerConfig is MotionDetectorConfig
-        config = MotionDetectorConfig(voxel_size=0.2, base_frame="base_footprint")
-        rebuilt = MotionDetectorConfig(**json.loads(config.to_json()))
-        assert rebuilt.voxel_size == pytest.approx(0.2)
-        assert rebuilt.base_frame == "base_footprint"
 
 
 # ---------------------------------------------------------------------------

@@ -1,9 +1,12 @@
 """Tests for config validation in agents/config.py — no ROS needed."""
 
+import json
+
 import pytest
 from agents.config import (
     LLMConfig,
     MLLMConfig,
+    MotionDetectorConfig,
     SpeechToTextConfig,
     TextToSpeechConfig,
     SemanticRouterConfig,
@@ -165,3 +168,47 @@ class TestRouterConfig:
         assert c.maximum_distance == 0.5
         with pytest.raises(ValueError):
             SemanticRouterConfig(router_name="r", maximum_distance=1.1)
+
+
+class TestMotionDetectorConfig:
+    def test_construction(self):
+        """MotionDetectorConfig can be constructed with defaults."""
+        MotionDetectorConfig()
+
+    def test_threshold_range(self):
+        with pytest.raises(ValueError):
+            MotionDetectorConfig(threshold=0.05)
+        with pytest.raises(ValueError):
+            MotionDetectorConfig(threshold=5.1)
+
+    def test_voxel_size_positive(self):
+        with pytest.raises(ValueError):
+            MotionDetectorConfig(voxel_size=0.0)
+
+    def test_cluster_params_positive(self):
+        with pytest.raises(ValueError):
+            MotionDetectorConfig(changed_voxel_threshold=0)
+        with pytest.raises(ValueError):
+            MotionDetectorConfig(min_cluster_size=0)
+        with pytest.raises(ValueError):
+            MotionDetectorConfig(max_clusters=0)
+
+    def test_motion_stop_delay_non_negative(self):
+        with pytest.raises(ValueError):
+            MotionDetectorConfig(motion_stop_delay=-1)
+
+    def test_device_options(self):
+        for device in ["cpu", "cuda"]:
+            c = MotionDetectorConfig(device=device)
+            assert c.device == device
+
+    def test_flow_kwargs_validated_against_defaults(self):
+        with pytest.raises(AttributeError):
+            MotionDetectorConfig(flow_kwargs={"not_a_flow_param": 1})
+
+    def test_serialization_round_trip(self):
+        """Multiprocess launch path: config survives a JSON round trip."""
+        config = MotionDetectorConfig(voxel_size=0.2, base_frame="base_footprint")
+        rebuilt = MotionDetectorConfig(**json.loads(config.to_json()))
+        assert rebuilt.voxel_size == pytest.approx(0.2)
+        assert rebuilt.base_frame == "base_footprint"
