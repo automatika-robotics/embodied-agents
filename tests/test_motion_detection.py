@@ -117,6 +117,49 @@ def test_voxel_set_difference():
     assert motion.voxel_set_difference(first, first).size == 0
 
 
+def test_new_voxels_against_history():
+    a = motion.unique_voxels(np.array([[0.0, 0.0, 0.0]], dtype=np.float32), 0.1)
+    b = motion.unique_voxels(np.array([[1.0, 0.0, 0.0]], dtype=np.float32), 0.1)
+    c = motion.unique_voxels(np.array([[2.0, 0.0, 0.0]], dtype=np.float32), 0.1)
+    # voxel seen in any history cloud is not new
+    assert motion.new_voxels(a, [a, b]).size == 0
+    assert motion.new_voxels(c, [a, b]).size == 1
+    # empty history yields no evidence
+    assert motion.new_voxels(c, []).size == 0
+
+
+def test_new_voxels_non_repetitive_scan_pattern():
+    # A non-repetitive scanner (e.g. Livox) samples a different subset of the
+    # static scene each frame. Frame-to-frame symmetric differencing reports
+    # the sampling pattern as motion; appearance against the accumulated
+    # history stays silent.
+    rng = np.random.default_rng(11)
+    scene = (rng.random((4000, 3)) - 0.5) * np.array([16.0, 16.0, 2.0])
+    samples = [
+        scene[rng.choice(len(scene), size=2000, replace=False)] for _ in range(12)
+    ]
+    voxel_sets = [
+        motion.unique_voxels(s.astype(np.float32), 0.3) for s in samples
+    ]
+
+    # the old approach sees hundreds of changed voxels in the static scene
+    symmetric = motion.voxel_set_difference(voxel_sets[-1], voxel_sets[-2])
+    assert symmetric.size > 100
+
+    # appearance vs the accumulated history sees (almost) nothing
+    appeared = motion.new_voxels(voxel_sets[-1], voxel_sets[:-1])
+    assert appeared.size <= 3
+
+    # while a genuinely new object is still caught
+    with_object = np.vstack(
+        [samples[-1], _blob((3.0, 3.0, 0.5), n=100, spread=0.5, seed=2)]
+    ).astype(np.float32)
+    appeared = motion.new_voxels(
+        motion.unique_voxels(with_object, 0.3), voxel_sets[:-1]
+    )
+    assert appeared.size > 10
+
+
 def _blob(center, n=30, spread=0.15, seed=0) -> np.ndarray:
     rng = np.random.default_rng(seed)
     return (rng.random((n, 3)) - 0.5) * spread + np.asarray(center)
@@ -404,6 +447,7 @@ class TestCloudPath:
                 config=MotionDetectorConfig(
                     voxel_size=0.1,
                     changed_voxel_threshold=2,
+                    accumulation_window=1,
                     min_cluster_size=2,
                     motion_stop_delay=1,
                 ),
@@ -492,7 +536,9 @@ class TestCloudPath:
                 outputs=[BOOL_OUT],
                 trigger=CLOUD,
                 component_name="test_motion",
-                config=MotionDetectorConfig(changed_voxel_threshold=2),
+                config=MotionDetectorConfig(
+                    changed_voxel_threshold=2, accumulation_window=1
+                ),
             )
         )
         bool_publisher = MagicMock()
