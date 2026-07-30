@@ -1035,10 +1035,12 @@ class MotionDetectorConfig(BaseComponentConfig):
     --
     Point cloud input params
     --
-    :param voxel_size: Edge length in meters of the voxel grid used for cloud differencing. Default is 0.1.
+    :param voxel_size: Edge length in meters of the voxel grid used for cloud differencing. Default is 0.3.
     :type voxel_size: float
-    :param changed_voxel_threshold: Number of changed voxels between consecutive clouds to declare motion. Default is 5.
+    :param changed_voxel_threshold: Number of newly appearing voxels (relative to the accumulated occupancy history) to declare motion. Default is 10.
     :type changed_voxel_threshold: int
+    :param accumulation_window: Number of previous clouds accumulated into the occupancy history that new clouds are differenced against. A window makes detection robust to sparse and non-repetitive scan patterns (e.g. Livox lidars) where a single previous cloud does not cover the whole scene. Detection starts once the window is full. Default is 10 (i.e. 1 second of history for a 10 Hz sensor).
+    :type accumulation_window: int
     :param min_cluster_size: Minimum number of changed voxels in a cluster for it to produce a motion center. Default is 3.
     :type min_cluster_size: int
     :param max_clusters: Maximum number of motion centers published at a time (largest clusters first). Default is 5.
@@ -1047,9 +1049,9 @@ class MotionDetectorConfig(BaseComponentConfig):
     :type min_range: float
     :param max_range: Maximum planar (xy) range in meters of cloud points considered. Default is 20.0.
     :type max_range: float
-    :param z_min: Minimum height of cloud points considered. Default is -1e3.
+    :param z_min: Minimum height of cloud points considered. Default is -1.0 (1 meter below the sensor).
     :type z_min: float
-    :param z_max: Maximum height of cloud points considered. Default is 1e3.
+    :param z_max: Maximum height of cloud points considered. Default is 1.0 (1 meter above the sensor).
     :type z_max: float
     :param base_frame: The robot base frame used for ego-motion subtraction. The static transform from the cloud frame to this frame (the sensor mount) is looked up from TF automatically. Default is "base_link".
     :type base_frame: str
@@ -1096,10 +1098,13 @@ class MotionDetectorConfig(BaseComponentConfig):
     )
 
     voxel_size: float = field(
-        default=0.1, validator=base_validators.in_range(min_value=1e-3, max_value=1e3)
+        default=0.3, validator=base_validators.in_range(min_value=1e-3, max_value=1e3)
     )
     changed_voxel_threshold: int = field(
-        default=5, validator=base_validators.in_range(min_value=1, max_value=1e9)
+        default=10, validator=base_validators.in_range(min_value=1, max_value=1e9)
+    )
+    accumulation_window: int = field(
+        default=10, validator=base_validators.in_range(min_value=1, max_value=1e3)
     )
     min_cluster_size: int = field(
         default=3, validator=base_validators.in_range(min_value=1, max_value=1e9)
@@ -1113,8 +1118,8 @@ class MotionDetectorConfig(BaseComponentConfig):
     max_range: float = field(
         default=20.0, validator=base_validators.in_range(min_value=1e-3, max_value=1e3)
     )
-    z_min: float = field(default=-1e3)
-    z_max: float = field(default=1e3)
+    z_min: float = field(default=-1.0)
+    z_max: float = field(default=1.0)
     base_frame: str = field(default="base_link")
 
 
