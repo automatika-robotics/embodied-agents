@@ -37,14 +37,15 @@ A Component is the main execution unit in _EmbodiedAgents_ and in essence each c
 * - **[Cortex](agents.components.cortex.md)**
   - An LLM-powered high level cognitive component that combines the roll of a long term task planner and executor and also serves as the system monitor. Receives high-level natural language goals, decomposes them into steps by inspecting available components, and executes them with per-step confirmation. Automatically discovers component actions and ROS entrypoints as callable tools.
 
-* - **[VideoMessageMaker](agents.components.imagestovideo.md)**
-  - This component generates ROS video messages from input image messages. A video message is a collection of image messages that have a perceivable motion. I.e. the primary task of this component is to make intentionality decisions about what sequence of consecutive images should be treated as one coherent temporal sequence. The chunking method used for selecting images for a video can be configured in component config. It can be useful in sending videos to ML models that take image sequences.
+* - **[MotionDetector](agents.components.motion_detection.md)**
+  - Detects motion from a stream of images or a stream of point clouds. Publishes the motion state on a Bool topic (useful as an event source for other components), video messages of coherent motion sequences (image inputs) or the coordinates of motion centers (point cloud inputs). Supports ego-motion handling through an optional odometry topic.
 ```
 """
 
 from .component_base import Component
 from .cortex import Cortex
 from .imagestovideo import VideoMessageMaker
+from .motion_detection import MotionDetector
 from .llm import LLM
 from .map_encoding import MapEncoding
 from .memory import Memory
@@ -69,6 +70,7 @@ __all__ = [
     "SpeechToText",
     "TextToSpeech",
     "Vision",
+    "MotionDetector",
     "VideoMessageMaker",
     "SemanticRouter",
 ]
