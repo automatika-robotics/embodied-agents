@@ -18,7 +18,7 @@ BaseComponent (ros_sugar)
               ├── TextToSpeech
               ├── SemanticRouter
               ├── MapEncoding
-              └── VideoMessageMaker
+              └── MotionDetector
 ```
 
 ### BaseComponent
@@ -134,7 +134,7 @@ BaseComponentConfig (ros_sugar)
         ├── SpeechToTextConfig
         ├── TextToSpeechConfig
         ├── SemanticRouterConfig
-        └── VideoMessageMakerConfig
+        └── MotionDetectorConfig
   └── MapConfig (extends BaseComponentConfig directly)
 ```
 
