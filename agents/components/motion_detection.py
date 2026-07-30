@@ -1,4 +1,5 @@
-from typing import List, Optional, Union
+from collections import deque
+from typing import Deque, List, Optional, Union
 
 import cv2
 import numpy as np
@@ -31,7 +32,7 @@ class MotionDetector(Component):
     - **Video** output (image inputs only): consecutive frames with perceivable motion are collected and published as a single video message once the motion stops (with a configurable debounce), i.e. the component makes intentionality decisions about what sequence of consecutive images should be treated as one coherent temporal sequence.
     - **PoseArray** output (point cloud inputs only): centers of the regions in which motion is being detected, published while motion is active. Multiple simultaneously moving regions produce multiple centers.
 
-    Point cloud motion is detected by sparse voxel-occupancy differencing between consecutive clouds: appearing/disappearing voxels are thresholded for the motion state and clustered into motion centers.
+    Point cloud motion is detected by sparse voxel-occupancy differencing against an accumulated history. Each cloud is voxelized and compared with the union of the last ``accumulation_window`` clouds, and voxels that newly appear are thresholded for the motion state and clustered into motion centers. Differencing against an occupancy history makes detection robust to sparse and non-repetitive scan patterns (e.g. Livox lidars). Detection starts once the history window is full. Note that sustained motion slower than roughly one voxel edge per window duration will blend into the history and can go undetected; lower ``voxel_size`` or raise ``accumulation_window`` to detect slower motion.
 
     An optional ``position`` (Odometry) topic enables use on a moving robot:
 
@@ -148,7 +149,10 @@ class MotionDetector(Component):
         self._roi_mask: Optional[np.ndarray] = None
 
         # Point cloud modality state
-        self._previous_voxels: Optional[np.ndarray] = None
+        # occupancy history of the last `accumulation_window` clouds
+        self._voxel_history: Deque[np.ndarray] = deque(
+            maxlen=self.config.accumulation_window
+        )
         self._sensor_tf_listener: Optional[TFListener] = None
         self._sensor_tf_warned: bool = False
 
@@ -361,8 +365,9 @@ class MotionDetector(Component):
         )
 
     def _process_cloud(self, cloud) -> None:
-        """Differences the incoming cloud against the previous one and
-        publishes the motion state and the centers of changed regions.
+        """Differences the incoming cloud against the accumulated occupancy
+        history and publishes the motion state and the centers of newly
+        occupied regions.
         """
         points = cloud.xyz
         if points is None:
@@ -387,25 +392,27 @@ class MotionDetector(Component):
         voxels = motion.unique_voxels(
             points, self.config.voxel_size, device=self.config.device
         )
-        previous_voxels, self._previous_voxels = self._previous_voxels, voxels
-        if previous_voxels is None:
-            return
 
-        changed = motion.voxel_set_difference(voxels, previous_voxels)
-        detected = changed.size > self.config.changed_voxel_threshold
+        # NOTE: Difference against the accumulated history only once it is full,
+        # so sparse scan patterns have covered the static scene
+        if len(self._voxel_history) == self.config.accumulation_window:
+            changed = motion.new_voxels(voxels, list(self._voxel_history))
+            detected = changed.size > self.config.changed_voxel_threshold
 
-        self._step_motion_state(detected)
+            self._step_motion_state(detected)
 
-        if detected and self._centers_publishers:
-            centers = motion.cluster_centers(
-                changed,
-                voxel_size=self.config.voxel_size,
-                min_cluster_size=self.config.min_cluster_size,
-                max_clusters=self.config.max_clusters,
-            )
-            if centers:
-                self.get_logger().debug(
-                    f"Detected {len(centers)} motion centers in frame '{frame_id}'"
+            if detected and self._centers_publishers:
+                centers = motion.cluster_centers(
+                    changed,
+                    voxel_size=self.config.voxel_size,
+                    min_cluster_size=self.config.min_cluster_size,
+                    max_clusters=self.config.max_clusters,
                 )
-                for publisher in self._centers_publishers:
-                    publisher.publish(output=centers, frame_id=frame_id)
+                if centers:
+                    self.get_logger().debug(
+                        f"Detected {len(centers)} motion centers in frame '{frame_id}'"
+                    )
+                    for publisher in self._centers_publishers:
+                        publisher.publish(output=centers, frame_id=frame_id)
+
+        self._voxel_history.append(voxels)

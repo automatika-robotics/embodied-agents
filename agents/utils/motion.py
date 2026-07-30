@@ -20,6 +20,7 @@ __all__ = [
     "ensure_torch",
     "unique_voxels",
     "voxel_set_difference",
+    "new_voxels",
     "cluster_voxels",
     "cluster_centers",
 ]
@@ -262,7 +263,7 @@ def voxel_set_difference(
     """Symmetric difference between two sorted voxel key sets.
 
     Voxels that appeared plus voxels that disappeared between two
-    consecutive clouds, the changed set that motion detection thresholds.
+    consecutive clouds.
 
     :rtype: np.ndarray
     """
@@ -271,6 +272,30 @@ def voxel_set_difference(
         ~np.isin(previous_keys, current_keys, assume_unique=True)
     ]
     return np.concatenate((appeared, disappeared))
+
+
+def new_voxels(
+    current_keys: np.ndarray, history: List[np.ndarray]
+) -> np.ndarray:
+    """Voxels occupied in the current cloud but in none of the history clouds.
+
+    This is the changed set that motion detection thresholds. Appearance
+    against an accumulated occupancy history is robust to sparse and
+    non-repetitive scan patterns (e.g. Livox lidars). Disappearances carry no
+    motion evidence with such sensors, while a moving object keeps appearing in
+    voxels the accumulated history never saw.
+
+    :param current_keys: Unique voxel keys of the current cloud
+    :type current_keys: np.ndarray
+    :param history: Unique voxel key sets of the previous clouds
+    :type history: List[np.ndarray]
+    :return: Voxel keys of the current cloud not present in the history
+    :rtype: np.ndarray
+    """
+    if not history:
+        return np.empty(0, dtype=np.int64)
+    occupied = np.unique(np.concatenate(history))
+    return current_keys[~np.isin(current_keys, occupied, assume_unique=True)]
 
 
 def _keys_to_indices(keys: np.ndarray) -> np.ndarray:
