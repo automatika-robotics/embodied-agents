@@ -32,7 +32,7 @@ class MotionDetector(Component):
     - **Video** output (image inputs only): consecutive frames with perceivable motion are collected and published as a single video message once the motion stops (with a configurable debounce), i.e. the component makes intentionality decisions about what sequence of consecutive images should be treated as one coherent temporal sequence.
     - **PoseArray** output (point cloud inputs only): centers of the regions in which motion is being detected, published while motion is active. Multiple simultaneously moving regions produce multiple centers.
 
-    Point cloud motion is detected by sparse voxel-occupancy differencing against an accumulated history. Each cloud is voxelized and compared with the union of the last ``accumulation_window`` clouds, and voxels that newly appear are thresholded for the motion state and clustered into motion centers. Differencing against an occupancy history makes detection robust to sparse and non-repetitive scan patterns (e.g. Livox lidars). Detection starts once the history window is full. Note that sustained motion slower than roughly one voxel edge per window duration will blend into the history and can go undetected; lower ``voxel_size`` or raise ``accumulation_window`` to detect slower motion.
+    Point cloud motion is detected by sparse voxel-occupancy differencing against an accumulated history. Each cloud is voxelized and compared with the union of the last ``accumulation_window`` clouds; newly appearing voxels are clustered, and only voxels belonging to spatially coherent clusters (of at least ``min_cluster_size``) count as motion evidence, which is thresholded for the motion state and whose clusters become the motion centers. Differencing against an occupancy history makes detection robust to sparse and non-repetitive scan patterns (e.g. Livox lidars), while the coherence requirement filters out scattered appearances from sensor noise or people standing quasi-still. Detection starts once the history window is full. Note that sustained motion slower than roughly one voxel edge per window duration will blend into the history and can go undetected; lower ``voxel_size`` or raise ``accumulation_window`` to detect slower motion.
 
     An optional ``position`` (Odometry) topic enables use on a moving robot:
 
@@ -397,22 +397,25 @@ class MotionDetector(Component):
         # so sparse scan patterns have covered the static scene
         if len(self._voxel_history) == self.config.accumulation_window:
             changed = motion.new_voxels(voxels, list(self._voxel_history))
-            detected = changed.size > self.config.changed_voxel_threshold
+            # NOTE: Motion evidence is the number of newly appearing voxels that
+            # form spatially coherent clusters. Scattered appearances carry no motion
+            # evidence.
+            clusters = motion.coherent_clusters(
+                changed, self.config.min_cluster_size
+            )
+            coherent = sum(len(cluster) for cluster in clusters)
+            detected = coherent > self.config.changed_voxel_threshold
 
             self._step_motion_state(detected)
 
             if detected and self._centers_publishers:
-                centers = motion.cluster_centers(
-                    changed,
-                    voxel_size=self.config.voxel_size,
-                    min_cluster_size=self.config.min_cluster_size,
-                    max_clusters=self.config.max_clusters,
+                centers = motion.centers_of(
+                    clusters, self.config.voxel_size, self.config.max_clusters
                 )
-                if centers:
-                    self.get_logger().debug(
-                        f"Detected {len(centers)} motion centers in frame '{frame_id}'"
-                    )
-                    for publisher in self._centers_publishers:
-                        publisher.publish(output=centers, frame_id=frame_id)
+                self.get_logger().debug(
+                    f"Detected {len(centers)} motion centers in frame '{frame_id}'"
+                )
+                for publisher in self._centers_publishers:
+                    publisher.publish(output=centers, frame_id=frame_id)
 
         self._voxel_history.append(voxels)

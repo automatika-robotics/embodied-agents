@@ -1004,7 +1004,7 @@ class MotionDetectorConfig(BaseComponentConfig):
     --
     Common params
     --
-    :param motion_stop_delay: Number of consecutive still inputs before declaring that motion has ended. Debounces flickery detections. Default is 5.
+    :param motion_stop_delay: Number of consecutive still inputs before declaring that motion has ended. Debounces flickery detections. Default is 8.
     :type motion_stop_delay: int
     :param publish_bool_on_change_only: Publish on Bool output topics only when the motion state changes, instead of on every processed input. Default is False.
     :type publish_bool_on_change_only: bool
@@ -1035,13 +1035,13 @@ class MotionDetectorConfig(BaseComponentConfig):
     --
     Point cloud input params
     --
-    :param voxel_size: Edge length in meters of the voxel grid used for cloud differencing. Default is 0.3.
+    :param voxel_size: Edge length in meters of the voxel grid used for cloud differencing. Default is 0.15.
     :type voxel_size: float
-    :param changed_voxel_threshold: Number of newly appearing voxels (relative to the accumulated occupancy history) to declare motion. Default is 10.
+    :param changed_voxel_threshold: Number of newly appearing voxels (relative to the accumulated occupancy history) that form spatially coherent clusters of at least ``min_cluster_size`` voxels, required to declare motion. Coherence filters out scattered appearances from sensor noise or people standing quasi-still. Default is 5.
     :type changed_voxel_threshold: int
-    :param accumulation_window: Number of previous clouds accumulated into the occupancy history that new clouds are differenced against. A window makes detection robust to sparse and non-repetitive scan patterns (e.g. Livox lidars) where a single previous cloud does not cover the whole scene. Detection starts once the window is full. Default is 10 (i.e. 1 second of history for a 10 Hz sensor).
+    :param accumulation_window: Number of previous clouds accumulated into the occupancy history that new clouds are differenced against. A window makes detection robust to sparse and non-repetitive scan patterns (e.g. Livox lidars) where a single previous cloud does not cover the whole scene. Detection starts once the window is full. Default is 20 (i.e. 2 seconds of history for a 10 Hz sensor).
     :type accumulation_window: int
-    :param min_cluster_size: Minimum number of changed voxels in a cluster for it to produce a motion center. Default is 3.
+    :param min_cluster_size: Minimum number of newly appearing voxels in a spatially connected cluster for the cluster to count as motion evidence and produce a motion center. Default is 4.
     :type min_cluster_size: int
     :param max_clusters: Maximum number of motion centers published at a time (largest clusters first). Default is 5.
     :type max_clusters: int
@@ -1065,7 +1065,7 @@ class MotionDetectorConfig(BaseComponentConfig):
     """
 
     motion_stop_delay: int = field(
-        default=5, validator=base_validators.in_range(min_value=0, max_value=1e3)
+        default=8, validator=base_validators.in_range(min_value=0, max_value=1e3)
     )
     publish_bool_on_change_only: bool = field(default=False)
     process_rate: Optional[float] = field(default=None)
@@ -1098,16 +1098,16 @@ class MotionDetectorConfig(BaseComponentConfig):
     )
 
     voxel_size: float = field(
-        default=0.3, validator=base_validators.in_range(min_value=1e-3, max_value=1e3)
+        default=0.15, validator=base_validators.in_range(min_value=1e-3, max_value=1e3)
     )
     changed_voxel_threshold: int = field(
-        default=10, validator=base_validators.in_range(min_value=1, max_value=1e9)
+        default=5, validator=base_validators.in_range(min_value=1, max_value=1e9)
     )
     accumulation_window: int = field(
-        default=10, validator=base_validators.in_range(min_value=1, max_value=1e3)
+        default=20, validator=base_validators.in_range(min_value=1, max_value=1e3)
     )
     min_cluster_size: int = field(
-        default=3, validator=base_validators.in_range(min_value=1, max_value=1e9)
+        default=4, validator=base_validators.in_range(min_value=1, max_value=1e9)
     )
     max_clusters: int = field(
         default=5, validator=base_validators.in_range(min_value=1, max_value=1e3)

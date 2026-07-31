@@ -22,7 +22,8 @@ __all__ = [
     "voxel_set_difference",
     "new_voxels",
     "cluster_voxels",
-    "cluster_centers",
+    "coherent_clusters",
+    "centers_of",
 ]
 
 # Bit layout for packing a 3D voxel index into a single int64 key:
@@ -364,29 +365,44 @@ def cluster_voxels(keys: np.ndarray) -> List[np.ndarray]:
     return clusters
 
 
-def cluster_centers(
-    keys: np.ndarray,
-    voxel_size: float,
-    min_cluster_size: int,
-    max_clusters: int,
-) -> List[Tuple[float, float, float]]:
-    """Cluster changed voxels and return metric centers of the largest clusters.
+def coherent_clusters(
+    keys: np.ndarray, min_cluster_size: int
+) -> List[np.ndarray]:
+    """Cluster voxel keys and keep spatially coherent clusters, largest first.
 
-    :param keys: 1D int64 array of unique changed voxel keys
+    Spatial coherence is the noise filter for motion evidence. Newly
+    appearing voxels caused by sensor noise or small jitter are scattered across the
+    scene, while a genuinely moving object produces a connected blob of appearances.
+
+    :param keys: 1D int64 array of unique voxel keys
     :type keys: np.ndarray
-    :param voxel_size: Edge length of a voxel in meters
-    :type voxel_size: float
     :param min_cluster_size: Minimum number of voxels for a valid cluster
     :type min_cluster_size: int
-    :param max_clusters: Maximum number of centers to return (largest first)
-    :type max_clusters: int
-    :return: Cluster centers as (x, y, z) in metric coordinates
-    :rtype: List[Tuple[float, float, float]]
+    :return: Clusters of Nx3 voxel indices with at least ``min_cluster_size``
+        voxels, sorted by size (largest first)
+    :rtype: List[np.ndarray]
     """
     clusters = [
         cluster for cluster in cluster_voxels(keys) if len(cluster) >= min_cluster_size
     ]
     clusters.sort(key=len, reverse=True)
+    return clusters
+
+
+def centers_of(
+    clusters: List[np.ndarray], voxel_size: float, max_clusters: int
+) -> List[Tuple[float, float, float]]:
+    """Metric centers of the largest voxel clusters.
+
+    :param clusters: Clusters of Nx3 voxel indices, sorted by size
+    :type clusters: List[np.ndarray]
+    :param voxel_size: Edge length of a voxel in meters
+    :type voxel_size: float
+    :param max_clusters: Maximum number of centers to return
+    :type max_clusters: int
+    :return: Cluster centers as (x, y, z) in metric coordinates
+    :rtype: List[Tuple[float, float, float]]
+    """
     centers = []
     for cluster in clusters[:max_clusters]:
         center = (cluster.mean(axis=0) + 0.5) * voxel_size
