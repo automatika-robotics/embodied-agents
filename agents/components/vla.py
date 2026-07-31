@@ -828,3 +828,7 @@ class VLA(ModelComponent):
         """Warm up and stat check"""
         # TODO: implement warmup
         pass
+
+    def _handle_websocket_streaming(self):
+        """Not used -- VLA streams actions through the LeRobot client."""
+        pass
