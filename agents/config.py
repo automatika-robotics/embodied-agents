@@ -400,6 +400,14 @@ class VLAConfig(ModelComponentConfig):
     :param joint_limits: A manual dictionary of joint limits to be used if a URDF file
         is not provided. Format should match parsed URDF limits.
     :type joint_limits: Optional[Dict]
+    :param aggregate_fn_name: The strategy used to merge actions when newly received
+        action chunks overlap timesteps already in the queue (chunks from consecutive
+        inferences overlap). Presets mirror the LeRobot client:
+        "latest_only" (new action wins), "weighted_average" (0.3 * old + 0.7 * new),
+        "average" (0.5 * old + 0.5 * new) and "conservative" (0.7 * old + 0.3 * new).
+        A custom callable set with `set_aggregation_function` on the component takes
+        precedence over this preset. Default is "latest_only".
+    :type aggregate_fn_name: Literal["latest_only", "weighted_average", "average", "conservative"]
 
     Example of usage:
     ```python
@@ -438,6 +446,9 @@ class VLAConfig(ModelComponentConfig):
     )  # seconds
     robot_urdf_file: Optional[str] = field(default=None)
     joint_limits: Optional[Dict] = field(default=None)
+    aggregate_fn_name: Literal[
+        "latest_only", "weighted_average", "average", "conservative"
+    ] = field(default="latest_only")
     _termination_mode: Literal["timesteps", "keyboard", "event"] = field(
         default="timesteps", alias="_termination_mode"
     )
