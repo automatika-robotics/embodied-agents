@@ -174,22 +174,33 @@ def test_cluster_centers_two_blobs():
         ]
     ).astype(np.float32)
     keys = motion.unique_voxels(cloud, voxel_size=0.1)
-    centers = motion.cluster_centers(
-        keys, voxel_size=0.1, min_cluster_size=2, max_clusters=5
-    )
+    clusters = motion.coherent_clusters(keys, min_cluster_size=2)
+    centers = motion.centers_of(clusters, voxel_size=0.1, max_clusters=5)
     assert len(centers) == 2
     # largest cluster first, centers close to the blob centers
     np.testing.assert_allclose(centers[0], (2.0, 0.0, 0.5), atol=0.2)
     np.testing.assert_allclose(centers[1], (-3.0, 1.0, 0.5), atol=0.2)
     # max_clusters caps the list
-    assert (
-        len(
-            motion.cluster_centers(
-                keys, voxel_size=0.1, min_cluster_size=2, max_clusters=1
-            )
-        )
-        == 1
+    assert len(motion.centers_of(clusters, voxel_size=0.1, max_clusters=1)) == 1
+
+
+def test_coherent_clusters_filter_scattered_noise():
+    # many isolated voxels (sway/sensor noise) vs one coherent blob
+    scattered = np.array(
+        [[float(3 * i), float(3 * i), 0.0] for i in range(12)], dtype=np.float32
     )
+    blob = _blob((5.0, 5.0, 0.5), n=60, spread=0.4).astype(np.float32)
+
+    noise_keys = motion.unique_voxels(scattered, 0.15)
+    assert noise_keys.size >= 12  # plenty of appearances...
+    assert motion.coherent_clusters(noise_keys, min_cluster_size=4) == []  # ...no evidence
+
+    blob_keys = motion.unique_voxels(blob, 0.15)
+    clusters = motion.coherent_clusters(blob_keys, min_cluster_size=4)
+    assert len(clusters) == 1
+    assert sum(len(c) for c in clusters) > 5  # above default threshold
+    centers = motion.centers_of(clusters, 0.15, max_clusters=5)
+    np.testing.assert_allclose(centers[0], (5.0, 5.0, 0.5), atol=0.2)
 
 
 def test_cuda_device_torch_guard():
@@ -219,10 +230,7 @@ def test_cuda_device_torch_guard():
 def test_cluster_min_size_filters_noise():
     lone_point = np.array([[5.0, 5.0, 0.0]], dtype=np.float32)
     keys = motion.unique_voxels(lone_point, voxel_size=0.1)
-    assert (
-        motion.cluster_centers(keys, voxel_size=0.1, min_cluster_size=2, max_clusters=5)
-        == []
-    )
+    assert motion.coherent_clusters(keys, min_cluster_size=2) == []
 
 
 def test_ego_motion_compensation_cancels_static_scene():
