@@ -1,10 +1,30 @@
-from typing import List, Dict, Literal, Optional, Iterable, Tuple
+from typing import Callable, List, Dict, Literal, Optional, Iterable, Tuple
 from attr import define, field
 import numpy as np
 
 from rclpy.logging import get_logger
 
 from .utils import _read_spec_file, find_missing_values
+
+# Chunk-overlap aggregation presets, mirroring the LeRobot client's
+# AGGREGATE_FUNCTIONS.
+AGGREGATE_FUNCTIONS: Dict[str, Callable] = {
+    "latest_only": lambda old, new: new,
+    "weighted_average": lambda old, new: 0.3 * old + 0.7 * new,
+    "average": lambda old, new: 0.5 * old + 0.5 * new,
+    "conservative": lambda old, new: 0.7 * old + 0.3 * new,
+}
+
+
+def _as_depth_frame(img: np.ndarray) -> np.ndarray:
+    """Shape a depth output as (H, W, 1) as expected for single channel
+    dataset features. uint16 depth (e.g. mono16/16UC1 encodings) is cast to
+    float32 since torch cannot convert uint16 arrays on the server side"""
+    if img.ndim == 2:
+        img = np.expand_dims(img, axis=-1)
+    if img.dtype == np.uint16:
+        img = img.astype(np.float32)
+    return img
 
 
 def _size_validator(instance, attribute, value):

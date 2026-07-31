@@ -27,9 +27,12 @@ from ..ros import (
     VisionLanguageAction,
     run_external_processor,
 )
+from ..callbacks import RGBDCallback
 from ..utils import validate_func_args, find_missing_values
 from ..utils.actions import (
+    AGGREGATE_FUNCTIONS,
     JointsData,
+    _as_depth_frame,
     parse_urdf_joints,
     check_joint_limits,
     cap_actions_with_limits,
@@ -41,7 +44,64 @@ from .model_component import ModelComponent
 
 
 class VLA(ModelComponent):
-    """Vision-Language-Agent (VLA) Component."""
+    """
+    This component utilizes Vision-Language-Action (VLA) policies served on the LeRobot Async Policy Server (e.g. SmolVLA, Pi0/Pi0.5, NVIDIA GR00T N1.7, ACT, Diffusion) for robot manipulation and control tasks.
+
+    The component runs as a ROS2 Action Server exposing the `<component_name>/manipulate_with_vla` action which takes a natural language task description as its goal. While a goal is active, the component continuously streams observations (mapped joint states and camera images) to the policy server at `observation_sending_rate` and publishes the received action chunks as joint commands at `action_sending_rate`. Overlapping action chunks from consecutive inferences are merged using the aggregation strategy set in the config (or a custom callable set with `set_aggregation_function`). Goal termination is configured with `set_termination_trigger` (after a number of timesteps, on a key press, or on an event).
+
+    :param inputs: The input topics for the VLA component.
+        This should be a list of Topic objects, containing exactly one JointState topic and at least one Image (or RGBD) topic. The camera topics should be mapped to the dataset camera names in `camera_inputs_map` of the config.
+    :type inputs: list[Topic]
+    :param outputs: The output topics for the VLA component.
+        This should be a list of Topic objects. JointState, JointTrajectory and JointJog types are handled automatically, covering common input formats for MoveIt Servo and ROS2 Control.
+    :type outputs: list[Topic]
+    :param model_client: The model client for the VLA component.
+        This must be an instance of LeRobotClient, connected to a running LeRobot Async Policy Server which serves the policy defined in a LeRobotPolicy model.
+    :type model_client: LeRobotClient
+    :param config: The configuration for the VLA component.
+        This should be an instance of VLAConfig. `joint_names_map` and `camera_inputs_map` are required to map the dataset feature names to the robot's joints and camera topics.
+    :type config: VLAConfig
+    :param component_name: The name of the VLA component.
+        This should be a string.
+    :type component_name: str
+
+    Example usage:
+    ```python
+    joint_states = Topic(name="joint_states", msg_type="JointState")
+    camera = Topic(name="camera/image_raw", msg_type="Image")
+    joint_cmd = Topic(name="joint_cmd", msg_type="JointState")
+
+    policy = LeRobotPolicy(
+        name="pick_policy",
+        checkpoint="my_hf_user/smolvla_finetuned",
+        policy_type="smolvla",
+        dataset_info_file="https://huggingface.co/datasets/my_hf_user/my_dataset/resolve/main/meta/info.json",
+    )
+    model_client = LeRobotClient(model=policy, host="127.0.0.1", port=8080)
+
+    config = VLAConfig(
+        joint_names_map={
+            "shoulder_pan.pos": "Rotation",
+            "elbow_flex.pos": "Elbow",
+        },
+        camera_inputs_map={"front": camera},
+        robot_urdf_file="./my_robot.urdf",
+    )
+    vla_component = VLA(
+        inputs=[joint_states, camera],
+        outputs=[joint_cmd],
+        model_client=model_client,
+        config=config,
+        component_name="vla",
+    )
+    vla_component.set_termination_trigger(mode="timesteps", max_timesteps=200)
+    ```
+
+    A task can then be sent to the running component as a ROS2 action goal, e.g. from the command line:
+    ```shell
+    ros2 action send_goal /vla/manipulate_with_vla automatika_embodied_agents/action/VisionLanguageAction "{task: 'pick up the orange'}"
+    ```
+    """
 
     @validate_func_args
     def __init__(
@@ -141,7 +201,22 @@ class VLA(ModelComponent):
                 "Could not find a topic of type JointState. VLA component needs at least one topic of type JointState as input."
             )
 
+        # Record expected channels per camera from the dataset features.
+        # Single channel features (H, W, 1) are treated as depth cameras
+        features = self.model_client.model_init_params.get("features") or {}
+        self._camera_channels: Dict[str, int] = {}
+        for cam_key in self.config.camera_inputs_map:
+            feature = features.get(f"observation.images.{cam_key}") or {}
+            shape = feature.get("shape") or ()
+            self._camera_channels[cam_key] = (
+                int(shape[-1]) if len(shape) == 3 else 3
+            )
+
+        # Resolve the aggregation preset from config
+        self._aggregator_function = AGGREGATE_FUNCTIONS[self.config.aggregate_fn_name]
+
         # Assign external aggregator function in case its provided
+        # (takes precedence over the config preset)
         if agg_fun := self._external_processors.get("aggregator_function", None):
             # Get the first element of the tuple and the only function in that list
             self._aggregator_function = partial(
@@ -243,6 +318,11 @@ class VLA(ModelComponent):
                 self.config.camera_inputs_map,
                 prefix="observation",
                 image_shape=(480, 640, 3),
+            )
+            # Refresh the init params captured at client construction, so the
+            # auto-generated spec reaches the policy server.
+            self.model_client.model_init_params = (
+                self.model_client._model._get_init_params()
             )
             logger.warning(
                 "You have not provided a dataset file for the model. Feature specification are required for initializing the policy on LeRobot Policy Server. We are going to auto-generate a feature spec from `joint_names_map` and `camera_inputs_map` that you provided. Please make sure their keys correspond to the names of features and actions used when training the model. Policy init might fail."
@@ -418,12 +498,22 @@ class VLA(ModelComponent):
         # Get images
         images = {}
         for key, value in self.config.camera_inputs_map.items():
-            img_out = self.callbacks[value["name"]].get_output(clear_last=True)
+            # Camera map values are dicts after config serialization and
+            # Topic objects when launched in-process
+            topic_name = value["name"] if isinstance(value, dict) else value.name
+            callback = self.callbacks[topic_name]
+            expects_depth = self._camera_channels.get(key) == 1
+            if expects_depth and isinstance(callback, RGBDCallback):
+                img_out = callback.get_output(clear_last=True, depth_only=True)
+            else:
+                img_out = callback.get_output(clear_last=True)
             if img_out is None:
                 self.get_logger().warning(
-                    f"Did not receive an image for topic: {value['name']}, not sending input for inference"
+                    f"Did not receive an image for topic: {topic_name}, not sending input for inference"
                 )
                 return
+            if expects_depth:
+                img_out = _as_depth_frame(img_out)
             images[key] = img_out
 
         # Combine state, images and task
