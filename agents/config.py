@@ -17,6 +17,7 @@ __all__ = [
     "SemanticRouterConfig",
     "MapConfig",
     "MemoryConfig",
+    "MotionDetectorConfig",
     "VideoMessageMakerConfig",
     "VisionConfig",
 ]
@@ -997,26 +998,78 @@ class SemanticRouterConfig(ModelComponentConfig):
 
 
 @define(kw_only=True)
-class VideoMessageMakerConfig(BaseComponentConfig):
-    """Configuration parameters for a video message maker component.
+class MotionDetectorConfig(BaseComponentConfig):
+    """Configuration parameters for a motion detection component.
 
+    --
+    Common params
+    --
+    :param motion_stop_delay: Number of consecutive still inputs before declaring that motion has ended. Debounces flickery detections. Default is 8.
+    :type motion_stop_delay: int
+    :param publish_bool_on_change_only: Publish on Bool output topics only when the motion state changes, instead of on every processed input. Default is False.
+    :type publish_bool_on_change_only: bool
+    :param process_rate: Optional maximum processing rate in Hz. Inputs arriving faster are dropped. Default is None (process every input).
+    :type process_rate: Optional[float]
+    :param device: Device for point cloud voxelization, "cpu" or "cuda". "cuda" requires torch (an error with installation instructions is raised if it is missing); if torch has no available CUDA device, processing falls back to cpu with a warning. Default is "cpu".
+    :type device: str
+
+    --
+    Image input params
+    --
     :param min_video_frames: The minimum number of frames in a video segment. Default is 15, assuming a 0.5 second video at 30 fps.
     :type min_video_frames: int
     :param max_video_frames: The maximum number of frames in a video segment. Default is 600, assuming a 20 second video at 30 fps.
     :type max_video_frames: int
     :param motion_estimation_func: The function used for motion estimation. Can be one of "frame_difference" or "optical_flow". Default is None.
     :type motion_estimation_func: Optional[str]
-    :param threshold: The threshold value for motion detection. A float between 0.1 and 5.0. Default is 0.3.
+    :param threshold: The threshold value for image motion detection. A float between 0.1 and 5.0. Default is 0.3.
     :type threshold: float
     :param flow_kwargs: Additional keyword arguments for the optical flow algorithm. Default is a dictionary with reasonable values.
+    :param roi_ignore_polygon: Optional polygon of (x, y) pixel coordinates to ignore during image motion estimation (e.g. a visible robot arm). Default is None.
+    :type roi_ignore_polygon: Optional[List]
+    :param pause_on_ego_motion: When a position (odometry) topic is provided with image inputs, suppress motion detection while the robot itself is moving. Default is True.
+    :type pause_on_ego_motion: bool
+    :param ego_speed_threshold: Speed (m/s) above which the robot is considered moving for ``pause_on_ego_motion``. Default is 0.05.
+    :type ego_speed_threshold: float
+
+    --
+    Point cloud input params
+    --
+    :param voxel_size: Edge length in meters of the voxel grid used for cloud differencing. Default is 0.15.
+    :type voxel_size: float
+    :param changed_voxel_threshold: Number of newly appearing voxels (relative to the accumulated occupancy history) that form spatially coherent clusters of at least ``min_cluster_size`` voxels, required to declare motion. Coherence filters out scattered appearances from sensor noise or people standing quasi-still. Default is 5.
+    :type changed_voxel_threshold: int
+    :param accumulation_window: Number of previous clouds accumulated into the occupancy history that new clouds are differenced against. A window makes detection robust to sparse and non-repetitive scan patterns (e.g. Livox lidars) where a single previous cloud does not cover the whole scene. Detection starts once the window is full. Default is 20 (i.e. 2 seconds of history for a 10 Hz sensor).
+    :type accumulation_window: int
+    :param min_cluster_size: Minimum number of newly appearing voxels in a spatially connected cluster for the cluster to count as motion evidence and produce a motion center. Default is 4.
+    :type min_cluster_size: int
+    :param max_clusters: Maximum number of motion centers published at a time (largest clusters first). Default is 5.
+    :type max_clusters: int
+    :param min_range: Minimum planar (xy) range in meters of cloud points considered. Default is 0.0.
+    :type min_range: float
+    :param max_range: Maximum planar (xy) range in meters of cloud points considered. Default is 20.0.
+    :type max_range: float
+    :param z_min: Minimum height of cloud points considered. Default is -1.0 (1 meter below the sensor).
+    :type z_min: float
+    :param z_max: Maximum height of cloud points considered. Default is 1.0 (1 meter above the sensor).
+    :type z_max: float
+    :param base_frame: The robot base frame used for ego-motion subtraction. The static transform from the cloud frame to this frame (the sensor mount) is looked up from TF automatically. Default is "base_link".
+    :type base_frame: str
 
     Example of usage:
     ```python
-    config = VideoMessageMakerConfig()
+    config = MotionDetectorConfig()
     # or
-    config = VideoMessageMakerConfig(min_video_frames=30, motion_estimation_func="optical_flow", threshold=0.5)
+    config = MotionDetectorConfig(min_video_frames=30, motion_estimation_func="optical_flow", threshold=0.5)
     ```
     """
+
+    motion_stop_delay: int = field(
+        default=8, validator=base_validators.in_range(min_value=0, max_value=1e3)
+    )
+    publish_bool_on_change_only: bool = field(default=False)
+    process_rate: Optional[float] = field(default=None)
+    device: Literal["cpu", "cuda"] = field(default="cpu")
 
     min_video_frames: int = field(default=15)  # assuming 0.5 second video at 30 fps
     max_video_frames: int = field(default=600)  # assuming 20 second video at 30 fps
@@ -1038,3 +1091,37 @@ class VideoMessageMakerConfig(BaseComponentConfig):
         },
         validator=validate_kwargs_from_default,
     )
+    roi_ignore_polygon: Optional[List] = field(default=None)
+    pause_on_ego_motion: bool = field(default=True)
+    ego_speed_threshold: float = field(
+        default=0.05, validator=base_validators.in_range(min_value=0.0, max_value=1e3)
+    )
+
+    voxel_size: float = field(
+        default=0.15, validator=base_validators.in_range(min_value=1e-3, max_value=1e3)
+    )
+    changed_voxel_threshold: int = field(
+        default=5, validator=base_validators.in_range(min_value=1, max_value=1e9)
+    )
+    accumulation_window: int = field(
+        default=20, validator=base_validators.in_range(min_value=1, max_value=1e3)
+    )
+    min_cluster_size: int = field(
+        default=4, validator=base_validators.in_range(min_value=1, max_value=1e9)
+    )
+    max_clusters: int = field(
+        default=5, validator=base_validators.in_range(min_value=1, max_value=1e3)
+    )
+    min_range: float = field(
+        default=0.0, validator=base_validators.in_range(min_value=0.0, max_value=1e3)
+    )
+    max_range: float = field(
+        default=20.0, validator=base_validators.in_range(min_value=1e-3, max_value=1e3)
+    )
+    z_min: float = field(default=-1.0)
+    z_max: float = field(default=1.0)
+    base_frame: str = field(default="base_link")
+
+
+# Backwards-compatible alias for the renamed config
+VideoMessageMakerConfig = MotionDetectorConfig
