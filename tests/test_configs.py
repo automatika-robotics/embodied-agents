@@ -7,6 +7,7 @@ from agents.config import (
     LLMConfig,
     MLLMConfig,
     MotionDetectorConfig,
+    VLAConfig,
     SpeechToTextConfig,
     TextToSpeechConfig,
     SemanticRouterConfig,
@@ -212,3 +213,33 @@ class TestMotionDetectorConfig:
         rebuilt = MotionDetectorConfig(**json.loads(config.to_json()))
         assert rebuilt.voxel_size == pytest.approx(0.2)
         assert rebuilt.base_frame == "base_footprint"
+
+
+class TestVLAConfig:
+    _MAPS = {
+        "joint_names_map": {"shoulder_pan.pos": "joint1"},
+        "camera_inputs_map": {"front": {"name": "camera", "msg_type": "Image"}},
+    }
+
+    def test_construction_defaults(self):
+        c = VLAConfig(**self._MAPS)
+        assert c.aggregate_fn_name == "latest_only"
+        # main action loop runs at the observation sending rate
+        assert c.loop_rate == c.observation_sending_rate
+
+    def test_aggregate_preset_selectable(self):
+        c = VLAConfig(**self._MAPS, aggregate_fn_name="weighted_average")
+        assert c.aggregate_fn_name == "weighted_average"
+
+    def test_rates_must_be_positive(self):
+        with pytest.raises(ValueError):
+            VLAConfig(**self._MAPS, observation_sending_rate=0.0)
+        with pytest.raises(ValueError):
+            VLAConfig(**self._MAPS, action_sending_rate=0.0)
+
+    def test_serialization_round_trip(self):
+        """Multiprocess launch path: config survives a JSON round trip."""
+        config = VLAConfig(**self._MAPS, aggregate_fn_name="conservative")
+        rebuilt = VLAConfig(**json.loads(config.to_json()))
+        assert rebuilt.aggregate_fn_name == "conservative"
+        assert rebuilt.joint_names_map == {"shoulder_pan.pos": "joint1"}
