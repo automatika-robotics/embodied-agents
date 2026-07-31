@@ -269,6 +269,8 @@ def _ros_image(arr: np.ndarray, encoding: str):
 class TestRGBDCallbackDepthOnly:
     @pytest.fixture
     def rgbd_callback(self):
+        # RGBD is an optional msg type in agents.ros
+        pytest.importorskip("realsense2_camera_msgs")
         from agents.callbacks import RGBDCallback
 
         callback = RGBDCallback(Topic(name="cam_rgbd", msg_type="RGBD"))
@@ -343,6 +345,8 @@ class TestJointConverters:
         assert np.allclose(times, [0.1, 0.2, 0.3], atol=1e-6)
 
     def test_joint_jog_duration_is_float(self, joints_data):
+        # JointJog is an optional msg type in agents.ros
+        pytest.importorskip("control_msgs")
         msg = JointJog.convert(joints_data)
         assert msg.duration == 0.25
         assert list(msg.displacements) == [1.0, 2.0]

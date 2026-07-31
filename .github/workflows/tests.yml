@@ -21,10 +21,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install pip
+      - name: Install pip and optional ROS message packages
         run: |
           apt-get update
-          apt-get install -y python3-pip
+          apt-get install -y python3-pip \
+              ros-${{ matrix.ros_distro }}-control-msgs \
+              ros-${{ matrix.ros_distro }}-realsense2-camera-msgs
 
       - name: Build workspace
         run: |
