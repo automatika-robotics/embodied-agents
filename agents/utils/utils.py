@@ -24,6 +24,7 @@ import cv2
 import httpx
 import numpy as np
 from attrs import Attribute
+from rclpy.logging import get_logger
 from jinja2 import Environment, FileSystemLoader
 from jinja2.environment import Template
 from .pluralize import pluralize
@@ -610,6 +611,11 @@ def _normalize_entry(spec: Dict) -> Dict:
     if not feature_type:
         return {}
 
+    # NOTE: The policy server builds state features only when dtype is exactly
+    # float32 (values get rebuilt as float32 there anyway)
+    if dtype == "float64":
+        dtype = "float32"
+
     names = _normalize_names(spec.get("names"))
 
     entry = {
@@ -647,6 +653,11 @@ def build_lerobot_features_from_dataset_info(
         # NOTE: Only checking for state, images and action for now
         if key == "observation.state":
             features[key] = _normalize_entry(spec)
+            # NOTE: This should be removed when feature checking is fixed in LeRobot
+            if spec.get("dtype", "").lower() == "float64":
+                get_logger("lerobot_dataset_features").warning(
+                    f"Dataset declares '{key}' as float64. Sending it as float32 for policy server compatibility, since the server would silently drop non float32 state features and rebuilds the values as float32 anyway."
+                )
         elif key.startswith("observation.images."):
             features[key] = _normalize_entry(spec)
             image_keys.append(key.removeprefix("observation.images."))
