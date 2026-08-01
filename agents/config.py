@@ -74,7 +74,7 @@ class LLMConfig(ModelComponentConfig):
         Default is 0.8 and must be greater than 0.0.
     :type temperature: float
     :param max_new_tokens: The maximum number of new tokens to generate.
-        Default is 100 and must be greater than 0.
+        Default is 512 and must be greater than 0.
     :type max_new_tokens: int
     :param stream: Publish the llm output as a stream of tokens, useful when sending llm output to a user facing client or to a TTS component. Cannot be used in conjunction with tool calling.
         Default is false
@@ -118,7 +118,7 @@ class LLMConfig(ModelComponentConfig):
         default=10, validator=base_validators.gt(4)
     )  # number of user messages
     temperature: float = field(default=0.8, validator=base_validators.gt(0.0))
-    max_new_tokens: int = field(default=1000, validator=base_validators.gt(0))
+    max_new_tokens: int = field(default=512, validator=base_validators.gt(0))
     stream: bool = field(default=False)
     break_character: str = field(default=".")
     response_terminator: str = field(default="<<Response Ended>>")
