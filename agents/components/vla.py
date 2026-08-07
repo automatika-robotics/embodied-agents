@@ -34,6 +34,7 @@ from ..utils.actions import (
     JointsData,
     _as_depth_frame,
     parse_urdf_joints,
+    convert_joint_limits_units,
     check_joint_limits,
     cap_actions_with_limits,
     create_observation_spec,
@@ -394,6 +395,20 @@ class VLA(ModelComponent):
                     f"Your 'joint_names_map' includes robot joint names not found in the URDF. "
                     f"Missing: {missing_in_urdf}. Available in URDF: {list(limits.keys())}"
                 )
+
+            # URDF <limit> values are radians; convert them into the unit
+            # space of the policy's actions if the config says so
+            limits = convert_joint_limits_units(limits, self.config.policy_action_units)
+            if self.config.policy_action_units == "radians":
+                logger.info(
+                    "URDF joint limits used as radians (policy_action_units='radians'). "
+                    "If your policy outputs normalized motor positions (e.g. LeRobot "
+                    "SO-100/101 datasets), set policy_action_units='normalized'."
+                )
+
+            # Manual config limits override URDF-derived ones per joint
+            if self.config.joint_limits:
+                limits = {**limits, **self.config.joint_limits}
             return limits
 
         # Fallback to config limits
@@ -553,6 +568,37 @@ class VLA(ModelComponent):
             if self.robot_joints_limits
             else action_to_pub_data
         )
+
+        # NOTE: Unit mismatch heuristic: if most early actions are getting capped,
+        # the limits are almost certainly in a different unit space than the
+        # policy's actions. Issue a warning once.
+        if self.robot_joints_limits and not getattr(
+            self, "_cap_mismatch_warned", False
+        ):
+            self._cap_actions_seen = getattr(self, "_cap_actions_seen", 0) + len(
+                np.atleast_1d(safe_action)
+            )
+            self._cap_actions_capped = getattr(self, "_cap_actions_capped", 0) + int(
+                np.sum(
+                    ~np.isclose(
+                        np.asarray(safe_action, dtype=np.float64),
+                        np.asarray(action_to_pub_data, dtype=np.float64),
+                    )
+                )
+            )
+            if self._cap_actions_seen >= 100:
+                capped_frac = self._cap_actions_capped / self._cap_actions_seen
+                if capped_frac > 0.5:
+                    self.get_logger().warning(
+                        f"{capped_frac:.0%} of the first {self._cap_actions_seen} action "
+                        "values were capped by joint limits — this usually means the "
+                        "limits and the policy's actions are in different unit spaces. "
+                        "URDF limits are radians; if your policy outputs normalized "
+                        "motor positions (e.g. LeRobot SO-100/101 datasets), set "
+                        "policy_action_units='normalized' in VLAConfig or provide "
+                        "'joint_limits' manually in the policy's units."
+                    )
+                self._cap_mismatch_warned = True
 
         # TODO: Add smoothing for bigger deltas between new action and currect state
 
