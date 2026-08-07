@@ -208,9 +208,7 @@ class VLA(ModelComponent):
         for cam_key in self.config.camera_inputs_map:
             feature = features.get(f"observation.images.{cam_key}") or {}
             shape = feature.get("shape") or ()
-            self._camera_channels[cam_key] = (
-                int(shape[-1]) if len(shape) == 3 else 3
-            )
+            self._camera_channels[cam_key] = int(shape[-1]) if len(shape) == 3 else 3
 
         # Resolve the aggregation preset from config
         self._aggregator_function = AGGREGATE_FUNCTIONS[self.config.aggregate_fn_name]
@@ -283,7 +281,7 @@ class VLA(ModelComponent):
                     "A stop_event must be provided when setting the termination mode to `event`"
                 )
             get_logger(self.node_name).info(
-                f"Action will terminate on {stop_event.name} event or after {max_timesteps}"
+                f"Action will terminate on {stop_event} or after {max_timesteps} timesteps"
             )
             self.config._termination_timesteps = max_timesteps
             self._add_event_action_pair(stop_event, Action(self.signal_done))
