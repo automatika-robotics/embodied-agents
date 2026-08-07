@@ -237,9 +237,18 @@ class TestVLAConfig:
         with pytest.raises(ValueError):
             VLAConfig(**self._MAPS, action_sending_rate=0.0)
 
+    def test_policy_action_units_default(self):
+        c = VLAConfig(**self._MAPS)
+        assert c.policy_action_units == "radians"
+
     def test_serialization_round_trip(self):
         """Multiprocess launch path: config survives a JSON round trip."""
-        config = VLAConfig(**self._MAPS, aggregate_fn_name="conservative")
+        config = VLAConfig(
+            **self._MAPS,
+            aggregate_fn_name="conservative",
+            policy_action_units="normalized",
+        )
         rebuilt = VLAConfig(**json.loads(config.to_json()))
         assert rebuilt.aggregate_fn_name == "conservative"
+        assert rebuilt.policy_action_units == "normalized"
         assert rebuilt.joint_names_map == {"shoulder_pan.pos": "joint1"}

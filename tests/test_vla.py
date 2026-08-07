@@ -21,7 +21,12 @@ from agents.components.vla import VLA
 from agents.config import VLAConfig
 from agents.models import LeRobotPolicy
 from agents.ros import JointJog, JointTrajectory, JointTrajectoryPoint, Topic
-from agents.utils.actions import AGGREGATE_FUNCTIONS, JointsData, _as_depth_frame
+from agents.utils.actions import (
+    AGGREGATE_FUNCTIONS,
+    JointsData,
+    _as_depth_frame,
+    convert_joint_limits_units,
+)
 from agents.utils.utils import build_lerobot_features_from_dataset_info
 
 SAMPLE_DATASET_INFO = {
@@ -234,6 +239,51 @@ class TestActionsQueueAggregation:
         actions = list(comp._actions_received.queue)
         # 0.7 * old + 0.3 * new
         assert np.allclose(actions[0].action, [0.7 * 1.0 + 0.3 * 9.0])
+
+
+class TestJointLimitsUnitConversion:
+    def test_radians_is_passthrough(self):
+        limits = {"joint1": {"lower": -1.0, "upper": 1.0, "velocity": 2.0}}
+        assert convert_joint_limits_units(limits, "radians") == limits
+
+    def test_degrees_conversion(self):
+        limits = {
+            "joint1": {
+                "lower": -np.pi,
+                "upper": np.pi / 2,
+                "effort": 5.0,
+                "velocity": np.pi,
+            }
+        }
+        out = convert_joint_limits_units(limits, "degrees")
+        assert out["joint1"]["lower"] == pytest.approx(-180.0)
+        assert out["joint1"]["upper"] == pytest.approx(90.0)
+        assert out["joint1"]["velocity"] == pytest.approx(180.0)
+        # effort is not an angular quantity, must stay untouched
+        assert out["joint1"]["effort"] == 5.0
+
+    def test_normalized_maps_range_and_scales_velocity(self):
+        limits = {"joint1": {"lower": -2.0, "upper": 2.0, "velocity": 1.0}}
+        out = convert_joint_limits_units(limits, "normalized")
+        assert out["joint1"]["lower"] == -100.0
+        assert out["joint1"]["upper"] == 100.0
+        # velocity scaled by the same per-joint factor: 200 / 4 rad
+        assert out["joint1"]["velocity"] == pytest.approx(50.0)
+
+    def test_normalized_gripper_maps_to_0_100(self):
+        limits = {"gripper_joint": {"lower": -0.17, "upper": 1.75, "velocity": None}}
+        out = convert_joint_limits_units(limits, "normalized")
+        assert out["gripper_joint"]["lower"] == 0.0
+        assert out["gripper_joint"]["upper"] == 100.0
+
+    def test_normalized_unusable_limits_become_none(self):
+        limits = {
+            "no_bounds": {"lower": None, "upper": 1.0},
+            "inverted": {"lower": 1.0, "upper": 1.0},
+        }
+        out = convert_joint_limits_units(limits, "normalized")
+        assert out["no_bounds"] is None
+        assert out["inverted"] is None
 
 
 class TestDepthFrame:
@@ -455,3 +505,83 @@ class TestVLAComponent:
                 ),
                 component_name="test_vla_bad_cameras",
             )
+
+    @pytest.fixture
+    def urdf_file(self, tmp_path):
+        path = tmp_path / "so101.urdf"
+        path.write_text(
+            '<robot name="so101">'
+            '<joint name="joint1" type="revolute">'
+            '<limit lower="-2.0" upper="2.0" effort="10.0" velocity="1.0"/>'
+            "</joint>"
+            '<joint name="joint2" type="revolute">'
+            '<limit lower="-1.0" upper="1.0" effort="10.0" velocity="1.0"/>'
+            "</joint>"
+            "</robot>"
+        )
+        return str(path)
+
+    def _make_vla_with_limits(self, vla_topics, dataset_info_file, config_kwargs, name):
+        model = LeRobotPolicy(name="policy", dataset_info_file=dataset_info_file)
+        client = _mock_lerobot_client(model)
+        config = VLAConfig(
+            joint_names_map={
+                "shoulder_pan.pos": "joint1",
+                "elbow_flex.pos": "joint2",
+            },
+            camera_inputs_map={
+                "front": vla_topics["camera"],
+                "depth_front": vla_topics["depth"],
+            },
+            **config_kwargs,
+        )
+        return VLA(
+            inputs=[vla_topics["state"], vla_topics["camera"], vla_topics["depth"]],
+            outputs=[vla_topics["out"]],
+            model_client=client,
+            config=config,
+            component_name=name,
+        )
+
+    def test_urdf_limits_converted_to_policy_units(
+        self, rclpy_init, vla_topics, dataset_info_file, urdf_file
+    ):
+        comp = self._make_vla_with_limits(
+            vla_topics,
+            dataset_info_file,
+            {"robot_urdf_file": urdf_file, "policy_action_units": "normalized"},
+            "test_vla_urdf_units",
+        )
+        assert comp.robot_joints_limits["joint1"]["lower"] == -100.0
+        assert comp.robot_joints_limits["joint1"]["upper"] == 100.0
+        assert comp.robot_joints_limits["joint2"]["upper"] == 100.0
+
+    def test_urdf_limits_default_stay_radians(
+        self, rclpy_init, vla_topics, dataset_info_file, urdf_file
+    ):
+        comp = self._make_vla_with_limits(
+            vla_topics,
+            dataset_info_file,
+            {"robot_urdf_file": urdf_file},
+            "test_vla_urdf_radians",
+        )
+        assert comp.robot_joints_limits["joint1"]["lower"] == -2.0
+        assert comp.robot_joints_limits["joint1"]["upper"] == 2.0
+
+    def test_manual_joint_limits_override_urdf(
+        self, rclpy_init, vla_topics, dataset_info_file, urdf_file
+    ):
+        manual = {"joint2": {"lower": -5.0, "upper": 5.0}}
+        comp = self._make_vla_with_limits(
+            vla_topics,
+            dataset_info_file,
+            {
+                "robot_urdf_file": urdf_file,
+                "policy_action_units": "normalized",
+                "joint_limits": manual,
+            },
+            "test_vla_manual_override",
+        )
+        # manual entry wins verbatim for joint2; joint1 stays URDF-derived
+        assert comp.robot_joints_limits["joint2"] == {"lower": -5.0, "upper": 5.0}
+        assert comp.robot_joints_limits["joint1"]["lower"] == -100.0
