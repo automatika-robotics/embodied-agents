@@ -517,9 +517,9 @@ class VLA(ModelComponent):
             callback = self.callbacks[topic_name]
             expects_depth = self._camera_channels.get(key) == 1
             if expects_depth and isinstance(callback, RGBDCallback):
-                img_out = callback.get_output(clear_last=True, depth_only=True)
+                img_out = callback.get_output(depth_only=True)
             else:
-                img_out = callback.get_output(clear_last=True)
+                img_out = callback.get_output()
             if img_out is None:
                 self.get_logger().warning(
                     f"Did not receive an image for topic: {topic_name}, not sending input for inference"
