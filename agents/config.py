@@ -398,8 +398,24 @@ class VLAConfig(ModelComponentConfig):
         actions within safe bounds.
     :type robot_urdf_file: Optional[str]
     :param joint_limits: A manual dictionary of joint limits to be used if a URDF file
-        is not provided. Format should match parsed URDF limits.
+        is not provided. Format should match parsed URDF limits. When a URDF file is
+        also provided, entries in this dictionary override the URDF-derived limits for
+        those joints.
     :type joint_limits: Optional[Dict]
+    :param policy_action_units: The unit space of the policy's actions, used to
+        convert URDF-derived joint limits before capping. URDF `<limit>` values are
+        always radians (per the URDF spec); this option converts them into the unit
+        space of the policy's actions:
+        - `"radians"` (default) — use URDF values as-is. Correct only when the policy
+          outputs radians.
+        - `"degrees"` — convert lower/upper (and velocity) to degrees.
+        - `"normalized"` — the LeRobot SO-10x motor-unit convention: each joint's
+          [lower, upper] range is mapped to [-100, 100]; joints whose name contains
+          "gripper" or "jaw" are mapped to [0, 100]. Use this for policies trained on
+          LeRobot datasets with normalized motor positions.
+        Only applies to URDF-derived limits; the manual `joint_limits` dict is always
+        used verbatim.
+    :type policy_action_units: Literal["radians", "degrees", "normalized"]
     :param aggregate_fn_name: The strategy used to merge actions when newly received
         action chunks overlap timesteps already in the queue (chunks from consecutive
         inferences overlap). Presets mirror the LeRobot client:
@@ -446,6 +462,9 @@ class VLAConfig(ModelComponentConfig):
     )  # seconds
     robot_urdf_file: Optional[str] = field(default=None)
     joint_limits: Optional[Dict] = field(default=None)
+    policy_action_units: Literal["radians", "degrees", "normalized"] = field(
+        default="radians"
+    )
     aggregate_fn_name: Literal[
         "latest_only", "weighted_average", "average", "conservative"
     ] = field(default="latest_only")
