@@ -715,6 +715,11 @@ class VLA(ModelComponent):
         # Clear the action queue
         self._actions_received.queue.clear()
 
+        # Reset per-goal state at goal START
+        with self._last_executed_timestep_lock:
+            self._last_executed_timestep = -1
+        self._task_completed = False
+
         # Get request
         task: str = goal_handle.request.task
 
@@ -828,6 +833,12 @@ class VLA(ModelComponent):
             with self._main_goal_lock:
                 self._action_cleanup()
                 goal_handle.succeed()
+        else:
+            # Loop exited without success (e.g. timestep cap exceeded in
+            # event/keyboard mode). Clean up and abort explicitly.
+            with self._main_goal_lock:
+                self._action_cleanup()
+                goal_handle.abort()
 
         return task_result
 
