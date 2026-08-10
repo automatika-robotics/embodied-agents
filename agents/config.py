@@ -306,7 +306,7 @@ class MLLMConfig(LLMConfig):
         Supported values are: "general", "pointing", "affordance", "trajectory", and "grounding".
         Default is None.
     :type task: Optional[Literal["general", "pointing", "affordance", "trajectory", "grounding"]]
-    :param enable_local_model: Whether to enable a local VLM via llama.cpp (Moondream2), allowing the component to run without a remote model client. Requires the ``llama-cpp-python`` package. Default is False.
+    :param enable_local_model: Whether to enable a local VLM via llama.cpp (Qwen3-VL by default), allowing the component to run without a remote model client. Requires the ``llama-cpp-python`` package. Default is False.
     :type enable_local_model: bool
     :param device_local_model: Device to run the local model on, either "cpu" or "cuda" (default: "cuda"). This parameter is only effective when ``enable_local_model`` is True.
     :type device_local_model: str
@@ -344,13 +344,6 @@ class MLLMConfig(LLMConfig):
             raise ValueError(
                 f"Local VLM model only supports general VQA. "
                 f"Task '{value}' requires a remote model client."
-            )
-
-    def __attrs_post_init__(self):
-        """Validate cross-field constraints for local model"""
-        if self.enable_local_model and self.stream:
-            raise ValueError(
-                "stream cannot be set to True when enable_local_model is True in VLMConfig. Local VLM model does not support streaming."
             )
 
     def _get_inference_params(self) -> Dict:
