@@ -418,7 +418,9 @@ def load_model_repo(
 
     :param model_name: Local cache name for the model
     :type model_name: str
-    :param repo_id: HuggingFace repository ID (e.g. 'onnx-community/Qwen3-0.6B-ONNX')
+    :param repo_id: HuggingFace repository ID (e.g. 'onnx-community/Qwen3-0.6B-ONNX'),
+        or a path to an existing local model directory, which is returned as-is
+        without downloading anything
     :type repo_id: str
     :param allow_patterns: Optional glob pattern to filter which files to download
         (e.g. 'cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/*'). When set,
@@ -431,6 +433,10 @@ def load_model_repo(
     import shutil
     from pathlib import Path
     from platformdirs import user_cache_dir
+
+    # A local model directory is used directly, no download involved
+    if Path(repo_id).is_dir():
+        return str(Path(repo_id))
 
     cachedir = user_cache_dir("ros_agents")
     # Use repo_id to create a unique subdirectory
