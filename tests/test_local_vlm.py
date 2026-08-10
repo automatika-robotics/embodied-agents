@@ -1,6 +1,7 @@
 """Tests for LocalVLM wrapper — no ROS needed."""
 
 import sys
+import threading
 import pytest
 import numpy as np
 from unittest.mock import MagicMock, patch
@@ -31,6 +32,7 @@ def local_vlm(mock_deps):
     vlm.llm = MagicMock()
     vlm.device = "cpu"
     vlm.ncpu = 1
+    vlm._lock = threading.Lock()
     return vlm
 
 
@@ -65,6 +67,37 @@ class TestLocalVLMCall:
         content = messages[0]["content"]
         assert any(item["type"] == "image_url" for item in content)
         assert any(item["type"] == "text" for item in content)
+
+    def test_streaming_returns_generator(self, local_vlm):
+        img = np.zeros((100, 100, 3), dtype=np.uint8)
+        chunks = [
+            {"choices": [{"delta": {"role": "assistant"}, "finish_reason": None}]},
+            {"choices": [{"delta": {"content": "A red"}, "finish_reason": None}]},
+            {"choices": [{"delta": {"content": " box"}, "finish_reason": None}]},
+            {"choices": [{"delta": {}, "finish_reason": "stop"}]},
+        ]
+        local_vlm.llm.create_chat_completion.return_value = iter(chunks)
+
+        result = local_vlm(
+            {"query": [{"role": "user", "content": "What is this?"}], "images": [img]},
+            stream=True,
+        )
+        assert list(result["output"]) == ["A red", " box"]
+        assert local_vlm.llm.create_chat_completion.call_args[1]["stream"] is True
+
+    def test_generation_params_forwarded(self, local_vlm):
+        img = np.zeros((100, 100, 3), dtype=np.uint8)
+        local_vlm.llm.create_chat_completion.return_value = _mock_vlm_response("ok")
+
+        local_vlm({
+            "query": [{"role": "user", "content": "What is this?"}],
+            "images": [img],
+            "temperature": 0.5,
+            "max_new_tokens": 100,
+        })
+        call_kwargs = local_vlm.llm.create_chat_completion.call_args[1]
+        assert call_kwargs["temperature"] == 0.5
+        assert call_kwargs["max_tokens"] == 100
 
     def test_no_images(self, local_vlm):
         result = local_vlm({

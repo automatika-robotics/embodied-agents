@@ -67,9 +67,9 @@ class TestMLLMConfig:
         assert c.task == "general"
         assert c.enable_local_model is True
 
-    def test_stream_with_local_raises(self):
-        with pytest.raises(ValueError):
-            MLLMConfig(enable_local_model=True, stream=True)
+    def test_stream_with_local_ok(self):
+        c = MLLMConfig(enable_local_model=True, stream=True)
+        assert c.stream is True
 
     def test_inference_params_with_task(self):
         c = MLLMConfig(task="general")

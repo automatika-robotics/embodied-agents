@@ -2,6 +2,8 @@
 
 import sys
 import json
+import threading
+import time
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -22,6 +24,7 @@ def local_llm(mock_llama_cpp):
     llm.llm = MagicMock()
     llm.device = "cpu"
     llm.ncpu = 1
+    llm._lock = threading.Lock()
     return llm
 
 
@@ -118,6 +121,41 @@ class TestCallWithTools:
         assert result["tool_calls"][0]["function"]["name"] == "route_to_nav"
         assert result["tool_calls"][0]["function"]["arguments"] == {"x": 1}
 
+    def test_inline_tool_calls_extracted_from_text(self, local_llm):
+        """llama-cpp's GGUF-template handler leaves Qwen/Hermes tool calls as
+        text — LocalLLM must parse them into the structured field."""
+        content = (
+            "<think>\nThe user asks a visual question.\n</think>\n\n"
+            '<tool_call>\n{"name": "route_to_vision", "arguments": {}}\n</tool_call>'
+        )
+        local_llm.llm.create_chat_completion.return_value = _mock_response(content)
+
+        tools = [{"type": "function", "function": {"name": "route_to_vision"}}]
+        result = local_llm(
+            {"query": [{"role": "user", "content": "what do you see"}], "tools": tools}
+        )
+        assert "<tool_call>" not in result["output"]
+        assert result["tool_calls"][0]["function"]["name"] == "route_to_vision"
+        assert result["tool_calls"][0]["function"]["arguments"] == {}
+
+    def test_inline_tool_calls_ignored_without_tools(self, local_llm):
+        content = '<tool_call>\n{"name": "fn", "arguments": {}}\n</tool_call>'
+        local_llm.llm.create_chat_completion.return_value = _mock_response(content)
+
+        result = local_llm({"query": [{"role": "user", "content": "Hi"}]})
+        assert "tool_calls" not in result
+        assert "<tool_call>" in result["output"]
+
+    def test_malformed_inline_tool_call_kept_as_text(self, local_llm):
+        content = "<tool_call>\n{not valid json}\n</tool_call>"
+        local_llm.llm.create_chat_completion.return_value = _mock_response(content)
+
+        tools = [{"type": "function", "function": {"name": "fn"}}]
+        result = local_llm(
+            {"query": [{"role": "user", "content": "Hi"}], "tools": tools}
+        )
+        assert "tool_calls" not in result
+
     def test_passes_tools_to_api(self, local_llm):
         local_llm.llm.create_chat_completion.return_value = _mock_response("ok")
 
@@ -129,6 +167,35 @@ class TestCallWithTools:
         call_kwargs = local_llm.llm.create_chat_completion.call_args[1]
         assert call_kwargs["tools"] == tools
         assert call_kwargs["tool_choice"] == "auto"
+
+
+class TestThreadSafety:
+    def test_concurrent_calls_serialized(self, local_llm):
+        """llama-cpp contexts are not thread-safe — concurrent component
+        callbacks must never overlap inside create_chat_completion."""
+        active, max_active = 0, 0
+
+        def fake_create(**kwargs):
+            nonlocal active, max_active
+            active += 1
+            max_active = max(max_active, active)
+            time.sleep(0.01)
+            active -= 1
+            return _mock_response("ok")
+
+        local_llm.llm.create_chat_completion.side_effect = fake_create
+
+        threads = [
+            threading.Thread(
+                target=local_llm, args=({"query": [{"role": "user", "content": "x"}]},)
+            )
+            for _ in range(4)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert max_active == 1
 
 
 class TestLocalLLMModelOptions:
