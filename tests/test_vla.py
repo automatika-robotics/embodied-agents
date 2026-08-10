@@ -119,6 +119,19 @@ class TestLeRobotPolicy:
             "rename_map",
         }
 
+    def test_default_dicts_not_shared_between_instances(self):
+        """Mutable defaults must be per-instance factories — a plain dict
+        default is one class-level object shared by every default-constructed
+        policy."""
+        policy_a = LeRobotPolicy(name="a")
+        policy_b = LeRobotPolicy(name="b")
+        policy_a.rename_map["observation.images.top"] = "observation.images.overhead"
+        policy_a._features["observation.state"] = {"shape": (2,)}
+        assert policy_b.rename_map == {}
+        assert policy_b._features == {}
+        # policies constructed after the mutation start clean too
+        assert LeRobotPolicy(name="c").rename_map == {}
+
     def test_rename_map_passthrough(self):
         model = LeRobotPolicy(
             name="policy",

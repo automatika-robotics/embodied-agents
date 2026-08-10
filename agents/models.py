@@ -3,7 +3,7 @@ The following model specification classes are meant to define a comman interface
 """
 
 from typing import Optional, Dict, Any, Literal, List
-from attrs import define, field, validators
+from attrs import Factory, define, field, validators
 from .ros import BaseAttrs, base_validators
 from .utils import build_lerobot_features_from_dataset_info, _LANGUAGE_CODES
 
@@ -613,8 +613,10 @@ class LeRobotPolicy(Model):
     actions_per_chunk: int = field(default=50)
     policy_device: Literal["cpu", "cuda"] = field(default="cuda")
     dataset_info_file: Optional[str] = field(default=None)
-    rename_map: Dict[str, str] = field(default={})
-    _features: Dict = field(default={})  # Created in the component if missing
+    rename_map: Dict[str, str] = field(default=Factory(dict))
+    _features: Dict = field(
+        default=Factory(dict)
+    )  # Created in the component if missing
     _actions: Optional[Dict] = field(default=None)
     _image_keys: Optional[List] = field(default=None)
     _joint_keys: Optional[List] = field(default=None)
