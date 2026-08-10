@@ -659,14 +659,16 @@ class SpeechToTextConfig(ModelComponentConfig):
     --
     Local Model
     --
-    :param enable_local_model: Whether to enable a local STT model via ``sherpa-onnx`` (Whisper tiny.en by default), allowing the component to run without a remote model client. Requires the ``sherpa-onnx`` pip package. Default is False.
+    :param enable_local_model: Whether to enable a local STT model via ``sherpa-onnx`` (NVIDIA Parakeet TDT 0.6B by default), allowing the component to run without a remote model client. Requires the ``sherpa-onnx`` pip package. Default is False.
     :type enable_local_model: bool
     :param device_local_model: Device to run the local model on, either "cpu" or "cuda" (default: "cuda"). This parameter is only effective when ``enable_local_model`` is True.
     :type device_local_model: str
     :param ncpu_local_model: Number of CPU cores to allocate to the local model when using CPU (default: 1). This parameter is only effective when ``enable_local_model`` is True.
     :type ncpu_local_model: int
-    :param local_model_path: HuggingFace repository ID for a sherpa-onnx compatible Whisper STT model (default: ``csukuangfj/sherpa-onnx-whisper-tiny.en``), or a path to a local directory containing an already downloaded model. For available models see https://k2-fsa.github.io/sherpa/onnx/pretrained_models/index.html. This parameter is only effective when ``enable_local_model`` is True.
+    :param local_model_path: HuggingFace repository ID for a sherpa-onnx compatible STT model (default: ``csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8``, NVIDIA Parakeet TDT), or a path to a local directory containing an already downloaded model. For available models see https://k2-fsa.github.io/sherpa/onnx/pretrained_models/index.html. This parameter is only effective when ``enable_local_model`` is True.
     :type local_model_path: Optional[str]
+    :param local_model_options: Additional options for the local model, validated at load time against the detected sherpa-onnx model family's loader signature (e.g. ``decoding_method``, ``hotwords_file``, ``hotwords_score`` for transducers; ``task`` for whisper; ``use_itn`` for sense_voice). An unknown key raises an error listing the valid keys for the detected family. The reserved key ``model_type`` forces the model family instead of detecting it from the bundle contents. Only effective when ``enable_local_model`` is True. Default is ``{}``.
+    :type local_model_options: Dict
 
     --
     Transcription
@@ -807,8 +809,9 @@ class SpeechToTextConfig(ModelComponentConfig):
     device_local_model: Literal["cpu", "cuda"] = field(default="cuda")
     ncpu_local_model: int = field(default=1)
     local_model_path: Optional[str] = field(
-        default="csukuangfj/sherpa-onnx-whisper-tiny.en"
+        default="csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8"
     )
+    local_model_options: Dict = field(default=Factory(dict))
     initial_prompt: Optional[str] = field(default=None)
     language: Optional[str] = field(
         default="en",
