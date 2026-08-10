@@ -188,6 +188,7 @@ class LLM(ModelComponent):
         if self.config.stream:
             # initialize think block state for streaming
             self._in_think_block: bool = False
+            self._swallow_stream_ws: bool = False
             # initialize result buffers
             self.result_partial: List = []
             self.result_complete: List = []
@@ -286,7 +287,14 @@ class LLM(ModelComponent):
     def _strip_think_tokens(self, text: str) -> str:
         """Strip <think>...</think> blocks from model output."""
         if self.config.strip_think_tokens:
-            return strip_think_tokens(text)
+            stripped = strip_think_tokens(text)
+            if not stripped and "<think>" in text:
+                self.get_logger().warning(
+                    "Model output was an unterminated <think> block — generation"
+                    " likely hit max_new_tokens before an answer was produced."
+                    " Increase max_new_tokens or disable thinking in the model."
+                )
+            return stripped
         return text
 
     def _deploy_local_model(self):
@@ -508,9 +516,16 @@ class LLM(ModelComponent):
                 return
             if "</think>" in token:
                 self._in_think_block = False
+                # swallow the whitespace models emit after the think block
+                self._swallow_stream_ws = True
                 return
             if self._in_think_block:
                 return
+            if self._swallow_stream_ws:
+                token = token.lstrip()
+                if not token:
+                    return
+                self._swallow_stream_ws = False
         if self.config.break_character:
             self.result_partial.append(token)
             if self.config.break_character in token:
@@ -534,6 +549,7 @@ class LLM(ModelComponent):
         appending the complete message to the message history.
         """
         self._in_think_block = False
+        self._swallow_stream_ws = False
         # Send remaining result after break character or termination if any
         if self.config.break_character:
             if self.result_partial:
