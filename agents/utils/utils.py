@@ -354,14 +354,6 @@ class VADStatus(Enum):
     END = 2
 
 
-class WakeWordStatus(Enum):
-    """WakeWord Status for start and end of detected wake word"""
-
-    START = 0
-    ONGOING = 1
-    END = 2
-
-
 def load_model(model_name: str, model_path: str) -> str:
     """Model download utility function"""
     from tqdm import tqdm
@@ -407,6 +399,73 @@ def load_model(model_name: str, model_path: str) -> str:
 
     progress_bar.close()
     return str(model_full_path)
+
+
+def load_model_archive(model_name: str, url: str) -> str:
+    """Download and extract a model archive (.tar.bz2/.tar.gz) from a URL.
+
+    Cached under the same directory scheme as `load_model_repo`. When
+    the archive contains a single top-level directory (the sherpa-onnx
+    convention), that directory is returned.
+
+    :param model_name: Local cache name for the model
+    :type model_name: str
+    :param url: Archive URL, or a path to an existing local model directory,
+        which is returned as-is
+    :type url: str
+    :returns: Path to the extracted model directory
+    :rtype: str
+    """
+    import shutil
+    import tarfile
+    from platformdirs import user_cache_dir
+
+    # A local model directory is used directly, no download involved
+    if Path(url).is_dir():
+        return str(Path(url))
+
+    archive_name = url.rstrip("/").rsplit("/", 1)[-1]
+    stem = archive_name
+    for suffix in (".tar.bz2", ".tar.gz", ".tgz", ".tar"):
+        if stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
+            break
+
+    base_dir = Path(user_cache_dir("ros_agents")) / "models" / model_name
+    model_dir = base_dir / stem
+    if model_dir.exists() and any(model_dir.iterdir()):
+        return str(model_dir)
+
+    # Download and extract in a staging directory, move into place on success
+    staging_dir = base_dir / f".{stem}_staging"
+    if staging_dir.exists():
+        shutil.rmtree(staging_dir)
+    staging_dir.mkdir(parents=True, exist_ok=True)
+    archive_path = staging_dir / archive_name
+    try:
+        with httpx.stream("GET", url, timeout=60, follow_redirects=True) as r:
+            r.raise_for_status()
+            with open(archive_path, "wb") as f:
+                for chunk in r.iter_bytes(chunk_size=65536):
+                    f.write(chunk)
+        with tarfile.open(archive_path) as tar:
+            try:
+                tar.extractall(staging_dir, filter="data")
+            except TypeError:
+                # python < 3.12 without the filter argument
+                tar.extractall(staging_dir)  # nosec
+        archive_path.unlink()
+
+        entries = list(staging_dir.iterdir())
+        extracted = (
+            entries[0] if len(entries) == 1 and entries[0].is_dir() else staging_dir
+        )
+        shutil.move(str(extracted), str(model_dir))
+    finally:
+        if staging_dir.exists():
+            shutil.rmtree(staging_dir)
+
+    return str(model_dir)
 
 
 def load_model_repo(
