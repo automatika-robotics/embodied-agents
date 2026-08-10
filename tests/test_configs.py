@@ -283,3 +283,12 @@ class TestVLAConfig:
         assert rebuilt.aggregate_fn_name == "conservative"
         assert rebuilt.policy_action_units == "normalized"
         assert rebuilt.joint_names_map == {"shoulder_pan.pos": "joint1"}
+
+
+class TestVLMLocalModelDefaults:
+    def test_default_is_qwen3_vl(self):
+        from agents.config import MLLMConfig
+
+        c = MLLMConfig()
+        assert c.local_model_path == "ggml-org/Qwen3-VL-2B-Instruct-GGUF"
+        assert c.local_model_options == {}

@@ -129,3 +129,80 @@ class TestCallWithTools:
         call_kwargs = local_llm.llm.create_chat_completion.call_args[1]
         assert call_kwargs["tools"] == tools
         assert call_kwargs["tool_choice"] == "auto"
+
+
+class TestLocalLLMModelOptions:
+    @staticmethod
+    def _fake_llama(mock_llama_cpp):
+        """Install a fake Llama class with a realistic signature, recording
+        constructor and from_pretrained calls."""
+        calls = {}
+
+        class FakeLlama:
+            def __init__(
+                self,
+                model_path=None,
+                n_ctx=512,
+                n_gpu_layers=0,
+                n_threads=1,
+                n_batch=512,
+                flash_attn=False,
+                chat_format=None,
+                verbose=True,
+            ):
+                calls["init"] = {
+                    "model_path": model_path,
+                    "n_ctx": n_ctx,
+                    "n_gpu_layers": n_gpu_layers,
+                    "n_threads": n_threads,
+                    "n_batch": n_batch,
+                    "flash_attn": flash_attn,
+                    "chat_format": chat_format,
+                    "verbose": verbose,
+                }
+
+            @classmethod
+            def from_pretrained(cls, repo_id=None, filename=None, **kwargs):
+                calls["from_pretrained"] = {
+                    "repo_id": repo_id,
+                    "filename": filename,
+                    **kwargs,
+                }
+                return MagicMock()
+
+        mock_llama_cpp.Llama = FakeLlama
+        return calls
+
+    def test_options_passed_and_defaults_set(self, mock_llama_cpp, tmp_path):
+        calls = self._fake_llama(mock_llama_cpp)
+        from agents.utils.local_llm import LocalLLM
+
+        gguf = tmp_path / "model.gguf"
+        gguf.touch()
+        LocalLLM(
+            str(gguf), device="cpu", ncpu=2, model_options={"n_batch": 1024}
+        )
+        assert calls["init"]["n_batch"] == 1024
+        # context defaults to the model's trained length, not llama-cpp's 512
+        assert calls["init"]["n_ctx"] == 0
+        assert calls["init"]["n_threads"] == 2
+
+    def test_filename_selects_quant_from_repo(self, mock_llama_cpp):
+        calls = self._fake_llama(mock_llama_cpp)
+        from agents.utils.local_llm import LocalLLM
+
+        LocalLLM(
+            "some/repo-GGUF",
+            device="cpu",
+            model_options={"filename": "*q4_k_m*.gguf"},
+        )
+        assert calls["from_pretrained"]["filename"] == "*q4_k_m*.gguf"
+
+    def test_unknown_option_raises(self, mock_llama_cpp, tmp_path):
+        self._fake_llama(mock_llama_cpp)
+        from agents.utils.local_llm import LocalLLM
+
+        gguf = tmp_path / "model.gguf"
+        gguf.touch()
+        with pytest.raises(ValueError, match="Valid options"):
+            LocalLLM(str(gguf), model_options={"not_an_option": 1})

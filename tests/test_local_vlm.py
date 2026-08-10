@@ -88,9 +88,13 @@ class TestLocalVLMCall:
 
         call_kwargs = local_vlm.llm.create_chat_completion.call_args[1]
         messages = call_kwargs["messages"]
-        # The text part should be the last user message
+        # The full conversation is preserved and the images are attached to
+        # the LAST user message
+        assert len(messages) == 3
+        assert messages[0] == {"role": "user", "content": "First question"}
+        assert messages[1] == {"role": "assistant", "content": "Answer"}
         text_items = [
-            item for item in messages[0]["content"] if item["type"] == "text"
+            item for item in messages[2]["content"] if item["type"] == "text"
         ]
         assert text_items[0]["text"] == "Second question"
 
@@ -108,3 +112,51 @@ class TestLocalVLMCall:
         image_item = next(item for item in content if item["type"] == "image_url")
         url = image_item["image_url"]["url"]
         assert url.startswith("data:image/png;base64,")
+
+
+class TestVLMFamilyDetection:
+    def test_families_detected_from_name(self):
+        from agents.utils.local_vlm import detect_vlm_family
+
+        assert detect_vlm_family("ggml-org/moondream2-20250414-GGUF") == "moondream"
+        assert detect_vlm_family("unsloth/Qwen3-VL-2B-Instruct-GGUF") == "qwen_vl"
+        assert detect_vlm_family("openbmb/MiniCPM-V-2_6-gguf") == "minicpm"
+        assert detect_vlm_family("cjpais/llava-v1.6-mistral-7b-gguf") == "llava16"
+        assert detect_vlm_family("mys/ggml_llava-v1.5-7b") == "llava"
+
+    def test_model_type_override_and_unknown(self):
+        from agents.utils.local_vlm import detect_vlm_family
+
+        assert detect_vlm_family("some/opaque-model", model_type="llava") == "llava"
+        with pytest.raises(ValueError, match="model_type"):
+            detect_vlm_family("some/opaque-model")
+        with pytest.raises(ValueError, match="Unknown model_type"):
+            detect_vlm_family("x", model_type="not_a_family")
+
+
+class TestVLMMessageBuilding:
+    def test_context_preserved_and_multi_image(self, local_vlm):
+        local_vlm.llm.create_chat_completion.return_value = _mock_vlm_response(
+            "Two oranges"
+        )
+        images = [
+            np.zeros((4, 4, 3), dtype=np.uint8),
+            np.ones((4, 4, 3), dtype=np.uint8),
+        ]
+        result = local_vlm(
+            {
+                "query": [
+                    {"role": "system", "content": "You are a robot."},
+                    {"role": "user", "content": "What do you see?"},
+                ],
+                "images": images,
+            }
+        )
+        assert result["output"] == "Two oranges"
+        messages = local_vlm.llm.create_chat_completion.call_args[1]["messages"]
+        # system prompt preserved
+        assert messages[0] == {"role": "system", "content": "You are a robot."}
+        # both images attached to the user message, text kept
+        user_content = messages[1]["content"]
+        assert sum(1 for part in user_content if part["type"] == "image_url") == 2
+        assert user_content[-1] == {"type": "text", "text": "What do you see?"}
