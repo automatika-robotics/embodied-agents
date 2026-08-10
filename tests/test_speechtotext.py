@@ -121,6 +121,11 @@ class TestSTTCreateInput:
 class TestWakeWordSpotter:
     """Keyword-file building for the sherpa keyword spotter."""
 
+    @pytest.fixture(autouse=True)
+    def _needs_onnxruntime(self):
+        # importing agents.utils.voice pulls in onnxruntime (VAD) at module level
+        pytest.importorskip("onnxruntime")
+
     @staticmethod
     def _bundle_with_tokens(tmp_path, tokens):
         bundle = tmp_path / "kws-bundle"
