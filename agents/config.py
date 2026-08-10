@@ -85,7 +85,7 @@ class LLMConfig(ModelComponentConfig):
     :param response_terminator: A string token marking that the end of a single response from the model. This token is only used in case of a persistent clients, such as a websocket client and when stream is set to True. It is not published. This value cannot be an empty string.
         Default is '<<Response Ended>>'
     :type response_terminator: str
-    :param strip_think_tokens: Whether to strip ``<think>...</think>`` blocks from model output. Reasoning models (e.g. Qwen3, DeepSeek-R1) emit these blocks which are useful for debugging but should typically not be forwarded to downstream components such as TTS or UI. Applies to both streaming and non-streaming output. Default is True.
+    :param strip_think_tokens: Whether to strip ``<think>...</think>`` blocks from model output. Reasoning models emit these blocks which are useful for debugging but should typically not be forwarded to downstream components such as TTS or UI. Applies to both streaming and non-streaming output. Default is True.
     :type strip_think_tokens: bool
     :param enable_local_model: Whether to enable a local LLM model via llama.cpp, allowing the component to run without a remote model client. Requires the ``llama-cpp-python`` package. Default is False.
     :type enable_local_model: bool

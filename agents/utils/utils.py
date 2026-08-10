@@ -307,15 +307,17 @@ def encode_img_base64(img: np.ndarray) -> str:
 def strip_think_tokens(text: str) -> str:
     """Strip ``<think>...</think>`` blocks from model output.
 
-    Reasoning models (Qwen3, DeepSeek-R1, etc.) emit these blocks which are
-    useful for debugging but should not be forwarded to downstream components.
+    Reasoning models emit these blocks which are useful for debugging but should
+    not be forwarded to downstream components. A block left unterminated
+    (generation truncated by the token limit before ``</think>`` was emitted)
+    is stripped to the end of the text.
 
     :param text: Raw model output text
     :type text: str
     :returns: Text with think blocks removed
     :rtype: str
     """
-    return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+    return re.sub(r"<think>.*?(?:</think>|\Z)", "", text, flags=re.DOTALL).strip()
 
 
 def execute_method_response_to_str(tool_name: str, response) -> str:
