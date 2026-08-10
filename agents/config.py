@@ -371,7 +371,11 @@ class VLAConfig(ModelComponentConfig):
         (keys) to the actual joint names in the robot's URDF/ROS system (values).
     :type joint_names_map: Dict[str, str]
     :param camera_inputs_map: A mapping of camera names expected by the model (keys)
-        to the corresponding ROS topics (values).
+        to the corresponding ROS topics (values). A camera whose dataset feature is
+        single channel is treated as a depth camera and fetches depth frames from its
+        topic (a depth Image topic or the depth part of an RGBD topic). Depth cameras
+        require ``dataset_info_file`` to be set on the LeRobotPolicy, as the
+        auto-generated feature spec assumes 3-channel RGB for every camera.
     :type camera_inputs_map: Mapping[str, Union[Topic, Dict]]
     :param state_input_type: The type of state data to extract from the joint state inputs.
         Supported values are "positions", "velocities", "accelerations", and "efforts".

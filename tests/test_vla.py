@@ -26,6 +26,7 @@ from agents.utils.actions import (
     JointsData,
     _as_depth_frame,
     convert_joint_limits_units,
+    resolve_feature_channels,
 )
 from agents.utils.utils import build_lerobot_features_from_dataset_info
 
@@ -284,6 +285,29 @@ class TestJointLimitsUnitConversion:
         out = convert_joint_limits_units(limits, "normalized")
         assert out["no_bounds"] is None
         assert out["inverted"] is None
+
+
+class TestResolveFeatureChannels:
+    def test_channel_last_with_names(self):
+        feature = {"shape": [480, 640, 1], "names": ["height", "width", "channel"]}
+        assert resolve_feature_channels(feature) == 1
+
+    def test_channel_first_with_names(self):
+        feature = {"shape": [1, 480, 640], "names": ["channels", "height", "width"]}
+        assert resolve_feature_channels(feature) == 1
+
+    def test_2d_shape_is_single_channel(self):
+        assert resolve_feature_channels({"shape": [480, 640]}) == 1
+
+    def test_3d_shape_without_names_is_channel_last(self):
+        assert resolve_feature_channels({"shape": [480, 640, 3]}) == 3
+
+    def test_missing_feature_defaults_to_rgb(self):
+        assert resolve_feature_channels({}) == 3
+
+    def test_names_not_parallel_to_shape_ignored(self):
+        feature = {"shape": [480, 640, 3], "names": ["channel"]}
+        assert resolve_feature_channels(feature) == 3
 
 
 class TestDepthFrame:
