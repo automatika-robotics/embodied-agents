@@ -258,7 +258,8 @@ class LocalVLM:
         """Yield decoded text tokens from a streaming response.
 
         The model lock is held for the whole generation, from inside the
-        generator so it is acquired and released by the consuming thread.
+        generator so it is acquired and released by the consuming thread
+        The component should guarantee closure of abandoned streams.
 
         :param kwargs: Keyword arguments for create_chat_completion
         :yields: Decoded text strings, one per chunk

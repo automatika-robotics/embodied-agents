@@ -229,6 +229,36 @@ class TestLLMThinkTokens:
         llm.publishers_dict["out"].publish.assert_not_called()
 
 
+class TestLLMStreamCleanup:
+    def test_generator_closed_when_publish_raises(self, llm):
+        """An abandoned stream must be finalized immediately so it releases
+        held resources (e.g. the local model lock) instead of waiting for
+        garbage collection."""
+        closed = []
+
+        def stream():
+            try:
+                yield "one. "
+                yield "two. "
+            finally:
+                closed.append(True)
+
+        llm.config.break_character = ""
+        llm._in_think_block = False
+        llm._swallow_stream_ws = False
+        llm.result_partial = []
+        llm.result_complete = []
+        llm.publishers_dict["out"].publish.side_effect = RuntimeError(
+            "publisher destroyed"
+        )
+
+        # keep a reference so finalization cannot come from refcounting
+        result = {"output": stream()}
+        llm._LLM__handle_streaming_generator(result)
+
+        assert closed == [True]
+
+
 class TestLLMWarmup:
     def test_with_model_client(self, llm, mock_model_client):
         llm._warmup()

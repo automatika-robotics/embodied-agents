@@ -587,8 +587,9 @@ class LLM(ModelComponent):
 
     def __handle_streaming_generator(self, result: MutableMapping) -> Optional[List]:
         """Handle streaming output"""
+        stream = result["output"]
         try:
-            for token in result["output"]:
+            for token in stream:
                 # Handle ollama client result format
                 if isinstance(self.model_client, OllamaClient):
                     token = token["message"]["content"]
@@ -603,6 +604,11 @@ class LLM(ModelComponent):
             self.get_logger().error(str(e))
             # raise a fallback trigger via health status
             self.health_status.set_fail_algorithm()
+        finally:
+            # Finalize the generator even when iteration was abandoned by an
+            # exception (so the iterator doesnt wait for garbage collection)
+            if close := getattr(stream, "close", None):
+                close()
 
     def _execution_step(self, *args, **kwargs):
         """_execution_step.
