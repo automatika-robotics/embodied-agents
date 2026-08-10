@@ -12,8 +12,8 @@ from ..ros import Audio, String, Topic
 from ..utils import (
     validate_func_args,
     VADStatus,
-    WakeWordStatus,
     load_model,
+    load_model_archive,
     load_model_repo,
 )
 from .model_component import ModelComponent
@@ -160,23 +160,24 @@ class SpeechToText(ModelComponent):
                 )
             )
             if self.config.enable_wakeword:
-                from ..utils.voice import WakeWord, AudioFeatures
+                from ..utils.voice import WakeWordSpotter
 
-                self.audio_features = AudioFeatures(
-                    melspectogram_model_path=load_model(
-                        "melspec", self.config.melspectrogram_model_path
-                    ),
-                    embedding_model_path=load_model(
-                        "voice_embeddings", self.config.embedding_model_path
-                    ),
-                    ncpu=self.config.ncpu_wakeword,
-                    device=self.config.device_wakeword,
+                wakeword_model_path = (
+                    load_model_archive("wakeword_kws", self.config.wakeword_model_path)
+                    if self.config.wakeword_model_path.startswith((
+                        "http://",
+                        "https://",
+                    ))
+                    else load_model_repo(
+                        "wakeword_kws", self.config.wakeword_model_path
+                    )
                 )
-                self.wake_word = WakeWord(
-                    model_path=load_model(
-                        "hey_jarvis", self.config.wakeword_model_path
-                    ),
+
+                self.wake_word = WakeWordSpotter(
+                    model_path=wakeword_model_path,
+                    phrase=self.config.wakeword_phrase,
                     threshold=self.config.wakeword_threshold,
+                    sample_rate=self.config._sample_rate,
                     ncpu=self.config.ncpu_wakeword,
                     device=self.config.device_wakeword,
                 )
@@ -259,8 +260,11 @@ class SpeechToText(ModelComponent):
 
         # if wake word is enabled then store speech when its triggered
         if self.config.enable_wakeword:
-            # create audio embeddings for wakeword classifier
-            self.audio_features(np_frames)
+            # feed the keyword spotter until the wake phrase is detected
+            if not self.wake_word_triggered:
+                if detected := self.wake_word.process(np_frames):
+                    self.get_logger().debug(f"Wake phrase detected: {detected}")
+                    self.wake_word_triggered = True
             if self.wake_word_triggered:
                 self.speech_buffer.append(indata)
 
@@ -325,26 +329,16 @@ class SpeechToText(ModelComponent):
     def __process_vad_output(self, vad_output: VADStatus):
         """Process VAD Status"""
         if vad_output is VADStatus.START:
-            # When someone starts speaking, check for wakeword if enabled
             self.get_logger().debug("Speech started")
-            if self.config.enable_wakeword:
-                self.wake_word(
-                    self.audio_features.get_embeddings(self.wake_word.model_input)
-                )
         elif vad_output is VADStatus.ONGOING:
             self.get_logger().debug("Speech ongoing")
-            if self.config.enable_wakeword:
-                wake_status = self.wake_word(
-                    self.audio_features.get_embeddings(self.wake_word.model_input)
-                )
-                if wake_status is WakeWordStatus.END:
-                    self.get_logger().debug("Wakeword ended")
-                    self.wake_word_triggered = True
         elif vad_output is VADStatus.END:
             # Send audio when speech finishes
             self.get_logger().debug("Speech ended")
             if self.config.enable_wakeword:
                 self.wake_word_triggered = False
+                # fresh spotter stream so stale audio does not linger
+                self.wake_word.reset()
             # Only send to STT if there is buffered speech
             if self.speech_buffer:
                 if self.config.stream:

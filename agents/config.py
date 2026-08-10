@@ -729,14 +729,22 @@ class SpeechToTextConfig(ModelComponentConfig):
     --
     Wakeword Detection
     --
-    :param enable_wakeword: Enable detection of a wakeword phrase (e.g. 'Hey Jarvis').
-                            Requires `enable_vad` to be True.
+    :param enable_wakeword: Enable detection of a wake phrase before transcription.
+                            Requires `enable_vad` to be True and the
+                            ``sentencepiece`` package for encoding the phrase.
                             Defaults to False.
     :type enable_wakeword: bool
 
-    :param wakeword_threshold: Minimum confidence score to trigger wakeword detection.
-                               Only used if `enable_wakeword` is True.
-                               Defaults to 0.6.
+    :param wakeword_phrase: The wake phrase (or list of phrases) to detect,
+                            as plain text (e.g. 'hey jarvis', 'ok robot').
+                            Only used if `enable_wakeword` is True.
+                            Defaults to 'ok robot'.
+    :type wakeword_phrase: Union[str, List[str]]
+
+    :param wakeword_threshold: Keyword spotting trigger threshold (sherpa-onnx
+                               `keywords_threshold`). Lower values trigger more
+                               easily. Only used if `enable_wakeword` is True.
+                               Defaults to 0.25.
     :type wakeword_threshold: float
 
     :param device_wakeword: Device for Wakeword Detection ('cpu' or 'gpu').
@@ -769,18 +777,12 @@ class SpeechToTextConfig(ModelComponentConfig):
                            Defaults to the Silero VAD model URL.
     :type vad_model_path: str
 
-    :param melspectrogram_model_path: Path or URL to melspectrogram model used in wakeword detection.
-                                      Defaults to openWakeWord model URL.
-    :type melspectrogram_model_path: str
-
-    :param embedding_model_path: Path or URL to audio embedding model for wakeword detection.
-                                 Defaults to openWakeWord model URL.
-    :type embedding_model_path: str
-
-    :param wakeword_model_path: Path or URL to wakeword ONNX model (e.g. 'Hey Jarvis').
-                                Defaults to a pretrained openWakeWord model.
-                                For custom models, see:
-                                https://github.com/dscripka/openWakeWord/blob/main/notebooks/automatic_model_training.ipynb
+    :param wakeword_model_path: Source of the sherpa-onnx keyword spotting bundle:
+                                a model archive URL (.tar.bz2/.tar.gz), a HuggingFace
+                                repository ID, or a local directory. Defaults to the
+                                official English zipformer KWS bundle (3.3M params)
+                                from the sherpa-onnx releases. For other languages
+                                see https://github.com/k2-fsa/sherpa-onnx/releases/tag/kws-models
     :type wakeword_model_path: str
 
     --
@@ -825,8 +827,9 @@ class SpeechToTextConfig(ModelComponentConfig):
         default=0.5, validator=base_validators.in_range(min_value=0.0, max_value=1.0)
     )
     wakeword_threshold: float = field(
-        default=0.6, validator=base_validators.in_range(min_value=0.0, max_value=1.0)
+        default=0.25, validator=base_validators.in_range(min_value=0.0, max_value=1.0)
     )
+    wakeword_phrase: Union[str, List[str]] = field(default="ok robot")
     min_silence_duration_ms: int = field(default=500)
     speech_pad_ms: int = field(default=30)
     speech_buffer_max_len: int = field(default=30000)
@@ -839,14 +842,8 @@ class SpeechToTextConfig(ModelComponentConfig):
     vad_model_path: str = field(
         default="https://raw.githubusercontent.com/snakers4/silero-vad/refs/heads/master/src/silero_vad/data/silero_vad.onnx"
     )
-    melspectrogram_model_path: str = field(
-        default="https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/melspectrogram.onnx"
-    )
-    embedding_model_path: str = field(
-        default="https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/embedding_model.onnx"
-    )
     wakeword_model_path: str = field(
-        default="https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/hey_jarvis_v0.1.onnx"
+        default="https://github.com/k2-fsa/sherpa-onnx/releases/download/kws-models/sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01.tar.bz2"
     )
     _sample_rate: int = field(default=16000, alias="_sample_rate")
     _block_size: int = field(default=1280, alias="_block_size")
