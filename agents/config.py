@@ -554,14 +554,18 @@ class TextToSpeechConfig(ModelComponentConfig):
 
     This class defines the configuration options for a Text-To-Speech component.
 
-    :param enable_local_model: Whether to enable a local TTS model via ``sherpa-onnx`` (Kokoro English by default), allowing the component to run without a remote model client. Requires the ``sherpa-onnx`` pip package. Default is False.
+    :param enable_local_model: Whether to enable a local TTS model via ``sherpa-onnx`` (Kyutai's Pocket TTS by default), allowing the component to run without a remote model client. Requires the ``sherpa-onnx`` pip package. Default is False.
     :type enable_local_model: bool
     :param device_local_model: Device to run the local model on, either "cpu" or "cuda" (default: "cuda"). This parameter is only effective when ``enable_local_model`` is True.
     :type device_local_model: str
     :param ncpu_local_model: Number of CPU cores to allocate to the local model when using CPU (default: 1). This parameter is only effective when ``enable_local_model`` is True.
     :type ncpu_local_model: int
-    :param local_model_path: HuggingFace repository ID for a sherpa-onnx compatible TTS model (default: ``csukuangfj/kokoro-en-v0_19``). For available models see https://k2-fsa.github.io/sherpa/onnx/pretrained_models/index.html. This parameter is only effective when ``enable_local_model`` is True.
+    :param local_model_path: HuggingFace repository ID for a sherpa-onnx compatible TTS model (default: ``csukuangfj2/sherpa-onnx-pocket-tts-int8-2026-01-26``, Kyutai's Pocket TTS), or a path to a local directory containing an already-downloaded bundle. For available models see https://k2-fsa.github.io/sherpa/onnx/pretrained_models/index.html. This parameter is only effective when ``enable_local_model`` is True.
     :type local_model_path: Optional[str]
+    :param speaker_id: Voice index used by multi-voice local models (e.g. Kokoro ships several voices; single-voice models ignore it). Only effective when ``enable_local_model`` is True. Default is 0.
+    :type speaker_id: int
+    :param local_model_options: Additional options for the local model, validated at load time against the fields of the detected sherpa-onnx model family (e.g. ``length_scale``, ``noise_scale`` (vits/matcha), ``lang`` (kokoro), ``voice_style`` (supertonic), ``guidance_scale`` (zipvoice)) and the top-level sherpa-onnx TTS options (``silence_scale``, ``max_num_sentences``, ``rule_fsts``, ``rule_fars``). Voice-prompted families (pocket, zipvoice) also accept generation options: ``voice`` (a wav file path for voice cloning, or a voice name shipped in the bundle — Pocket TTS bundles include several; defaults to the bundle's first voice), ``num_steps``, ``reference_text`` and ``max_reference_audio_len``. An unknown key raises an error listing the valid keys for the detected family. The reserved key ``model_type`` forces the model family instead of detecting it from the bundle contents. Only effective when ``enable_local_model`` is True. Default is ``{}``.
+    :type local_model_options: Dict
     :param play_on_device: Whether to play the audio on available audio device (default: False).
     :type play_on_device: bool
     :param device: Optional device id (int) for playing the audio. Only effective if play_on_device is True (default: None).
@@ -576,7 +580,7 @@ class TextToSpeechConfig(ModelComponentConfig):
     :type block_size: int
     :param thread_shutdown_timeout: Timeout to shutdown a playback thread, if data is not received for more than a certain number of seconds. Only effective if play_on_device is True (default: 5 seconds).
     :type thread_shutdown_timeout: int
-    :param stream: Stram output when used with WebSocketClient. Useful when model output is large and broken into chunks by the server. (default: True).
+    :param stream: Stream output audio in chunks. With a WebSocketClient, chunks are streamed by the server; with a local model, audio chunks are yielded as the model synthesizes them (all sherpa-onnx families support this). Useful for playing audio while long text is still being synthesized. (default: True).
     :type stream: bool
 
     Example of usage for local playback:
@@ -598,7 +602,11 @@ class TextToSpeechConfig(ModelComponentConfig):
     enable_local_model: bool = field(default=False)
     device_local_model: Literal["cpu", "cuda"] = field(default="cuda")
     ncpu_local_model: int = field(default=1)
-    local_model_path: Optional[str] = field(default="csukuangfj/kokoro-en-v0_19")
+    local_model_path: Optional[str] = field(
+        default="csukuangfj2/sherpa-onnx-pocket-tts-int8-2026-01-26"
+    )
+    speaker_id: int = field(default=0, validator=base_validators.gt(-1))
+    local_model_options: Dict = field(default=Factory(dict))
     play_on_device: bool = field(default=False)
     device: Optional[int] = field(default=None)
     stream_to_ip: Optional[str] = field(default=None)
@@ -657,7 +665,7 @@ class SpeechToTextConfig(ModelComponentConfig):
     :type device_local_model: str
     :param ncpu_local_model: Number of CPU cores to allocate to the local model when using CPU (default: 1). This parameter is only effective when ``enable_local_model`` is True.
     :type ncpu_local_model: int
-    :param local_model_path: HuggingFace repository ID for a sherpa-onnx compatible Whisper STT model (default: ``csukuangfj/sherpa-onnx-whisper-tiny.en``). For available models see https://k2-fsa.github.io/sherpa/onnx/pretrained_models/index.html. This parameter is only effective when ``enable_local_model`` is True.
+    :param local_model_path: HuggingFace repository ID for a sherpa-onnx compatible Whisper STT model (default: ``csukuangfj/sherpa-onnx-whisper-tiny.en``), or a path to a local directory containing an already downloaded model. For available models see https://k2-fsa.github.io/sherpa/onnx/pretrained_models/index.html. This parameter is only effective when ``enable_local_model`` is True.
     :type local_model_path: Optional[str]
 
     --
