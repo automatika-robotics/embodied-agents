@@ -128,16 +128,38 @@ class TestTTSConfig:
         TextToSpeechConfig()
 
     def test_stream_with_local_ok(self):
-        """Local model + stream is accepted at config time; stream is
-        disabled at runtime by _deploy_local_model."""
+        """Local model + stream is a supported combination (chunks are
+        yielded by the local model as they are synthesized)."""
         c = TextToSpeechConfig(enable_local_model=True)
         assert c.enable_local_model is True
-        assert c.stream is True  # will be overridden at deploy time
+        assert c.stream is True
 
     def test_local_no_stream_ok(self):
         c = TextToSpeechConfig(enable_local_model=True, stream=False)
         assert c.enable_local_model is True
         assert c.stream is False
+
+    def test_local_model_defaults(self):
+        c = TextToSpeechConfig()
+        assert "pocket-tts" in c.local_model_path
+        assert c.speaker_id == 0
+        assert c.local_model_options == {}
+
+    def test_speaker_id_non_negative(self):
+        with pytest.raises(ValueError):
+            TextToSpeechConfig(speaker_id=-1)
+        c = TextToSpeechConfig(speaker_id=3)
+        assert c.speaker_id == 3
+
+    def test_local_model_options_round_trip(self):
+        config = TextToSpeechConfig(
+            local_model_options={"model_type": "kokoro", "length_scale": 1.2}
+        )
+        rebuilt = TextToSpeechConfig(**json.loads(config.to_json()))
+        assert rebuilt.local_model_options == {
+            "model_type": "kokoro",
+            "length_scale": 1.2,
+        }
 
     def test_stream_to_ip_without_play_raises(self):
         with pytest.raises(ValueError):
