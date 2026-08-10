@@ -16,6 +16,10 @@ AGGREGATE_FUNCTIONS: Dict[str, Callable] = {
 }
 
 
+# Feature key prefix used by LeRobot dataset specs
+OBSERVATION_PREFIX = "observation"
+
+
 def _as_depth_frame(img: np.ndarray) -> np.ndarray:
     """Shape a depth output as (H, W, 1) as expected for single channel
     dataset features. uint16 depth (e.g. mono16/16UC1 encodings) is cast to
@@ -104,8 +108,32 @@ class JointsData:
         return mapped
 
 
+def resolve_feature_channels(feature: Dict) -> int:
+    """Resolve the channel count of an image feature from its dataset entry.
+
+    Prefers the dimension labeled in ``names`` (lerobot writes both
+    channel-last and channel-first layouts), falls back to treating a 2-D shape
+    as single channel and a 3-D shape as channel-last.
+    Defaults to 3 (RGB) when the entry carries no usable shape.
+
+    :param feature: Normalized feature entry with optional ``shape`` and ``names``
+    :return: Number of channels declared for the feature
+    """
+    shape = feature.get("shape") or ()
+    names = feature.get("names") or ()
+    if len(names) == len(shape):
+        for label in ("channels", "channel"):
+            if label in names:
+                return int(shape[names.index(label)])
+    # Case (H, W)
+    if len(shape) == 2:
+        return 1
+    # Default channel-last or 3
+    return int(shape[-1]) if len(shape) == 3 else 3
+
+
 def create_observation_spec(
-    joints_map, camera_map, prefix="observation", image_shape=(480, 640, 3)
+    joints_map, camera_map, prefix=OBSERVATION_PREFIX, image_shape=(480, 640, 3)
 ):
     """Create a specification dictionary for observation data structure.
 
