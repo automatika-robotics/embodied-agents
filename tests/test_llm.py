@@ -212,6 +212,22 @@ class TestLLMThinkTokens:
         publish.assert_called_once()
         assert publish.call_args[0][0] == "Paris."
 
+    def test_stream_unterminated_think_warns(self, llm):
+        """A stream that ends inside a think block must warn, same as the
+        non-streaming path."""
+        llm.config.break_character = ""
+        llm._in_think_block = False
+        llm._swallow_stream_ws = False
+        llm.result_partial = []
+        llm.result_complete = []
+
+        for token in ["<think>", "reasoning cut off by the token limit"]:
+            llm._LLM__process_stream_token(token)
+        llm._LLM__finalize_stream()
+
+        llm.get_logger.return_value.warning.assert_called_once()
+        llm.publishers_dict["out"].publish.assert_not_called()
+
 
 class TestLLMWarmup:
     def test_with_model_client(self, llm, mock_model_client):

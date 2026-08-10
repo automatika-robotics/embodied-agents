@@ -548,6 +548,12 @@ class LLM(ModelComponent):
         Finalizes the stream by publishing any remaining partial results and
         appending the complete message to the message history.
         """
+        if self._in_think_block:
+            self.get_logger().warning(
+                "Model output was an unterminated <think> block — generation"
+                " likely hit max_new_tokens before an answer was produced."
+                " Increase max_new_tokens or disable thinking in the model."
+            )
         self._in_think_block = False
         self._swallow_stream_ws = False
         # Send remaining result after break character or termination if any
