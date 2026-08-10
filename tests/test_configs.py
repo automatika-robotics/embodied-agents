@@ -88,6 +88,15 @@ class TestSTTConfig:
         """SpeechToTextConfig can be constructed with defaults."""
         SpeechToTextConfig()
 
+    def test_wakeword_defaults(self):
+        c = SpeechToTextConfig(enable_vad=True, enable_wakeword=True)
+        assert c.wakeword_phrase == "ok robot"
+        assert c.wakeword_threshold == 0.25
+        assert c.wakeword_model_path.endswith(".tar.bz2")
+        # the openWakeWord-era model fields are gone
+        assert not hasattr(c, "melspectrogram_model_path")
+        assert not hasattr(c, "embedding_model_path")
+
     def test_wakeword_requires_vad(self):
         with pytest.raises(ValueError):
             SpeechToTextConfig(enable_wakeword=True)
