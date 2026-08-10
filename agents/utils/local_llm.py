@@ -1,5 +1,9 @@
+import inspect
 import json
-from typing import Dict, Generator, Union
+from typing import Dict, Generator, Optional, Union
+
+# Reserved keys in model_options that are not llama_cpp.Llama parameters
+_FILENAME_KEY = "filename"
 
 
 class LocalLLM:
@@ -9,9 +13,20 @@ class LocalLLM:
         (e.g. ``Qwen/Qwen3-0.6B-GGUF``) or a local path to a ``.gguf`` file.
     :param device: Device to run on ('cpu' or 'cuda')
     :param ncpu: Number of CPU threads
+    :param model_options: Additional keyword options for ``llama_cpp.Llama``,
+        validated against its signature (e.g. ``n_ctx``, ``n_batch``,
+        ``flash_attn``, ``chat_format``). The reserved key ``filename``
+        selects the GGUF file when a repository ships several quantizations
+        (e.g. ``"*q4_k_m*.gguf"``).
     """
 
-    def __init__(self, model_path: str, device: str = "cuda", ncpu: int = 1):
+    def __init__(
+        self,
+        model_path: str,
+        device: str = "cuda",
+        ncpu: int = 1,
+        model_options: Optional[Dict] = None,
+    ):
         try:
             from llama_cpp import Llama
         except ImportError as e:
@@ -25,22 +40,37 @@ class LocalLLM:
         self.device = device
         self.ncpu = ncpu
 
-        n_gpu_layers = -1 if device == "cuda" else 0
+        options = dict(model_options or {})
+        filename = options.pop(_FILENAME_KEY, "*.gguf")
+
+        # Validate user options against the Llama signature
+        llama_params = inspect.signature(Llama.__init__).parameters
+        for key in options:
+            if key not in llama_params:
+                valid = sorted(
+                    p for p in llama_params if p not in ("self", "kwargs")
+                )
+                raise ValueError(
+                    f"Unknown local_model_options key '{key}' for llama-cpp. "
+                    f"Valid options: {valid}. Reserved: '{_FILENAME_KEY}'."
+                )
+
+        kwargs = {
+            "n_gpu_layers": -1 if device == "cuda" else 0,
+            "n_threads": ncpu,
+            # NOTE: 0 = use the model's trained context length. llama-cpp's own
+            # default (512) overflows immediately with chat history, system
+            # prompts and tool descriptions
+            "n_ctx": 0,
+            "verbose": False,
+            **options,
+        }
 
         if model_path.endswith(".gguf"):
-            self.llm = Llama(
-                model_path=model_path,
-                n_gpu_layers=n_gpu_layers,
-                n_threads=ncpu,
-                verbose=False,
-            )
+            self.llm = Llama(model_path=model_path, **kwargs)
         else:
             self.llm = Llama.from_pretrained(
-                repo_id=model_path,
-                filename="*.gguf",
-                n_gpu_layers=n_gpu_layers,
-                n_threads=ncpu,
-                verbose=False,
+                repo_id=model_path, filename=filename, **kwargs
             )
 
     def __call__(

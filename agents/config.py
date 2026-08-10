@@ -95,6 +95,8 @@ class LLMConfig(ModelComponentConfig):
     :type ncpu_local_model: int
     :param local_model_path: HuggingFace repository ID for a GGUF model (default: ``Qwen/Qwen3-0.6B-GGUF``), or a local path to a ``.gguf`` file. This parameter is only effective when ``enable_local_model`` is True.
     :type local_model_path: Optional[str]
+    :param local_model_options: Additional options for the local model, validated at load time against the ``llama_cpp.Llama`` signature (e.g. ``n_ctx``, ``n_batch``, ``flash_attn``, ``chat_format``). Reserved keys: ``filename`` selects the GGUF file when a repository ships several quantizations (e.g. ``"*q4_k_m*.gguf"``); for VLM components ``model_type`` additionally forces the VLM family (moondream, qwen_vl, minicpm, llava, llava16, nanollava) instead of detecting it from the model name. An unknown key raises an error listing the valid keys. Only effective when ``enable_local_model`` is True. Default is ``{}``.
+    :type local_model_options: Dict
 
     Example of usage:
     ```python
@@ -127,6 +129,7 @@ class LLMConfig(ModelComponentConfig):
     device_local_model: Literal["cpu", "cuda"] = field(default="cuda")
     ncpu_local_model: int = field(default=1)
     local_model_path: Optional[str] = field(default="Qwen/Qwen3-0.6B-GGUF")
+    local_model_options: Dict = field(default=Factory(dict))
     _system_prompt: Optional[str] = field(default=None, alias="_system_prompt")
     _component_prompt: Optional[Union[str, Path]] = field(
         default=None, alias="_component_prompt"
@@ -309,7 +312,7 @@ class MLLMConfig(LLMConfig):
     :type device_local_model: str
     :param ncpu_local_model: Number of CPU cores to allocate to the local model when using CPU (default: 1). This parameter is only effective when ``enable_local_model`` is True.
     :type ncpu_local_model: int
-    :param local_model_path: HuggingFace repository ID for a GGUF VLM model (default: ``ggml-org/moondream2-20250414-GGUF``). This parameter is only effective when ``enable_local_model`` is True.
+    :param local_model_path: HuggingFace repository ID for a GGUF VLM model (default: ``ggml-org/Qwen3-VL-2B-Instruct-GGUF``), a local directory with the GGUF and mmproj files, or a local path to a ``.gguf`` file. The VLM family (qwen_vl, gemma, moondream, minicpm, llava, llava16, nanollava) is detected from the model name. This parameter is only effective when ``enable_local_model`` is True.
     :type local_model_path: Optional[str]
 
     Example of usage:
@@ -326,7 +329,9 @@ class MLLMConfig(LLMConfig):
     task: Optional[
         Literal["general", "pointing", "affordance", "trajectory", "grounding"]
     ] = field(default=None)
-    local_model_path: Optional[str] = field(default="ggml-org/moondream2-20250414-GGUF")
+    local_model_path: Optional[str] = field(
+        default="ggml-org/Qwen3-VL-2B-Instruct-GGUF"
+    )
 
     @task.validator
     def _check_task(self, _, value):

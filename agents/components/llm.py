@@ -299,6 +299,7 @@ class LLM(ModelComponent):
             model_path=self.config.local_model_path,
             device=self.config.device_local_model,
             ncpu=self.config.ncpu_local_model,
+            model_options=self.config.local_model_options,
         )
 
     def _handle_rag_query(self, query: str) -> Optional[str]:
