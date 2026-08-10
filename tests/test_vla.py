@@ -644,3 +644,62 @@ class TestVLAComponent:
         data = published["output"]
         assert data.duration == pytest.approx(1 / comp.config.action_sending_rate)
         assert data.duration > 0
+
+    def _prepare_goal_execution(self, vla_topics, name):
+        """Build a VLA and patch the internals main_action_callback needs."""
+        model = LeRobotPolicy(name="policy")
+        client = _mock_lerobot_client(model)
+        comp = VLA(
+            inputs=[vla_topics["state"], vla_topics["camera"]],
+            outputs=[vla_topics["out"]],
+            model_client=client,
+            config=VLAConfig(
+                joint_names_map={"shoulder_pan.pos": "joint1"},
+                camera_inputs_map={"front": vla_topics["camera"]},
+            ),
+            component_name=name,
+        )
+        comp._actions_received = queue.Queue()
+        comp._last_executed_timestep_lock = threading.Lock()
+        comp._last_executed_timestep = -1
+        comp._task_completed = False
+        comp._main_goal_lock = threading.Lock()
+        comp.create_timer = MagicMock()
+        comp.get_logger = MagicMock()
+        comp.got_all_inputs = MagicMock(return_value=True)
+        comp._action_done = MagicMock(return_value=False)
+        comp._action_cleanup = MagicMock()
+        return comp
+
+    def test_cancel_requested_goal_transitions_to_canceled(
+        self, rclpy_init, vla_topics
+    ):
+        """A canceling goal must reach STATUS_CANCELED — returning without a
+        transition makes rclpy force-abort it, so clients cannot distinguish
+        a clean preempt from an execution failure."""
+        comp = self._prepare_goal_execution(vla_topics, "test_vla_cancel")
+        goal_handle = MagicMock()
+        goal_handle.request.task = "pick"
+        goal_handle.is_active = True
+        goal_handle.is_cancel_requested = True
+
+        comp.main_action_callback(goal_handle)
+
+        goal_handle.canceled.assert_called_once()
+        goal_handle.abort.assert_not_called()
+        comp._action_cleanup.assert_called_once()
+
+    def test_preempted_goal_not_transitioned_again(self, rclpy_init, vla_topics):
+        """A goal already aborted by preemption is terminal — transitioning
+        it again would be an invalid state transition."""
+        comp = self._prepare_goal_execution(vla_topics, "test_vla_preempt")
+        goal_handle = MagicMock()
+        goal_handle.request.task = "pick"
+        goal_handle.is_active = False
+        goal_handle.is_cancel_requested = False
+
+        comp.main_action_callback(goal_handle)
+
+        goal_handle.canceled.assert_not_called()
+        goal_handle.abort.assert_not_called()
+        comp._action_cleanup.assert_called_once()

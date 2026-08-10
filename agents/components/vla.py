@@ -783,8 +783,8 @@ class VLA(ModelComponent):
             self.get_logger().error(
                 "Inputs were not received within the specified timeout period, aborting action."
             )
-            self._action_cleanup()
             with self._main_goal_lock:
+                self._action_cleanup()
                 goal_handle.abort()
                 return task_result
 
@@ -793,9 +793,18 @@ class VLA(ModelComponent):
                 start_time = time.perf_counter()
                 # Check if goal is canceled
                 if not goal_handle.is_active or goal_handle.is_cancel_requested:
-                    self._action_cleanup()
-                    self.get_logger().info("Goal Canceled")
-                    return task_result
+                    with self._main_goal_lock:
+                        self._action_cleanup()
+                        if goal_handle.is_cancel_requested:
+                            goal_handle.canceled()
+                            self.get_logger().info("Goal canceled by client")
+                        else:
+                            # an inactive goal was already transitioned elsewhere
+                            # nothing to transition
+                            self.get_logger().info(
+                                "Goal already terminated (preempted by a new goal), stopping execution"
+                            )
+                        return task_result
 
                 # Get new observations from inputs
                 model_observations = self._create_input(task)
