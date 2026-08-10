@@ -1,6 +1,7 @@
 import inspect
+import threading
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Generator, List, Optional, Union
 
 import numpy as np
 from .utils import encode_img_base64
@@ -199,12 +200,21 @@ class LocalVLM:
                 **kwargs,
             )
 
-    def __call__(self, inference_input: Dict) -> Dict:
+        # NOTE: llama-cpp contexts are stateful and not thread-safe. Concurrent
+        # calls corrupt the shared batch/KV cache and abort the process. We will
+        # use thread locking per call
+        self._lock = threading.Lock()
+
+    def __call__(
+        self, inference_input: Dict, stream: bool = False
+    ) -> Union[Dict, Generator[str, None, None]]:
         """Run VLM inference.
 
         :param inference_input: Dict with 'query' (messages list) and
-            'images' (list of RGB numpy arrays)
-        :returns: Dict with 'output' (str)
+            'images' (list of RGB numpy arrays), and optional 'temperature',
+            'max_new_tokens'
+        :param stream: Yield the response as a generator of text chunks
+        :returns: Dict with 'output' (str, or a generator when streaming)
         """
         images: List[np.ndarray] = inference_input.get("images", [])
         if not images:
@@ -231,5 +241,30 @@ class LocalVLM:
         else:
             messages.append({"role": "user", "content": image_parts})
 
-        response = self.llm.create_chat_completion(messages=messages)
+        kwargs = {"messages": messages, "stream": stream}
+        if temperature := inference_input.get("temperature"):
+            kwargs["temperature"] = temperature
+        if max_new_tokens := inference_input.get("max_new_tokens"):
+            kwargs["max_tokens"] = max_new_tokens
+
+        if stream:
+            return {"output": self._stream_tokens(kwargs)}
+
+        with self._lock:
+            response = self.llm.create_chat_completion(**kwargs)
         return {"output": response["choices"][0]["message"]["content"]}
+
+    def _stream_tokens(self, kwargs: Dict) -> Generator[str, None, None]:
+        """Yield decoded text tokens from a streaming response.
+
+        The model lock is held for the whole generation, from inside the
+        generator so it is acquired and released by the consuming thread.
+
+        :param kwargs: Keyword arguments for create_chat_completion
+        :yields: Decoded text strings, one per chunk
+        """
+        with self._lock:
+            for chunk in self.llm.create_chat_completion(**kwargs):
+                delta = chunk["choices"][0]["delta"]
+                if "content" in delta and delta["content"]:
+                    yield delta["content"]
