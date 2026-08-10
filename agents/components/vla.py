@@ -550,10 +550,12 @@ class VLA(ModelComponent):
             else:
                 return
 
-        # Create publishing action
+        # Create publishing action. The point should be reached within one
+        # action tick
         action_data = JointsData(
             joints_names=self._dataset_sorted_joint_names
             or list(self.config.joint_names_map.values()),
+            duration=1 / self.config.action_sending_rate,
         )
 
         # Cap actions within limits

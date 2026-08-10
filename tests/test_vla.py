@@ -585,3 +585,38 @@ class TestVLAComponent:
         # manual entry wins verbatim for joint2; joint1 stays URDF-derived
         assert comp.robot_joints_limits["joint2"] == {"lower": -5.0, "upper": 5.0}
         assert comp.robot_joints_limits["joint1"]["lower"] == -100.0
+
+    def test_sent_actions_carry_one_tick_duration(self, rclpy_init, vla_topics):
+        """Published JointsData must carry a nonzero duration (one action
+        tick) — a zero time_from_start makes joint_trajectory_controller
+        reject the trajectory and gives JointJog a zero jog duration."""
+        model = LeRobotPolicy(name="policy")
+        client = _mock_lerobot_client(model)
+        comp = VLA(
+            inputs=[vla_topics["state"], vla_topics["camera"]],
+            outputs=[vla_topics["out"]],
+            model_client=client,
+            config=VLAConfig(
+                joint_names_map={"shoulder_pan.pos": "joint1"},
+                camera_inputs_map={"front": vla_topics["camera"]},
+            ),
+            component_name="test_vla_action_duration",
+        )
+        # action queue state is normally created in custom_on_activate
+        comp._actions_received = queue.Queue()
+        comp._action_queue_lock = threading.Lock()
+        comp._last_executed_timestep_lock = threading.Lock()
+        comp._last_executed_timestep = -1
+        comp._actions_received.put(
+            SimpleNamespace(
+                action=SimpleNamespace(numpy=lambda: np.array([0.1])), timestep=3
+            )
+        )
+        published = {}
+        comp._publish = lambda result: published.update(result)
+
+        comp._send_action_commands()
+
+        data = published["output"]
+        assert data.duration == pytest.approx(1 / comp.config.action_sending_rate)
+        assert data.duration > 0
