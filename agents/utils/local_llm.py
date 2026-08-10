@@ -1,9 +1,14 @@
 import inspect
 import json
-from typing import Dict, Generator, Optional, Union
+import re
+import threading
+from typing import Dict, Generator, List, Optional, Tuple, Union
 
 # Reserved keys in model_options that are not llama_cpp.Llama parameters
 _FILENAME_KEY = "filename"
+
+# Qwen/Hermes-style inline tool call emitted as text
+_TOOL_CALL_RE = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.DOTALL)
 
 
 class LocalLLM:
@@ -73,6 +78,11 @@ class LocalLLM:
                 repo_id=model_path, filename=filename, **kwargs
             )
 
+        # NOTE: llama-cpp contexts are stateful and not thread-safe. Concurrent
+        # calls corrupt the shared batch/KV cache and abort the process. We will
+        # use thread locks for each call.
+        self._lock = threading.Lock()
+
     def __call__(
         self, inference_input: Dict, stream=False
     ) -> Union[Dict, Generator[str, None, None]]:
@@ -95,17 +105,24 @@ class LocalLLM:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
 
-        response = self.llm.create_chat_completion(**kwargs)
-
         if stream:
-            return {"output": self._stream_tokens(response)}
+            return {"output": self._stream_tokens(kwargs)}
+
+        with self._lock:
+            response = self.llm.create_chat_completion(**kwargs)
 
         choice = response["choices"][0]
         message = choice["message"]
+        content = message.get("content") or ""
+        tool_calls = message.get("tool_calls")
 
-        result = {"output": message.get("content") or ""}
+        # parse tool calls (Qwen/Hermes style)
+        if tools and not tool_calls:
+            content, tool_calls = self._extract_inline_tool_calls(content)
 
-        if message.get("tool_calls"):
+        result = {"output": content}
+
+        if tool_calls:
             result["tool_calls"] = [
                 {
                     "function": {
@@ -115,18 +132,50 @@ class LocalLLM:
                         else tc["function"]["arguments"],
                     }
                 }
-                for tc in message["tool_calls"]
+                for tc in tool_calls
             ]
 
         return result
 
-    def _stream_tokens(self, response) -> Generator[str, None, None]:
+    @staticmethod
+    def _extract_inline_tool_calls(
+        content: str,
+    ) -> Tuple[str, Optional[List[Dict]]]:
+        """Extract Qwen/Hermes-style ``<tool_call>{...}</tool_call>`` tags.
+
+        :param content: Model output text
+        :returns: Tuple of (text without tool call tags, tool calls or None)
+        """
+        calls = []
+        for block in _TOOL_CALL_RE.findall(content):
+            try:
+                parsed = json.loads(block)
+            except json.JSONDecodeError:
+                continue
+            if name := parsed.get("name"):
+                calls.append(
+                    {
+                        "function": {
+                            "name": name,
+                            "arguments": parsed.get("arguments") or {},
+                        }
+                    }
+                )
+        if calls:
+            content = _TOOL_CALL_RE.sub("", content).strip()
+        return content, calls or None
+
+    def _stream_tokens(self, kwargs: Dict) -> Generator[str, None, None]:
         """Yield decoded text tokens from a streaming response.
 
-        :param response: Streaming iterator from create_chat_completion
+        The model lock is held for the whole generation, from inside the
+        generator so it is acquired and released by the consuming thread.
+
+        :param kwargs: Keyword arguments for create_chat_completion
         :yields: Decoded text strings, one per chunk
         """
-        for chunk in response:
-            delta = chunk["choices"][0]["delta"]
-            if "content" in delta and delta["content"]:
-                yield delta["content"]
+        with self._lock:
+            for chunk in self.llm.create_chat_completion(**kwargs):
+                delta = chunk["choices"][0]["delta"]
+                if "content" in delta and delta["content"]:
+                    yield delta["content"]
