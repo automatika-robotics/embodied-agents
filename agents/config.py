@@ -12,6 +12,7 @@ __all__ = [
     "VLMConfig",
     "CortexConfig",
     "VLAConfig",
+    "MoveItConfig",
     "SpeechToTextConfig",
     "TextToSpeechConfig",
     "SemanticRouterConfig",
@@ -486,6 +487,150 @@ class VLAConfig(ModelComponentConfig):
 
     def _get_inference_params(self) -> Dict:
         return {}
+
+
+@define(kw_only=True)
+class MoveItConfig(BaseComponentConfig):
+    """
+    Configuration for the MoveIt manipulation component.
+
+    It defines which planning groups to command on a running MoveIt 2 `move_group`
+    node, how to plan (planner selection, effort, tolerances) and how the gripper
+    is controlled.
+
+    :param arm_group_name: Name of the SRDF planning group of the arm (e.g. "panda_arm"). Group names are defined in the robot's MoveIt (SRDF) configuration.
+    :type arm_group_name: str
+    :param gripper_group_name: Name of the SRDF planning group of the gripper (e.g. "hand"). Required for gripper control when `gripper_mode` is "move_group". Default is None.
+    :type gripper_group_name: Optional[str]
+    :param end_effector_link: End-effector link that pose targets and Cartesian waypoints refer to. Empty (default) uses the planning group's default tip link.
+    :type end_effector_link: str
+    :param pose_reference_frame: Default reference frame for pose targets that carry an empty `header.frame_id`. Empty (default) uses move_group's planning frame.
+    :type pose_reference_frame: str
+    :param planning_pipeline: Planning pipeline to use (e.g. "ompl", "pilz_industrial_motion_planner"). Empty (default) uses move_group's default pipeline. Validated against the pipelines advertised by move_group at activation.
+    :type planning_pipeline: str
+    :param planner_id: Planner algorithm within the pipeline (e.g. "RRTConnect", "RRTstar" for OMPL). Empty (default) uses the pipeline's default planner. Validated against the planners advertised by move_group at activation.
+    :type planner_id: str
+    :param num_planning_attempts: Number of planning attempts before the best solution is returned. Default is 5.
+    :type num_planning_attempts: int
+    :param allowed_planning_time: Maximum planning time in seconds. Default is 5.0.
+    :type allowed_planning_time: float
+    :param max_velocity_scaling: Fraction of the joint velocity limits used when timing trajectories, in (0, 1]. Default is 0.1 — deliberately slow; increase once a setup is trusted.
+    :type max_velocity_scaling: float
+    :param max_acceleration_scaling: Fraction of the joint acceleration limits used when timing trajectories, in (0, 1]. Default is 0.1.
+    :type max_acceleration_scaling: float
+    :param goal_position_tolerance: Position tolerance in meters for pose targets. Default is 1e-3.
+    :type goal_position_tolerance: float
+    :param goal_orientation_tolerance: Orientation tolerance in radians for pose targets — a single value applied to all axes, or a list of 3 per-axis values (x, y, z). Relaxing a single axis (e.g. z to ~3.14) makes many poses reachable for underactuated (e.g. 5-DOF) arms. Default is 1e-2.
+    :type goal_orientation_tolerance: Union[float, List[float]]
+    :param goal_joint_tolerance: Position tolerance in radians for joint targets. Default is 1e-3.
+    :type goal_joint_tolerance: float
+    :param cartesian_max_step: End-effector interpolation step in meters for Cartesian paths. Default is 0.0025.
+    :type cartesian_max_step: float
+    :param cartesian_jump_threshold: Maximum allowed joint-space jump between consecutive Cartesian points (0.0 disables the check). Default is 0.0.
+    :type cartesian_jump_threshold: float
+    :param cartesian_avoid_collisions: Whether Cartesian paths must avoid collisions. Default is True.
+    :type cartesian_avoid_collisions: bool
+    :param cartesian_fraction_threshold: Minimum fraction of the requested Cartesian path that must be achievable for the goal to be executed, in [0, 1]. Default is 0.95.
+    :type cartesian_fraction_threshold: float
+    :param gripper_mode: How the gripper is controlled: "move_group" (default) sends named targets on `gripper_group_name`; "gripper_command" sends a control_msgs GripperCommand to `gripper_command_action`.
+    :type gripper_mode: Literal["move_group", "gripper_command"]
+    :param gripper_command_action: Action name of the gripper controller (e.g. "/gripper_controller/gripper_cmd"). Required when `gripper_mode` is "gripper_command".
+    :type gripper_command_action: str
+    :param gripper_open_target: SRDF named target used by `open_gripper` in "move_group" mode. Default is "open".
+    :type gripper_open_target: str
+    :param gripper_close_target: SRDF named target used by `close_gripper` in "move_group" mode. Default is "close".
+    :type gripper_close_target: str
+    :param gripper_open_position: Gripper position used by `open_gripper` in "gripper_command" mode. Default is 0.04.
+    :type gripper_open_position: float
+    :param gripper_close_position: Gripper position used by `close_gripper` in "gripper_command" mode. Default is 0.0.
+    :type gripper_close_position: float
+    :param gripper_max_effort: Maximum effort for GripperCommand goals (0.0 lets the controller decide). Default is 0.0.
+    :type gripper_max_effort: float
+    :param move_group_namespace: Namespace prefix of the move_group interfaces (e.g. "/my_robot" if the actions are at "/my_robot/move_action"). Default is "".
+    :type move_group_namespace: str
+    :param move_group_node_name: Name of the move_group node, used to fetch the SRDF (named targets) from its parameters. Default is "move_group".
+    :type move_group_node_name: str
+    :param named_targets: Manual named-target definitions per group, overriding the SRDF: {group: {target_name: {joint: position}}}. Default is None.
+    :type named_targets: Optional[Dict]
+    :param srdf_file: Path or URL of a local SRDF file used as fallback for named targets when the SRDF cannot be fetched from move_group. Default is None.
+    :type srdf_file: Optional[str]
+    :param server_timeout: Time in seconds to wait for move_group's servers to become available. Default is 30.0.
+    :type server_timeout: float
+    :param execution_timeout: Maximum wall time in seconds for a single plan+execute goal. Default is 120.0.
+    :type execution_timeout: float
+
+    Example of usage:
+    ```python
+    config = MoveItConfig(arm_group_name="panda_arm", gripper_group_name="hand")
+    ```
+    """
+
+    arm_group_name: str = field()
+    gripper_group_name: Optional[str] = field(default=None)
+    end_effector_link: str = field(default="")
+    pose_reference_frame: str = field(default="")
+    planning_pipeline: str = field(default="")
+    planner_id: str = field(default="")
+    num_planning_attempts: int = field(default=5, validator=base_validators.gt(0))
+    allowed_planning_time: float = field(
+        default=5.0, validator=base_validators.gt(0.0)
+    )
+    max_velocity_scaling: float = field(
+        default=0.1, validator=base_validators.in_range(min_value=1e-3, max_value=1.0)
+    )
+    max_acceleration_scaling: float = field(
+        default=0.1, validator=base_validators.in_range(min_value=1e-3, max_value=1.0)
+    )
+    goal_position_tolerance: float = field(
+        default=1e-3, validator=base_validators.gt(0.0)
+    )
+    goal_orientation_tolerance: Union[float, List[float]] = field(default=1e-2)
+    goal_joint_tolerance: float = field(default=1e-3, validator=base_validators.gt(0.0))
+    cartesian_max_step: float = field(default=0.0025, validator=base_validators.gt(0.0))
+    cartesian_jump_threshold: float = field(default=0.0)
+    cartesian_avoid_collisions: bool = field(default=True)
+    cartesian_fraction_threshold: float = field(
+        default=0.95, validator=base_validators.in_range(min_value=0.0, max_value=1.0)
+    )
+    gripper_mode: Literal["move_group", "gripper_command"] = field(
+        default="move_group"
+    )
+    gripper_command_action: str = field(default="")
+    gripper_open_target: str = field(default="open")
+    gripper_close_target: str = field(default="close")
+    gripper_open_position: float = field(default=0.04)
+    gripper_close_position: float = field(default=0.0)
+    gripper_max_effort: float = field(default=0.0)
+    move_group_namespace: str = field(default="")
+    move_group_node_name: str = field(default="move_group")
+    named_targets: Optional[Dict] = field(default=None)
+    srdf_file: Optional[str] = field(default=None)
+    server_timeout: float = field(default=30.0, validator=base_validators.gt(0.0))
+    execution_timeout: float = field(default=120.0, validator=base_validators.gt(0.0))
+
+    @goal_orientation_tolerance.validator
+    def _check_orientation_tolerance(self, _, value):
+        """Orientation tolerance validator"""
+        if isinstance(value, (int, float)):
+            if value <= 0:
+                raise ValueError("goal_orientation_tolerance must be greater than 0")
+            return
+        if len(value) != 3 or any(v <= 0 for v in value):
+            raise ValueError(
+                "goal_orientation_tolerance must be a single positive value or "
+                "a list of 3 positive per-axis (x, y, z) values"
+            )
+
+    @gripper_command_action.validator
+    def _check_gripper_command_action(self, _, value):
+        """Gripper command action validator.
+
+        Defined on gripper_command_action (declared after gripper_mode)."""
+        if self.gripper_mode == "gripper_command" and not value:
+            raise ValueError(
+                "gripper_command_action must be set when gripper_mode is "
+                "'gripper_command' (e.g. '/gripper_controller/gripper_cmd')"
+            )
 
 
 @define(kw_only=True)

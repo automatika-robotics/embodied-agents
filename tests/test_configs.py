@@ -292,3 +292,55 @@ class TestVLMLocalModelDefaults:
         c = MLLMConfig()
         assert c.local_model_path == "ggml-org/Qwen3-VL-2B-Instruct-GGUF"
         assert c.local_model_options == {}
+
+
+class TestMoveItConfig:
+    def test_defaults(self):
+        from agents.config import MoveItConfig
+
+        c = MoveItConfig(arm_group_name="panda_arm")
+        assert c.arm_group_name == "panda_arm"
+        assert c.gripper_group_name is None
+        assert c.planning_pipeline == "" and c.planner_id == ""
+        assert c.gripper_mode == "move_group"
+        assert c.max_velocity_scaling == 0.1
+        assert c.cartesian_fraction_threshold == 0.95
+        assert c.server_timeout == 30.0 and c.execution_timeout == 120.0
+
+    def test_arm_group_required(self):
+        from agents.config import MoveItConfig
+
+        with pytest.raises(TypeError):
+            MoveItConfig()
+
+    def test_gripper_command_mode_requires_action_name(self):
+        from agents.config import MoveItConfig
+
+        with pytest.raises(ValueError, match="gripper_command_action"):
+            MoveItConfig(arm_group_name="arm", gripper_mode="gripper_command")
+        c = MoveItConfig(
+            arm_group_name="arm",
+            gripper_mode="gripper_command",
+            gripper_command_action="/gripper_controller/gripper_cmd",
+        )
+        assert c.gripper_command_action == "/gripper_controller/gripper_cmd"
+
+    def test_orientation_tolerance_scalar_or_triple(self):
+        from agents.config import MoveItConfig
+
+        c = MoveItConfig(
+            arm_group_name="arm", goal_orientation_tolerance=[0.01, 0.01, 3.14]
+        )
+        assert c.goal_orientation_tolerance == [0.01, 0.01, 3.14]
+        with pytest.raises(ValueError, match="3 positive"):
+            MoveItConfig(arm_group_name="arm", goal_orientation_tolerance=[0.01, 0.01])
+        with pytest.raises(ValueError):
+            MoveItConfig(arm_group_name="arm", goal_orientation_tolerance=-1.0)
+
+    def test_scaling_range_enforced(self):
+        from agents.config import MoveItConfig
+
+        with pytest.raises(ValueError):
+            MoveItConfig(arm_group_name="arm", max_velocity_scaling=1.5)
+        with pytest.raises(ValueError):
+            MoveItConfig(arm_group_name="arm", max_velocity_scaling=0.0)
