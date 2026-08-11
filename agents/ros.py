@@ -19,7 +19,9 @@ from ros_sugar.supported_types import (
     OccupancyGrid,
     Odometry,
     PointCloud2,
+    Pose,
     PoseArray,
+    PoseStamped,
     String,
     ROSImage,
     ROSCompressedImage,
@@ -46,12 +48,18 @@ from ros_sugar.utils import (
 from ros_sugar.io.utils import run_external_processor
 from ros_sugar.core import Event, Action
 from ros_sugar import actions
-from ros_sugar.base_clients import ServiceClientHandler, ActionClientHandler
+from ros_sugar.base_clients import (
+    ActionClientConfig,
+    ActionClientHandler,
+    ServiceClientConfig,
+    ServiceClientHandler,
+)
 
 from .launcher import Launcher
 
 # SUGATCOAT INTERFACES
 from automatika_ros_sugar.srv import ExecuteMethod
+from rcl_interfaces.srv import GetParameters
 
 # AGENTS TYPES
 from automatika_embodied_agents.msg import (
@@ -67,7 +75,7 @@ from automatika_embodied_agents.msg import (
     TrackingsMultiSource as ROSTrackingsMultiSource,
     PointsOfInterest as ROSPointsOfInterest,
 )
-from automatika_embodied_agents.action import VisionLanguageAction
+from automatika_embodied_agents.action import MoveManipulator, VisionLanguageAction
 from .callbacks import (
     DetectionsCallback,
     DetectionsMultiSourceCallback,
@@ -91,7 +99,9 @@ __all__ = [
     "OccupancyGrid",
     "Odometry",
     "PointCloud2",
+    "Pose",
     "PoseArray",
+    "PoseStamped",
     "Detections",
     "DetectionsMultiSource",
     "PointsOfInterest",
@@ -123,8 +133,12 @@ __all__ = [
     "component_fallback",
     "component_action",
     "VisionLanguageAction",
+    "MoveManipulator",
+    "GetParameters",
     "run_external_processor",
+    "ServiceClientConfig",
     "ServiceClientHandler",
+    "ActionClientConfig",
     "ActionClientHandler",
     "get_ros_msg_fields_dict",
     "ros_msg_to_str",

@@ -8,13 +8,76 @@ lazily.
 """
 
 import xml.etree.ElementTree as ET
+from enum import Enum
 from importlib.util import find_spec
-from typing import Any, Dict, Iterable, List, Sequence, Union
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Union
+
+from rclpy.logging import get_logger
+
+from .utils import _read_spec_file
 
 _MOVEIT_INSTALL_HINT = (
     "'moveit_msgs' module is required to use the MoveIt component but it is "
     "not installed. Please install the 'ros-<distro>-moveit-msgs' package."
 )
+
+# Parameter of the move_group node that carries the robot SRDF
+SRDF_PARAMETER = "robot_description_semantic"
+
+
+class MoveMode(str, Enum):
+    """Kinds of motion target accepted in a manipulation goal.
+
+    - ``POSE``: an end-effector pose.
+    - ``JOINTS``: explicit joint positions.
+    - ``NAMED``: a named target defined in the robot's SRDF (e.g. "home").
+    - ``CARTESIAN``: a straight-line end-effector path through waypoints.
+    """
+
+    POSE = "pose"
+    JOINTS = "joints"
+    NAMED = "named"
+    CARTESIAN = "cartesian"
+
+    @classmethod
+    def values(cls) -> List[str]:
+        """List the valid mode strings"""
+        return [mode.value for mode in cls]
+
+    @classmethod
+    def from_goal(cls, goal: Any) -> "MoveMode":
+        """Get the mode of a manipulation goal, inferring it when not set.
+
+        When the goal's ``mode`` field is empty the mode is inferred from
+        whichever target field carries a value.
+
+        :param goal: MoveManipulator goal
+        :raises ValueError: If the mode is unknown or no target is given
+        """
+        mode = (goal.mode or "").strip().lower()
+        if mode:
+            try:
+                return cls(mode)
+            except ValueError:
+                raise ValueError(
+                    f"Unknown mode '{mode}'. Valid modes: {cls.values()}"
+                ) from None
+        if goal.named_target:
+            return cls.NAMED
+        if len(goal.cartesian_waypoints):
+            return cls.CARTESIAN
+        if len(goal.joint_names):
+            return cls.JOINTS
+        if goal.target_pose.header.frame_id or any([
+            goal.target_pose.pose.position.x,
+            goal.target_pose.pose.position.y,
+            goal.target_pose.pose.position.z,
+        ]):
+            return cls.POSE
+        raise ValueError(
+            "No motion target given. Set 'mode' and the matching target field: "
+            f"{cls.values()}"
+        )
 
 
 def ensure_moveit_msgs() -> None:
@@ -197,13 +260,53 @@ def build_cartesian_request(
     return request
 
 
-def parse_srdf_group_states(srdf_xml: str) -> Dict[str, Dict[str, Dict[str, float]]]:
-    """Extract named states per planning group from an SRDF document.
+def load_named_targets(
+    srdf: Optional[Union[str, ET.Element]] = None,
+    srdf_file: Optional[str] = None,
+    overrides: Optional[Dict] = None,
+    logger_name: str = "moveit",
+) -> Dict[str, Dict[str, Dict[str, float]]]:
+    """Collect the named targets available per planning group.
 
-    :param srdf_xml: SRDF document content
+    Named targets are read from the robot SRDF, either from already
+    retrieved content or from a file when no content is given. Manually
+    provided targets take precedence over the ones defined in the SRDF.
+
+    :param srdf: SRDF document content, e.g. as read from the move_group node
+    :param srdf_file: Path or URL of an SRDF file, used when no content is given
+    :param overrides: Manually defined targets, {group: {name: {joint: position}}}
+    :param logger_name: Name of the logger to report failures on
     :returns: Mapping of group name to {state name: {joint name: position}}
     """
-    root = ET.fromstring(srdf_xml)
+    states: Dict[str, Dict[str, Dict[str, float]]] = {}
+    if srdf is None and srdf_file:
+        try:
+            srdf = _read_spec_file(srdf_file, spec_type="xml")
+        except Exception as e:
+            get_logger(logger_name).warning(
+                f"Could not read SRDF file '{srdf_file}': {e}"
+            )
+    if srdf is not None:
+        try:
+            states = parse_srdf_group_states(srdf)
+        except Exception as e:
+            get_logger(logger_name).warning(f"Could not parse the robot SRDF: {e}")
+
+    for group, group_states in (overrides or {}).items():
+        states.setdefault(group, {}).update(group_states)
+    return states
+
+
+def parse_srdf_group_states(
+    srdf_xml: Union[str, ET.Element],
+) -> Dict[str, Dict[str, Dict[str, float]]]:
+    """Extract named states per planning group from an SRDF document.
+
+    :param srdf_xml: SRDF document content, or an already parsed XML root
+        (as returned by ``_read_spec_file`` for local files)
+    :returns: Mapping of group name to {state name: {joint name: position}}
+    """
+    root = ET.fromstring(srdf_xml) if isinstance(srdf_xml, str) else srdf_xml
     states: Dict[str, Dict[str, Dict[str, float]]] = {}
     for group_state in root.iter("group_state"):
         group = group_state.get("group")
