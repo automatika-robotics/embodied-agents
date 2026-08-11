@@ -24,6 +24,7 @@ import cv2
 import httpx
 import numpy as np
 from attrs import Attribute
+from rclpy.logging import get_logger
 from jinja2 import Environment, FileSystemLoader
 from jinja2.environment import Template
 from .pluralize import pluralize
@@ -306,15 +307,17 @@ def encode_img_base64(img: np.ndarray) -> str:
 def strip_think_tokens(text: str) -> str:
     """Strip ``<think>...</think>`` blocks from model output.
 
-    Reasoning models (Qwen3, DeepSeek-R1, etc.) emit these blocks which are
-    useful for debugging but should not be forwarded to downstream components.
+    Reasoning models emit these blocks which are useful for debugging but should
+    not be forwarded to downstream components. A block left unterminated
+    (generation truncated by the token limit before ``</think>`` was emitted)
+    is stripped to the end of the text.
 
     :param text: Raw model output text
     :type text: str
     :returns: Text with think blocks removed
     :rtype: str
     """
-    return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+    return re.sub(r"<think>.*?(?:</think>|\Z)", "", text, flags=re.DOTALL).strip()
 
 
 def execute_method_response_to_str(tool_name: str, response) -> str:
@@ -347,14 +350,6 @@ def execute_method_response_to_str(tool_name: str, response) -> str:
 
 class VADStatus(Enum):
     """VAD Status for start and end of detected speech"""
-
-    START = 0
-    ONGOING = 1
-    END = 2
-
-
-class WakeWordStatus(Enum):
-    """WakeWord Status for start and end of detected wake word"""
 
     START = 0
     ONGOING = 1
@@ -408,6 +403,73 @@ def load_model(model_name: str, model_path: str) -> str:
     return str(model_full_path)
 
 
+def load_model_archive(model_name: str, url: str) -> str:
+    """Download and extract a model archive (.tar.bz2/.tar.gz) from a URL.
+
+    Cached under the same directory scheme as `load_model_repo`. When
+    the archive contains a single top-level directory (the sherpa-onnx
+    convention), that directory is returned.
+
+    :param model_name: Local cache name for the model
+    :type model_name: str
+    :param url: Archive URL, or a path to an existing local model directory,
+        which is returned as-is
+    :type url: str
+    :returns: Path to the extracted model directory
+    :rtype: str
+    """
+    import shutil
+    import tarfile
+    from platformdirs import user_cache_dir
+
+    # A local model directory is used directly, no download involved
+    if Path(url).is_dir():
+        return str(Path(url))
+
+    archive_name = url.rstrip("/").rsplit("/", 1)[-1]
+    stem = archive_name
+    for suffix in (".tar.bz2", ".tar.gz", ".tgz", ".tar"):
+        if stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
+            break
+
+    base_dir = Path(user_cache_dir("ros_agents")) / "models" / model_name
+    model_dir = base_dir / stem
+    if model_dir.exists() and any(model_dir.iterdir()):
+        return str(model_dir)
+
+    # Download and extract in a staging directory, move into place on success
+    staging_dir = base_dir / f".{stem}_staging"
+    if staging_dir.exists():
+        shutil.rmtree(staging_dir)
+    staging_dir.mkdir(parents=True, exist_ok=True)
+    archive_path = staging_dir / archive_name
+    try:
+        with httpx.stream("GET", url, timeout=60, follow_redirects=True) as r:
+            r.raise_for_status()
+            with open(archive_path, "wb") as f:
+                for chunk in r.iter_bytes(chunk_size=65536):
+                    f.write(chunk)
+        with tarfile.open(archive_path) as tar:
+            try:
+                tar.extractall(staging_dir, filter="data")
+            except TypeError:
+                # python < 3.12 without the filter argument
+                tar.extractall(staging_dir)  # nosec
+        archive_path.unlink()
+
+        entries = list(staging_dir.iterdir())
+        extracted = (
+            entries[0] if len(entries) == 1 and entries[0].is_dir() else staging_dir
+        )
+        shutil.move(str(extracted), str(model_dir))
+    finally:
+        if staging_dir.exists():
+            shutil.rmtree(staging_dir)
+
+    return str(model_dir)
+
+
 def load_model_repo(
     model_name: str,
     repo_id: str,
@@ -417,7 +479,9 @@ def load_model_repo(
 
     :param model_name: Local cache name for the model
     :type model_name: str
-    :param repo_id: HuggingFace repository ID (e.g. 'onnx-community/Qwen3-0.6B-ONNX')
+    :param repo_id: HuggingFace repository ID (e.g. 'onnx-community/Qwen3-0.6B-ONNX'),
+        or a path to an existing local model directory, which is returned as-is
+        without downloading anything
     :type repo_id: str
     :param allow_patterns: Optional glob pattern to filter which files to download
         (e.g. 'cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/*'). When set,
@@ -430,6 +494,10 @@ def load_model_repo(
     import shutil
     from pathlib import Path
     from platformdirs import user_cache_dir
+
+    # A local model directory is used directly, no download involved
+    if Path(repo_id).is_dir():
+        return str(Path(repo_id))
 
     cachedir = user_cache_dir("ros_agents")
     # Use repo_id to create a unique subdirectory
@@ -610,6 +678,11 @@ def _normalize_entry(spec: Dict) -> Dict:
     if not feature_type:
         return {}
 
+    # NOTE: The policy server builds state features only when dtype is exactly
+    # float32 (values get rebuilt as float32 there anyway)
+    if dtype == "float64":
+        dtype = "float32"
+
     names = _normalize_names(spec.get("names"))
 
     entry = {
@@ -647,6 +720,11 @@ def build_lerobot_features_from_dataset_info(
         # NOTE: Only checking for state, images and action for now
         if key == "observation.state":
             features[key] = _normalize_entry(spec)
+            # NOTE: This should be removed when feature checking is fixed in LeRobot
+            if spec.get("dtype", "").lower() == "float64":
+                get_logger("lerobot_dataset_features").warning(
+                    f"Dataset declares '{key}' as float64. Sending it as float32 for policy server compatibility, since the server would silently drop non float32 state features and rebuilds the values as float32 anyway."
+                )
         elif key.startswith("observation.images."):
             features[key] = _normalize_entry(spec)
             image_keys.append(key.removeprefix("observation.images."))

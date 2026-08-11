@@ -570,6 +570,14 @@ class JointTrajectoryPoint(SupportedType):
         return JointTrajectoryPointROS
 
     @classmethod
+    def _to_ros_duration(cls, seconds: float) -> Any:
+        """Convert seconds as float to a builtin_interfaces Duration message"""
+        from builtin_interfaces.msg import Duration
+
+        sec = int(seconds)
+        return Duration(sec=sec, nanosec=int((seconds - sec) * 1e9))
+
+    @classmethod
     def convert(cls, output: JointsData, index: Optional[int] = None, **_) -> Any:
         """
         Takes joint state data and converts it into a ROS message
@@ -578,12 +586,17 @@ class JointTrajectoryPoint(SupportedType):
         :return: JointTrajectory
         """
         msg = cls.get_ros_type()()
-        msg.time_from_start = output.delay
+        # Point idx is reached after the initial delay plus the per point
+        # duration of all points up to and including this one
+        point_number = 1 if index is None else index + 1
+        msg.time_from_start = cls._to_ros_duration(
+            output.delay + output.duration * point_number
+        )
 
         if index is None:
             msg.positions = output.positions.tolist()
             msg.velocities = output.velocities.tolist()
-            msg.accelerations = output.velocities.tolist()
+            msg.accelerations = output.accelerations.tolist()
             msg.effort = output.efforts.tolist()
             return msg
 
@@ -686,7 +699,7 @@ class JointJog(SupportedType):
 
         msg.displacements = output.positions.tolist()
         msg.velocities = output.velocities.tolist()
-        msg.duration = output.duration.tolist()
+        msg.duration = float(output.duration)
 
         return msg
 

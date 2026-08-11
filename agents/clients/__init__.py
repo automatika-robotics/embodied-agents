@@ -36,7 +36,7 @@ Some clients might need additional dependacies, which are provided in the follow
 
 * - **LeRobot**
   - [LeRobotClient](agents.clients.lerobot.LeRobotClient)
-  - A GRPC based asynchronous client for vision-language-action (VLA) policies served on LeRobot Policy Server. Supports various robot action policies available in LeRobot package by HuggingFace. It can be invoked with the generic wrapper [LeRobotPolicy](agents.models.md#classes).
+  - A GRPC based asynchronous client for vision-language-action (VLA) policies served on LeRobot Policy Server. Supports all robot action policies servable by the LeRobot Async Policy Server (LeRobot >= 0.6.0), including SmolVLA, Pi0/Pi0.5, NVIDIA GR00T N1.7, ACT and Diffusion policies. It can be invoked with the generic wrapper [LeRobotPolicy](agents.models.md#classes).
     Requires grpc and torch (at least the CPU version):<br/>
     `pip install grpcio`<br/>
     `pip install torch --index-url https://download.pytorch.org/whl/cpu`

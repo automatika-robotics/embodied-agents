@@ -1,12 +1,14 @@
 """Tests for SemanticRouter component — requires rclpy."""
 
 import pytest
-from unittest.mock import MagicMock, PropertyMock
+from unittest.mock import MagicMock, PropertyMock, patch
 
 from agents.config import SemanticRouterConfig, LLMConfig
 from agents.ros import Topic, Route
+from agents.components.llm import LLM
 from agents.components.semantic_router import SemanticRouter, RouterMode
 from agents.clients.model_base import ModelClient
+from tests.conftest import mock_component_internals
 
 
 @pytest.fixture
@@ -68,6 +70,37 @@ class TestRouterConstruction:
                 routes=routes,
                 component_name="test_fail_router",
             )
+
+    def test_agentic_local_mode_deploys_local_model(self, rclpy_init, routes):
+        """Regression: agentic routing on the local LLM must deploy the model
+        on configure (LLM.custom_on_configure only deploys for type(self) is
+        LLM, so the router has to trigger its own deploy)."""
+        router = SemanticRouter(
+            inputs=[Topic(name="in", msg_type="String")],
+            routes=routes,
+            config=LLMConfig(enable_local_model=True),
+            component_name="test_local_deploy_router",
+        )
+        mock_component_internals(router)
+        router._deploy_local_model = MagicMock()
+        with patch.object(LLM, "custom_on_configure"):
+            router.custom_on_configure()
+        router._deploy_local_model.assert_called_once()
+
+    def test_agentic_client_mode_does_not_deploy_local_model(
+        self, rclpy_init, routes, mock_model_client
+    ):
+        router = SemanticRouter(
+            inputs=[Topic(name="in", msg_type="String")],
+            routes=routes,
+            model_client=mock_model_client,
+            component_name="test_client_no_deploy_router",
+        )
+        mock_component_internals(router)
+        router._deploy_local_model = MagicMock()
+        with patch.object(LLM, "custom_on_configure"):
+            router.custom_on_configure()
+        router._deploy_local_model.assert_not_called()
 
     def test_no_tool_support_raises(self, rclpy_init, routes):
         client = MagicMock(spec=ModelClient)

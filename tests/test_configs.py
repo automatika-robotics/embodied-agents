@@ -7,6 +7,7 @@ from agents.config import (
     LLMConfig,
     MLLMConfig,
     MotionDetectorConfig,
+    VLAConfig,
     SpeechToTextConfig,
     TextToSpeechConfig,
     SemanticRouterConfig,
@@ -66,9 +67,9 @@ class TestMLLMConfig:
         assert c.task == "general"
         assert c.enable_local_model is True
 
-    def test_stream_with_local_raises(self):
-        with pytest.raises(ValueError):
-            MLLMConfig(enable_local_model=True, stream=True)
+    def test_stream_with_local_ok(self):
+        c = MLLMConfig(enable_local_model=True, stream=True)
+        assert c.stream is True
 
     def test_inference_params_with_task(self):
         c = MLLMConfig(task="general")
@@ -86,6 +87,15 @@ class TestSTTConfig:
     def test_construction(self):
         """SpeechToTextConfig can be constructed with defaults."""
         SpeechToTextConfig()
+
+    def test_wakeword_defaults(self):
+        c = SpeechToTextConfig(enable_vad=True, enable_wakeword=True)
+        assert c.wakeword_phrase == "ok robot"
+        assert c.wakeword_threshold == 0.25
+        assert c.wakeword_model_path.endswith(".tar.bz2")
+        # the openWakeWord-era model fields are gone
+        assert not hasattr(c, "melspectrogram_model_path")
+        assert not hasattr(c, "embedding_model_path")
 
     def test_wakeword_requires_vad(self):
         with pytest.raises(ValueError):
@@ -127,16 +137,38 @@ class TestTTSConfig:
         TextToSpeechConfig()
 
     def test_stream_with_local_ok(self):
-        """Local model + stream is accepted at config time; stream is
-        disabled at runtime by _deploy_local_model."""
+        """Local model + stream is a supported combination (chunks are
+        yielded by the local model as they are synthesized)."""
         c = TextToSpeechConfig(enable_local_model=True)
         assert c.enable_local_model is True
-        assert c.stream is True  # will be overridden at deploy time
+        assert c.stream is True
 
     def test_local_no_stream_ok(self):
         c = TextToSpeechConfig(enable_local_model=True, stream=False)
         assert c.enable_local_model is True
         assert c.stream is False
+
+    def test_local_model_defaults(self):
+        c = TextToSpeechConfig()
+        assert "pocket-tts" in c.local_model_path
+        assert c.speaker_id == 0
+        assert c.local_model_options == {}
+
+    def test_speaker_id_non_negative(self):
+        with pytest.raises(ValueError):
+            TextToSpeechConfig(speaker_id=-1)
+        c = TextToSpeechConfig(speaker_id=3)
+        assert c.speaker_id == 3
+
+    def test_local_model_options_round_trip(self):
+        config = TextToSpeechConfig(
+            local_model_options={"model_type": "kokoro", "length_scale": 1.2}
+        )
+        rebuilt = TextToSpeechConfig(**json.loads(config.to_json()))
+        assert rebuilt.local_model_options == {
+            "model_type": "kokoro",
+            "length_scale": 1.2,
+        }
 
     def test_stream_to_ip_without_play_raises(self):
         with pytest.raises(ValueError):
@@ -212,3 +244,51 @@ class TestMotionDetectorConfig:
         rebuilt = MotionDetectorConfig(**json.loads(config.to_json()))
         assert rebuilt.voxel_size == pytest.approx(0.2)
         assert rebuilt.base_frame == "base_footprint"
+
+
+class TestVLAConfig:
+    _MAPS = {
+        "joint_names_map": {"shoulder_pan.pos": "joint1"},
+        "camera_inputs_map": {"front": {"name": "camera", "msg_type": "Image"}},
+    }
+
+    def test_construction_defaults(self):
+        c = VLAConfig(**self._MAPS)
+        assert c.aggregate_fn_name == "latest_only"
+        # main action loop runs at the observation sending rate
+        assert c.loop_rate == c.observation_sending_rate
+
+    def test_aggregate_preset_selectable(self):
+        c = VLAConfig(**self._MAPS, aggregate_fn_name="weighted_average")
+        assert c.aggregate_fn_name == "weighted_average"
+
+    def test_rates_must_be_positive(self):
+        with pytest.raises(ValueError):
+            VLAConfig(**self._MAPS, observation_sending_rate=0.0)
+        with pytest.raises(ValueError):
+            VLAConfig(**self._MAPS, action_sending_rate=0.0)
+
+    def test_policy_action_units_default(self):
+        c = VLAConfig(**self._MAPS)
+        assert c.policy_action_units == "radians"
+
+    def test_serialization_round_trip(self):
+        """Multiprocess launch path: config survives a JSON round trip."""
+        config = VLAConfig(
+            **self._MAPS,
+            aggregate_fn_name="conservative",
+            policy_action_units="normalized",
+        )
+        rebuilt = VLAConfig(**json.loads(config.to_json()))
+        assert rebuilt.aggregate_fn_name == "conservative"
+        assert rebuilt.policy_action_units == "normalized"
+        assert rebuilt.joint_names_map == {"shoulder_pan.pos": "joint1"}
+
+
+class TestVLMLocalModelDefaults:
+    def test_default_is_qwen3_vl(self):
+        from agents.config import MLLMConfig
+
+        c = MLLMConfig()
+        assert c.local_model_path == "ggml-org/Qwen3-VL-2B-Instruct-GGUF"
+        assert c.local_model_options == {}

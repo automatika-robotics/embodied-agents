@@ -160,6 +160,7 @@ class MLLM(LLM):
             model_path=self.config.local_model_path,
             device=self.config.device_local_model,
             ncpu=self.config.ncpu_local_model,
+            model_options=self.config.local_model_options,
         )
 
     def _create_input(self, *_, **kwargs) -> Optional[Dict[str, Any]]:

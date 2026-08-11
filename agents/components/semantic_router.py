@@ -134,9 +134,13 @@ class SemanticRouter(LLM):
                 component_config.stream = False
                 component_config.enable_rag = False
                 component_config.chat_history = False
+                component_config.strip_think_tokens = True
             else:
                 component_config = LLMConfig(
-                    stream=False, enable_rag=False, chat_history=False
+                    stream=False,
+                    enable_rag=False,
+                    chat_history=False,
+                    strip_think_tokens=True,
                 )
         elif db_client:
             self.routing_mode = RouterMode.VECTOR
@@ -151,6 +155,7 @@ class SemanticRouter(LLM):
             component_config.stream = False
             component_config.enable_rag = False
             component_config.chat_history = False
+            component_config.strip_think_tokens = True
         else:
             raise ValueError(
                 "A semantic router must be initiated with a DB Client (vector mode), a model client with an LLM model or an LLMConfig with enable_local_model=True (agentic mode)."
@@ -290,6 +295,9 @@ class SemanticRouter(LLM):
         if self.routing_mode is RouterMode.LLM:
             self.get_logger().info("SemanticRouter starting in LLM (Agentic) Mode.")
             self._setup_llm_routes(self.routes_dict)
+            # deploy local LLM when routing agentically without a model client
+            if not self.model_client and self.config.enable_local_model:
+                self._deploy_local_model()
         else:
             self.get_logger().info(
                 "SemanticRouter starting in VECTOR (Embedding) Mode."

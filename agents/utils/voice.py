@@ -1,9 +1,10 @@
-from typing import Optional, List
+from typing import Optional, List, Union
 from typing import Callable
 import logging
+from pathlib import Path
 
 import numpy as np
-from .utils import VADStatus, WakeWordStatus
+from .utils import VADStatus
 
 try:
     import onnxruntime as ort
@@ -137,157 +138,148 @@ class VADIterator:
         return None
 
 
-class AudioFeatures:
+class WakeWordSpotter:
     """
-     Adapted streaming implementation of AudioFeatures class from the wonderful [openWakeWord project](https://github.com/dscripka/openWakeWord/). This class converts raw audio to audio embeddings. It uses the following two ONNX models.
+    Open-vocabulary wake word detection using sherpa-onnx's streaming
+    KeywordSpotter (default, a small zipformer transducer).
 
-    - An ONNX implementation of Torch's melspectrogram function with fixed parameters.
-
-    - A shared feature extraction backbone model that converts melspectrogram inputs into general-purpose speech audio embeddings. This model is provided by Google as a TFHub module under an Apache-2.0 license and manually reimplemented in openWakeWord.
-    """
-
-    def __init__(
-        self,
-        melspectogram_model_path: str,
-        embedding_model_path: str,
-        ncpu: int = 1,
-        device: str = "cpu",
-    ):
-        # Initialize ONNX options
-        sessionOptions = ort.SessionOptions()
-        sessionOptions.inter_op_num_threads = ncpu
-        sessionOptions.intra_op_num_threads = ncpu
-
-        providers = _get_onnx_providers(device, "WakeWord")
-        # Initialize melspectrogram model
-        self.melspec_model = ort.InferenceSession(
-            melspectogram_model_path, sess_options=sessionOptions, providers=providers
-        )
-
-        self.melspec_model_predict = lambda x: self.melspec_model.run(
-            None, {"input": x}
-        )
-
-        # Initialize audio embedding model
-        self.embedding_model = ort.InferenceSession(
-            embedding_model_path, sess_options=sessionOptions, providers=providers
-        )
-
-        self.embedding_model_predict = lambda x: self.embedding_model.run(
-            None, {"input_1": x}
-        )[0].squeeze()
-
-        # Buffers for storing melspectrograms and embeddings
-        self.melspectrogram_buffer = np.ones((76, 32))  # n_frames x num_features
-        self.embeddings_buffer = self._initialize_random_embeddings(
-            np.random.randint(-1000, 1000, 16000 * 4).astype(np.float32)
-        )
-
-    def _get_melspectrogram(
-        self,
-        x: np.ndarray,
-        melspec_transform: Callable = lambda x: x / 10 + 2,
-    ):
-        """
-        Function to compute the mel-spectrogram of the provided audio samples.
-        melspec_transform: A function to transform the computed melspectrogram.
-        Defaults to a transform that makes the ONNX melspectrogram model closer to the native Tensorflow implementation from Google (https://tfhub.dev/google/speech_embedding/1).
-        """
-        x = x[None,] if len(x.shape) < 2 else x
-
-        # compute melspectrogram
-        outputs = self.melspec_model_predict(x)
-        spec = np.squeeze(outputs[0])
-
-        # transform melspectrogram
-        spec = melspec_transform(spec)
-
-        return spec
-
-    def _initialize_random_embeddings(
-        self, x: np.ndarray, window_size: int = 76, step_size: int = 8, **kwargs
-    ):
-        """Initialize random embeddings"""
-        spec = self._get_melspectrogram(x, **kwargs)
-        windows = []
-        for i in range(0, spec.shape[0], step_size):
-            window = spec[i : i + window_size]
-            if window.shape[0] == window_size:  # truncate short windows
-                windows.append(window)
-        batch = np.expand_dims(np.array(windows), axis=-1).astype(np.float32)
-        embedding = self.embedding_model_predict(batch)
-        return embedding
-
-    def get_embeddings(self, n_feature_frames: int = 16) -> np.ndarray:
-        """Get computed embeddings from the buffer"""
-        return self.embeddings_buffer[int(-1 * n_feature_frames) :, :][None,].astype(
-            np.float32
-        )
-
-    def __call__(self, x):
-        """Calclate melspetrogram and audio embeddings"""
-        # calculate melspectogram
-        mels = self._get_melspectrogram(x)
-        self.melspectrogram_buffer = np.roll(
-            self.melspectrogram_buffer, -mels.shape[0], axis=0
-        )
-        self.melspectrogram_buffer[-mels.shape[0] :] = mels
-
-        # calculate audio embeddings
-        x = self.melspectrogram_buffer.astype(np.float32)[None, :, :, None]
-
-        self.embeddings_buffer = np.roll(self.embeddings_buffer, -1, axis=0)
-        self.embeddings_buffer[-1:] = self.embedding_model_predict(x)
-
-
-class WakeWord:
-    """
-    A wakeword model classification class that uses pre-trained wakeword models adapted for models presented in [openWakeWord project](https://github.com/dscripka/openWakeWord/).
-    This class consumed audio embeddings and gives out the probability of detecting a wakeword.
-    Simple models like 2 layer RNNs work fairly well as wakeword classification models. Pre-trained models from openWakeWord are available [here](https://github.com/dscripka/openWakeWord/tree/main?tab=readme-ov-file#pre-trained-models).
-    To train a custom model, follow this simple [tutorial](https://github.com/dscripka/openWakeWord/blob/main/notebooks/automatic_model_training.ipynb) provided by openWakeWord. Please check [licensing information](https://github.com/dscripka/openWakeWord/tree/main?tab=readme-ov-file#license) for pre-trained models, before utilizing them.
+    The wake phrase is plain text, encoded into the bundle's BPE tokens at
+    load time, so it can be changed in the config without training a
+    per-phrase classifier. Audio is fed block by block (same int16-scale
+    float convention as VADIterator) and a detection returns the phrase.
     """
 
     def __init__(
         self,
         model_path: str,
-        threshold: float = 0.6,
-        ncpu=1,
-        device="cpu",
+        phrase: Union[str, List[str]] = "ok robot",
+        threshold: float = 0.25,
+        score: float = 2.0,
+        sample_rate: int = 16000,
+        ncpu: int = 1,
+        device: str = "cpu",
     ):
-        sessionOptions = ort.SessionOptions()
-        sessionOptions.inter_op_num_threads = ncpu
-        sessionOptions.intra_op_num_threads = ncpu
+        try:
+            import sherpa_onnx
+            import sentencepiece  # noqa: F401 — used when encoding the phrase
+        except ImportError as e:
+            raise ImportError(
+                "Wake word detection requires sherpa-onnx and sentencepiece. "
+                "Install them with: pip install sherpa-onnx sentencepiece"
+            ) from e
 
-        providers = _get_onnx_providers(device, "WakeWord")
-        # Create inference session
-        self.model = ort.InferenceSession(
-            model_path, sess_options=sessionOptions, providers=providers
+        model_dir = Path(model_path)
+
+        def find(patterns: List[str]) -> Optional[str]:
+            for pattern in patterns:
+                for match in sorted(model_dir.glob(pattern)):
+                    return str(match)
+            return None
+
+        encoder = find(["encoder*.onnx", "*encoder*.onnx"])
+        decoder = find(["decoder*.onnx", "*decoder*.onnx"])
+        joiner = find(["joiner*.onnx", "*joiner*.onnx"])
+        tokens = find(["tokens.txt"])
+        if not all([encoder, decoder, joiner, tokens]):
+            raise FileNotFoundError(
+                f"Could not find a sherpa-onnx keyword spotting bundle in "
+                f"'{model_path}'. Expected encoder/decoder/joiner onnx files "
+                "and tokens.txt (e.g. sherpa-onnx-kws-zipformer-gigaspeech-3.3M)."
+            )
+
+        phrases = [phrase] if isinstance(phrase, str) else list(phrase)
+        keywords_file = self._build_keywords_file(model_dir, phrases)
+
+        self._sample_rate = sample_rate
+        self._spotter = sherpa_onnx.KeywordSpotter(
+            tokens=tokens,
+            encoder=encoder,
+            decoder=decoder,
+            joiner=joiner,
+            keywords_file=keywords_file,
+            keywords_threshold=threshold,
+            keywords_score=score,
+            num_threads=ncpu,
+            provider="cuda" if device == "cuda" else "cpu",
         )
-        self.model_input = self.model.get_inputs()[0].shape[1]
-        self.model_output = self.model.get_outputs()[0].shape[1]
-        self.threshold = threshold
-        self.prob: float = 0.0
+        self._stream = self._spotter.create_stream()
 
-    def _predict(self, x) -> Optional[WakeWordStatus]:
-        self.prob = self.model.run(None, {self.model.get_inputs()[0].name: x})[
-            0
-        ].squeeze()
+    @staticmethod
+    def _build_keywords_file(model_dir: Path, phrases: List[str]) -> str:
+        """Encode wake phrases into the bundle's BPE tokens and write the
+        keywords file sherpa expects (one line per phrase: tokens @phrase)."""
+        bpe_model = None
+        for match in sorted(model_dir.glob("*.model")):
+            bpe_model = str(match)
+            break
+        if bpe_model is None:
+            raise FileNotFoundError(
+                f"No BPE model (bpe.model) found in '{model_dir}' — required "
+                "to encode custom wake phrases for this bundle."
+            )
+        try:
+            import sentencepiece as spm
+        except ImportError as e:
+            raise ImportError(
+                "Encoding wake phrases requires sentencepiece. "
+                "Install it with: pip install sentencepiece"
+            ) from e
 
-    def __call__(self, x: np.ndarray):
-        """Check wakeword probability in audio embeddings"""
-        if self.prob < self.threshold:
-            self._predict(x)
-            if self.prob > self.threshold:
-                return WakeWordStatus.START
-            else:
-                return
-        elif self.prob >= self.threshold:
-            self._predict(x)
-            if self.prob < self.threshold:
-                return WakeWordStatus.END
-            else:
-                return WakeWordStatus.ONGOING
+        sp = spm.SentencePieceProcessor()
+        sp.load(bpe_model)
+
+        # read the token vocabulary to verify the casing convention
+        vocab = set()
+        with open(model_dir / "tokens.txt", encoding="utf-8") as f:
+            for line in f:
+                parts = line.split()
+                if parts:
+                    vocab.add(parts[0])
+
+        lines = []
+        for phrase in phrases:
+            pieces = None
+            for candidate in (phrase.upper(), phrase, phrase.lower()):
+                encoded = sp.encode_as_pieces(candidate)
+                if encoded and all(p in vocab for p in encoded):
+                    pieces = encoded
+                    break
+            if pieces is None:
+                raise ValueError(
+                    f"The wake phrase '{phrase}' cannot be encoded with this "
+                    "bundle's tokens — check that the phrase language matches "
+                    "the keyword spotting model."
+                )
+            # NOTE: sherpa's keywords parser splits on whitespace. The display
+            # label after @ must not contain spaces
+            label = phrase.replace(" ", "_")
+            lines.append(f"{' '.join(pieces)} @{label}")
+
+        keywords_file = model_dir / "agents_keywords.txt"
+        keywords_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return str(keywords_file)
+
+    def process(self, x_np_32: np.ndarray) -> Optional[str]:
+        """Feed an audio block and return the detected wake phrase, if any.
+
+        :param x_np_32: int16-scale float32 samples (same convention as
+            VADIterator)
+        """
+        self._stream.accept_waveform(self._sample_rate, x_np_32 / 32768.0)
+        detected = None
+        while self._spotter.is_ready(self._stream):
+            self._spotter.decode_stream(self._stream)
+            result = self._spotter.get_result(self._stream)
+            if result:
+                detected = result
+                # reset so the same stream can detect again later
+                self._spotter.reset_stream(self._stream)
+        return detected
+
+    def reset(self):
+        """Start a fresh detection stream (e.g. at the end of a speech
+        segment) so stale audio does not linger in the decoder state."""
+        self._stream = self._spotter.create_stream()
 
 
 class HypothesisBuffer:

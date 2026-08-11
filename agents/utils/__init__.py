@@ -10,8 +10,8 @@ from .utils import (
     strip_think_tokens,
     execute_method_response_to_str,
     VADStatus,
-    WakeWordStatus,
     load_model,
+    load_model_archive,
     load_model_repo,
     flatten,
     build_url,
@@ -37,7 +37,7 @@ __all__ = [
     "strip_think_tokens",
     "execute_method_response_to_str",
     "VADStatus",
-    "WakeWordStatus",
     "load_model",
+    "load_model_archive",
     "load_model_repo",
 ]

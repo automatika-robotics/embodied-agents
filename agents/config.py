@@ -74,7 +74,7 @@ class LLMConfig(ModelComponentConfig):
         Default is 0.8 and must be greater than 0.0.
     :type temperature: float
     :param max_new_tokens: The maximum number of new tokens to generate.
-        Default is 100 and must be greater than 0.
+        Default is 512 and must be greater than 0.
     :type max_new_tokens: int
     :param stream: Publish the llm output as a stream of tokens, useful when sending llm output to a user facing client or to a TTS component. Cannot be used in conjunction with tool calling.
         Default is false
@@ -85,7 +85,7 @@ class LLMConfig(ModelComponentConfig):
     :param response_terminator: A string token marking that the end of a single response from the model. This token is only used in case of a persistent clients, such as a websocket client and when stream is set to True. It is not published. This value cannot be an empty string.
         Default is '<<Response Ended>>'
     :type response_terminator: str
-    :param strip_think_tokens: Whether to strip ``<think>...</think>`` blocks from model output. Reasoning models (e.g. Qwen3, DeepSeek-R1) emit these blocks which are useful for debugging but should typically not be forwarded to downstream components such as TTS or UI. Applies to both streaming and non-streaming output. Default is True.
+    :param strip_think_tokens: Whether to strip ``<think>...</think>`` blocks from model output. Reasoning models emit these blocks which are useful for debugging but should typically not be forwarded to downstream components such as TTS or UI. Applies to both streaming and non-streaming output. Default is True.
     :type strip_think_tokens: bool
     :param enable_local_model: Whether to enable a local LLM model via llama.cpp, allowing the component to run without a remote model client. Requires the ``llama-cpp-python`` package. Default is False.
     :type enable_local_model: bool
@@ -95,6 +95,8 @@ class LLMConfig(ModelComponentConfig):
     :type ncpu_local_model: int
     :param local_model_path: HuggingFace repository ID for a GGUF model (default: ``Qwen/Qwen3-0.6B-GGUF``), or a local path to a ``.gguf`` file. This parameter is only effective when ``enable_local_model`` is True.
     :type local_model_path: Optional[str]
+    :param local_model_options: Additional options for the local model, validated at load time against the ``llama_cpp.Llama`` signature (e.g. ``n_ctx``, ``n_batch``, ``flash_attn``, ``chat_format``). Reserved keys: ``filename`` selects the GGUF file when a repository ships several quantizations (e.g. ``"*q4_k_m*.gguf"``); for VLM components ``model_type`` additionally forces the VLM family (moondream, qwen_vl, minicpm, llava, llava16, nanollava) instead of detecting it from the model name. An unknown key raises an error listing the valid keys. Only effective when ``enable_local_model`` is True. Default is ``{}``.
+    :type local_model_options: Dict
 
     Example of usage:
     ```python
@@ -118,7 +120,7 @@ class LLMConfig(ModelComponentConfig):
         default=10, validator=base_validators.gt(4)
     )  # number of user messages
     temperature: float = field(default=0.8, validator=base_validators.gt(0.0))
-    max_new_tokens: int = field(default=1000, validator=base_validators.gt(0))
+    max_new_tokens: int = field(default=512, validator=base_validators.gt(0))
     stream: bool = field(default=False)
     break_character: str = field(default=".")
     response_terminator: str = field(default="<<Response Ended>>")
@@ -127,6 +129,7 @@ class LLMConfig(ModelComponentConfig):
     device_local_model: Literal["cpu", "cuda"] = field(default="cuda")
     ncpu_local_model: int = field(default=1)
     local_model_path: Optional[str] = field(default="Qwen/Qwen3-0.6B-GGUF")
+    local_model_options: Dict = field(default=Factory(dict))
     _system_prompt: Optional[str] = field(default=None, alias="_system_prompt")
     _component_prompt: Optional[Union[str, Path]] = field(
         default=None, alias="_component_prompt"
@@ -297,19 +300,19 @@ class MLLMConfig(LLMConfig):
     :param response_terminator: A string token marking that the end of a single response from the model. This token is only used in case of a persistent clients, such as a websocket client and when stream is set to True. It is not published. This value cannot be an empty string.
         Default is '<<Response Ended>>'
     :type response_terminator: str
-    :param strip_think_tokens: Whether to strip ``<think>...</think>`` blocks from model output. Reasoning models (e.g. Qwen3, DeepSeek-R1) emit these blocks which are useful for debugging but should typically not be forwarded to downstream components such as TTS or UI. Applies to both streaming and non-streaming output. Default is True.
+    :param strip_think_tokens: Whether to strip ``<think>...</think>`` blocks from model output. Reasoning models emit these blocks which are useful for debugging but should typically not be forwarded to downstream components such as TTS or UI. Applies to both streaming and non-streaming output. Default is True.
     :type strip_think_tokens: bool
      :param task: The specific task the VLM should perform. This can help tailor model behavior and is useful when the VLM being used with the component has been trained on specific tasks. For an example of such a model check out RoboBrain2 in models.
         Supported values are: "general", "pointing", "affordance", "trajectory", and "grounding".
         Default is None.
     :type task: Optional[Literal["general", "pointing", "affordance", "trajectory", "grounding"]]
-    :param enable_local_model: Whether to enable a local VLM via llama.cpp (Moondream2), allowing the component to run without a remote model client. Requires the ``llama-cpp-python`` package. Default is False.
+    :param enable_local_model: Whether to enable a local VLM via llama.cpp (Qwen3-VL by default), allowing the component to run without a remote model client. Requires the ``llama-cpp-python`` package. Default is False.
     :type enable_local_model: bool
     :param device_local_model: Device to run the local model on, either "cpu" or "cuda" (default: "cuda"). This parameter is only effective when ``enable_local_model`` is True.
     :type device_local_model: str
     :param ncpu_local_model: Number of CPU cores to allocate to the local model when using CPU (default: 1). This parameter is only effective when ``enable_local_model`` is True.
     :type ncpu_local_model: int
-    :param local_model_path: HuggingFace repository ID for a GGUF VLM model (default: ``ggml-org/moondream2-20250414-GGUF``). This parameter is only effective when ``enable_local_model`` is True.
+    :param local_model_path: HuggingFace repository ID for a GGUF VLM model (default: ``ggml-org/Qwen3-VL-2B-Instruct-GGUF``), a local directory with the GGUF and mmproj files, or a local path to a ``.gguf`` file. The VLM family (qwen_vl, gemma, moondream, minicpm, llava, llava16, nanollava) is detected from the model name. This parameter is only effective when ``enable_local_model`` is True.
     :type local_model_path: Optional[str]
 
     Example of usage:
@@ -326,7 +329,9 @@ class MLLMConfig(LLMConfig):
     task: Optional[
         Literal["general", "pointing", "affordance", "trajectory", "grounding"]
     ] = field(default=None)
-    local_model_path: Optional[str] = field(default="ggml-org/moondream2-20250414-GGUF")
+    local_model_path: Optional[str] = field(
+        default="ggml-org/Qwen3-VL-2B-Instruct-GGUF"
+    )
 
     @task.validator
     def _check_task(self, _, value):
@@ -339,13 +344,6 @@ class MLLMConfig(LLMConfig):
             raise ValueError(
                 f"Local VLM model only supports general VQA. "
                 f"Task '{value}' requires a remote model client."
-            )
-
-    def __attrs_post_init__(self):
-        """Validate cross-field constraints for local model"""
-        if self.enable_local_model and self.stream:
-            raise ValueError(
-                "stream cannot be set to True when enable_local_model is True in VLMConfig. Local VLM model does not support streaming."
             )
 
     def _get_inference_params(self) -> Dict:
@@ -373,7 +371,11 @@ class VLAConfig(ModelComponentConfig):
         (keys) to the actual joint names in the robot's URDF/ROS system (values).
     :type joint_names_map: Dict[str, str]
     :param camera_inputs_map: A mapping of camera names expected by the model (keys)
-        to the corresponding ROS topics (values).
+        to the corresponding ROS topics (values). A camera whose dataset feature is
+        single channel is treated as a depth camera and fetches depth frames from its
+        topic (a depth Image topic or the depth part of an RGBD topic). Depth cameras
+        require ``dataset_info_file`` to be set on the LeRobotPolicy, as the
+        auto-generated feature spec assumes 3-channel RGB for every camera.
     :type camera_inputs_map: Mapping[str, Union[Topic, Dict]]
     :param state_input_type: The type of state data to extract from the joint state inputs.
         Supported values are "positions", "velocities", "accelerations", and "efforts".
@@ -398,8 +400,32 @@ class VLAConfig(ModelComponentConfig):
         actions within safe bounds.
     :type robot_urdf_file: Optional[str]
     :param joint_limits: A manual dictionary of joint limits to be used if a URDF file
-        is not provided. Format should match parsed URDF limits.
+        is not provided. Format should match parsed URDF limits. When a URDF file is
+        also provided, entries in this dictionary override the URDF-derived limits for
+        those joints.
     :type joint_limits: Optional[Dict]
+    :param policy_action_units: The unit space of the policy's actions, used to
+        convert URDF-derived joint limits before capping. URDF `<limit>` values are
+        always radians (per the URDF spec); this option converts them into the unit
+        space of the policy's actions:
+        - `"radians"` (default) — use URDF values as-is. Correct only when the policy
+          outputs radians.
+        - `"degrees"` — convert lower/upper (and velocity) to degrees.
+        - `"normalized"` — the LeRobot SO-10x motor-unit convention: each joint's
+          [lower, upper] range is mapped to [-100, 100]; joints whose name contains
+          "gripper" or "jaw" are mapped to [0, 100]. Use this for policies trained on
+          LeRobot datasets with normalized motor positions.
+        Only applies to URDF-derived limits; the manual `joint_limits` dict is always
+        used verbatim.
+    :type policy_action_units: Literal["radians", "degrees", "normalized"]
+    :param aggregate_fn_name: The strategy used to merge actions when newly received
+        action chunks overlap timesteps already in the queue (chunks from consecutive
+        inferences overlap). Presets mirror the LeRobot client:
+        "latest_only" (new action wins), "weighted_average" (0.3 * old + 0.7 * new),
+        "average" (0.5 * old + 0.5 * new) and "conservative" (0.7 * old + 0.3 * new).
+        A custom callable set with `set_aggregation_function` on the component takes
+        precedence over this preset. Default is "latest_only".
+    :type aggregate_fn_name: Literal["latest_only", "weighted_average", "average", "conservative"]
 
     Example of usage:
     ```python
@@ -438,6 +464,12 @@ class VLAConfig(ModelComponentConfig):
     )  # seconds
     robot_urdf_file: Optional[str] = field(default=None)
     joint_limits: Optional[Dict] = field(default=None)
+    policy_action_units: Literal["radians", "degrees", "normalized"] = field(
+        default="radians"
+    )
+    aggregate_fn_name: Literal[
+        "latest_only", "weighted_average", "average", "conservative"
+    ] = field(default="latest_only")
     _termination_mode: Literal["timesteps", "keyboard", "event"] = field(
         default="timesteps", alias="_termination_mode"
     )
@@ -524,14 +556,18 @@ class TextToSpeechConfig(ModelComponentConfig):
 
     This class defines the configuration options for a Text-To-Speech component.
 
-    :param enable_local_model: Whether to enable a local TTS model via ``sherpa-onnx`` (Kokoro English by default), allowing the component to run without a remote model client. Requires the ``sherpa-onnx`` pip package. Default is False.
+    :param enable_local_model: Whether to enable a local TTS model via ``sherpa-onnx`` (Kyutai's Pocket TTS by default), allowing the component to run without a remote model client. Requires the ``sherpa-onnx`` pip package. Default is False.
     :type enable_local_model: bool
     :param device_local_model: Device to run the local model on, either "cpu" or "cuda" (default: "cuda"). This parameter is only effective when ``enable_local_model`` is True.
     :type device_local_model: str
     :param ncpu_local_model: Number of CPU cores to allocate to the local model when using CPU (default: 1). This parameter is only effective when ``enable_local_model`` is True.
     :type ncpu_local_model: int
-    :param local_model_path: HuggingFace repository ID for a sherpa-onnx compatible TTS model (default: ``csukuangfj/kokoro-en-v0_19``). For available models see https://k2-fsa.github.io/sherpa/onnx/pretrained_models/index.html. This parameter is only effective when ``enable_local_model`` is True.
+    :param local_model_path: HuggingFace repository ID for a sherpa-onnx compatible TTS model (default: ``csukuangfj2/sherpa-onnx-pocket-tts-int8-2026-01-26``, Kyutai's Pocket TTS), or a path to a local directory containing an already-downloaded bundle. For available models see https://k2-fsa.github.io/sherpa/onnx/pretrained_models/index.html. This parameter is only effective when ``enable_local_model`` is True.
     :type local_model_path: Optional[str]
+    :param speaker_id: Voice index used by multi-voice local models (e.g. Kokoro ships several voices; single-voice models ignore it). Only effective when ``enable_local_model`` is True. Default is 0.
+    :type speaker_id: int
+    :param local_model_options: Additional options for the local model, validated at load time against the fields of the detected sherpa-onnx model family (e.g. ``length_scale``, ``noise_scale`` (vits/matcha), ``lang`` (kokoro), ``voice_style`` (supertonic), ``guidance_scale`` (zipvoice)) and the top-level sherpa-onnx TTS options (``silence_scale``, ``max_num_sentences``, ``rule_fsts``, ``rule_fars``). Voice-prompted families (pocket, zipvoice) also accept generation options: ``voice`` (a wav file path for voice cloning, or a voice name shipped in the bundle — Pocket TTS bundles include several; defaults to the bundle's first voice), ``num_steps``, ``reference_text`` and ``max_reference_audio_len``. An unknown key raises an error listing the valid keys for the detected family. The reserved key ``model_type`` forces the model family instead of detecting it from the bundle contents. Only effective when ``enable_local_model`` is True. Default is ``{}``.
+    :type local_model_options: Dict
     :param play_on_device: Whether to play the audio on available audio device (default: False).
     :type play_on_device: bool
     :param device: Optional device id (int) for playing the audio. Only effective if play_on_device is True (default: None).
@@ -546,7 +582,7 @@ class TextToSpeechConfig(ModelComponentConfig):
     :type block_size: int
     :param thread_shutdown_timeout: Timeout to shutdown a playback thread, if data is not received for more than a certain number of seconds. Only effective if play_on_device is True (default: 5 seconds).
     :type thread_shutdown_timeout: int
-    :param stream: Stram output when used with WebSocketClient. Useful when model output is large and broken into chunks by the server. (default: True).
+    :param stream: Stream output audio in chunks. With a WebSocketClient, chunks are streamed by the server; with a local model, audio chunks are yielded as the model synthesizes them (all sherpa-onnx families support this). Useful for playing audio while long text is still being synthesized. (default: True).
     :type stream: bool
 
     Example of usage for local playback:
@@ -568,7 +604,11 @@ class TextToSpeechConfig(ModelComponentConfig):
     enable_local_model: bool = field(default=False)
     device_local_model: Literal["cpu", "cuda"] = field(default="cuda")
     ncpu_local_model: int = field(default=1)
-    local_model_path: Optional[str] = field(default="csukuangfj/kokoro-en-v0_19")
+    local_model_path: Optional[str] = field(
+        default="csukuangfj2/sherpa-onnx-pocket-tts-int8-2026-01-26"
+    )
+    speaker_id: int = field(default=0, validator=base_validators.gt(-1))
+    local_model_options: Dict = field(default=Factory(dict))
     play_on_device: bool = field(default=False)
     device: Optional[int] = field(default=None)
     stream_to_ip: Optional[str] = field(default=None)
@@ -621,14 +661,16 @@ class SpeechToTextConfig(ModelComponentConfig):
     --
     Local Model
     --
-    :param enable_local_model: Whether to enable a local STT model via ``sherpa-onnx`` (Whisper tiny.en by default), allowing the component to run without a remote model client. Requires the ``sherpa-onnx`` pip package. Default is False.
+    :param enable_local_model: Whether to enable a local STT model via ``sherpa-onnx`` (NVIDIA Parakeet TDT 0.6B by default), allowing the component to run without a remote model client. Requires the ``sherpa-onnx`` pip package. Default is False.
     :type enable_local_model: bool
     :param device_local_model: Device to run the local model on, either "cpu" or "cuda" (default: "cuda"). This parameter is only effective when ``enable_local_model`` is True.
     :type device_local_model: str
     :param ncpu_local_model: Number of CPU cores to allocate to the local model when using CPU (default: 1). This parameter is only effective when ``enable_local_model`` is True.
     :type ncpu_local_model: int
-    :param local_model_path: HuggingFace repository ID for a sherpa-onnx compatible Whisper STT model (default: ``csukuangfj/sherpa-onnx-whisper-tiny.en``). For available models see https://k2-fsa.github.io/sherpa/onnx/pretrained_models/index.html. This parameter is only effective when ``enable_local_model`` is True.
+    :param local_model_path: HuggingFace repository ID for a sherpa-onnx compatible STT model (default: ``csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8``, NVIDIA Parakeet TDT), or a path to a local directory containing an already downloaded model. For available models see https://k2-fsa.github.io/sherpa/onnx/pretrained_models/index.html. This parameter is only effective when ``enable_local_model`` is True.
     :type local_model_path: Optional[str]
+    :param local_model_options: Additional options for the local model, validated at load time against the detected sherpa-onnx model family's loader signature (e.g. ``decoding_method``, ``hotwords_file``, ``hotwords_score`` for transducers; ``task`` for whisper; ``use_itn`` for sense_voice). An unknown key raises an error listing the valid keys for the detected family. The reserved key ``model_type`` forces the model family instead of detecting it from the bundle contents. Only effective when ``enable_local_model`` is True. Default is ``{}``.
+    :type local_model_options: Dict
 
     --
     Transcription
@@ -689,14 +731,22 @@ class SpeechToTextConfig(ModelComponentConfig):
     --
     Wakeword Detection
     --
-    :param enable_wakeword: Enable detection of a wakeword phrase (e.g. 'Hey Jarvis').
-                            Requires `enable_vad` to be True.
+    :param enable_wakeword: Enable detection of a wake phrase before transcription.
+                            Requires `enable_vad` to be True and the
+                            ``sentencepiece`` package for encoding the phrase.
                             Defaults to False.
     :type enable_wakeword: bool
 
-    :param wakeword_threshold: Minimum confidence score to trigger wakeword detection.
-                               Only used if `enable_wakeword` is True.
-                               Defaults to 0.6.
+    :param wakeword_phrase: The wake phrase (or list of phrases) to detect,
+                            as plain text (e.g. 'hey jarvis', 'ok robot').
+                            Only used if `enable_wakeword` is True.
+                            Defaults to 'ok robot'.
+    :type wakeword_phrase: Union[str, List[str]]
+
+    :param wakeword_threshold: Keyword spotting trigger threshold (sherpa-onnx
+                               `keywords_threshold`). Lower values trigger more
+                               easily. Only used if `enable_wakeword` is True.
+                               Defaults to 0.25.
     :type wakeword_threshold: float
 
     :param device_wakeword: Device for Wakeword Detection ('cpu' or 'gpu').
@@ -729,18 +779,12 @@ class SpeechToTextConfig(ModelComponentConfig):
                            Defaults to the Silero VAD model URL.
     :type vad_model_path: str
 
-    :param melspectrogram_model_path: Path or URL to melspectrogram model used in wakeword detection.
-                                      Defaults to openWakeWord model URL.
-    :type melspectrogram_model_path: str
-
-    :param embedding_model_path: Path or URL to audio embedding model for wakeword detection.
-                                 Defaults to openWakeWord model URL.
-    :type embedding_model_path: str
-
-    :param wakeword_model_path: Path or URL to wakeword ONNX model (e.g. 'Hey Jarvis').
-                                Defaults to a pretrained openWakeWord model.
-                                For custom models, see:
-                                https://github.com/dscripka/openWakeWord/blob/main/notebooks/automatic_model_training.ipynb
+    :param wakeword_model_path: Source of the sherpa-onnx keyword spotting bundle:
+                                a model archive URL (.tar.bz2/.tar.gz), a HuggingFace
+                                repository ID, or a local directory. Defaults to the
+                                official English zipformer KWS bundle (3.3M params)
+                                from the sherpa-onnx releases. For other languages
+                                see https://github.com/k2-fsa/sherpa-onnx/releases/tag/kws-models
     :type wakeword_model_path: str
 
     --
@@ -769,8 +813,9 @@ class SpeechToTextConfig(ModelComponentConfig):
     device_local_model: Literal["cpu", "cuda"] = field(default="cuda")
     ncpu_local_model: int = field(default=1)
     local_model_path: Optional[str] = field(
-        default="csukuangfj/sherpa-onnx-whisper-tiny.en"
+        default="csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8"
     )
+    local_model_options: Dict = field(default=Factory(dict))
     initial_prompt: Optional[str] = field(default=None)
     language: Optional[str] = field(
         default="en",
@@ -784,8 +829,9 @@ class SpeechToTextConfig(ModelComponentConfig):
         default=0.5, validator=base_validators.in_range(min_value=0.0, max_value=1.0)
     )
     wakeword_threshold: float = field(
-        default=0.6, validator=base_validators.in_range(min_value=0.0, max_value=1.0)
+        default=0.25, validator=base_validators.in_range(min_value=0.0, max_value=1.0)
     )
+    wakeword_phrase: Union[str, List[str]] = field(default="ok robot")
     min_silence_duration_ms: int = field(default=500)
     speech_pad_ms: int = field(default=30)
     speech_buffer_max_len: int = field(default=30000)
@@ -798,14 +844,8 @@ class SpeechToTextConfig(ModelComponentConfig):
     vad_model_path: str = field(
         default="https://raw.githubusercontent.com/snakers4/silero-vad/refs/heads/master/src/silero_vad/data/silero_vad.onnx"
     )
-    melspectrogram_model_path: str = field(
-        default="https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/melspectrogram.onnx"
-    )
-    embedding_model_path: str = field(
-        default="https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/embedding_model.onnx"
-    )
     wakeword_model_path: str = field(
-        default="https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/hey_jarvis_v0.1.onnx"
+        default="https://github.com/k2-fsa/sherpa-onnx/releases/download/kws-models/sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01.tar.bz2"
     )
     _sample_rate: int = field(default=16000, alias="_sample_rate")
     _block_size: int = field(default=1280, alias="_block_size")

@@ -1,10 +1,34 @@
-from typing import List, Dict, Literal, Optional, Iterable, Tuple
+from typing import Callable, List, Dict, Literal, Optional, Iterable, Tuple
 from attr import define, field
 import numpy as np
 
 from rclpy.logging import get_logger
 
 from .utils import _read_spec_file, find_missing_values
+
+# Chunk-overlap aggregation presets, mirroring the LeRobot client's
+# AGGREGATE_FUNCTIONS.
+AGGREGATE_FUNCTIONS: Dict[str, Callable] = {
+    "latest_only": lambda _, new: new,
+    "weighted_average": lambda old, new: 0.3 * old + 0.7 * new,
+    "average": lambda old, new: 0.5 * old + 0.5 * new,
+    "conservative": lambda old, new: 0.7 * old + 0.3 * new,
+}
+
+
+# Feature key prefix used by LeRobot dataset specs
+OBSERVATION_PREFIX = "observation"
+
+
+def _as_depth_frame(img: np.ndarray) -> np.ndarray:
+    """Shape a depth output as (H, W, 1) as expected for single channel
+    dataset features. uint16 depth (e.g. mono16/16UC1 encodings) is cast to
+    float32 since torch cannot convert uint16 arrays on the server side"""
+    if img.ndim == 2:
+        img = np.expand_dims(img, axis=-1)
+    if img.dtype == np.uint16:
+        img = img.astype(np.float32)
+    return img
 
 
 def _size_validator(instance, attribute, value):
@@ -84,8 +108,32 @@ class JointsData:
         return mapped
 
 
+def resolve_feature_channels(feature: Dict) -> int:
+    """Resolve the channel count of an image feature from its dataset entry.
+
+    Prefers the dimension labeled in ``names`` (lerobot writes both
+    channel-last and channel-first layouts), falls back to treating a 2-D shape
+    as single channel and a 3-D shape as channel-last.
+    Defaults to 3 (RGB) when the entry carries no usable shape.
+
+    :param feature: Normalized feature entry with optional ``shape`` and ``names``
+    :return: Number of channels declared for the feature
+    """
+    shape = feature.get("shape") or ()
+    names = feature.get("names") or ()
+    if len(names) == len(shape):
+        for label in ("channels", "channel"):
+            if label in names:
+                return int(shape[names.index(label)])
+    # Case (H, W)
+    if len(shape) == 2:
+        return 1
+    # Default channel-last or 3
+    return int(shape[-1]) if len(shape) == 3 else 3
+
+
 def create_observation_spec(
-    joints_map, camera_map, prefix="observation", image_shape=(480, 640, 3)
+    joints_map, camera_map, prefix=OBSERVATION_PREFIX, image_shape=(480, 640, 3)
 ):
     """Create a specification dictionary for observation data structure.
 
@@ -272,9 +320,7 @@ def cap_actions_with_limits(
         )
         return target_actions
 
-    for idx, (jname, target) in enumerate(
-        zip(joint_names, target_actions)
-    ):
+    for idx, (jname, target) in enumerate(zip(joint_names, target_actions)):
         # If limit missing in dict
         joint_limits = limits_dict.get(jname)
         if joint_limits is None:
@@ -442,3 +488,60 @@ def parse_urdf_joints(path_or_url: str) -> Dict:
         joints_limits[name] = limits
 
     return joints_limits
+
+
+_GRIPPER_NAME_HINTS = ("gripper", "jaw")
+
+
+def convert_joint_limits_units(
+    joints_limits: Dict[str, Optional[Dict[str, float]]],
+    units: Literal["radians", "degrees", "normalized"],
+) -> Dict[str, Optional[Dict[str, float]]]:
+    """
+    Convert URDF-derived joint limits (always radians per the URDF spec) into
+    the unit space of the policy's actions.
+
+    :param joints_limits: Output of parse_urdf_joints() (values in radians).
+    :type joints_limits: Dict[str, Optional[Dict[str, float]]]
+    :param units: Target unit space:
+        - "radians": no conversion (URDF values used as-is).
+        - "degrees": lower/upper and velocity converted rad -> deg.
+        - "normalized": LeRobot motor-unit convention — each joint's
+          [lower, upper] mechanical range maps linearly to [-100, 100];
+          joints whose name contains "gripper" or "jaw" map to [0, 100].
+          Velocity limits are scaled by the same per-joint factor.
+    :type units: Literal["radians", "degrees", "normalized"]
+    :return: A new dict in the requested units. Joints without limits stay None.
+    :rtype: Dict[str, Optional[Dict[str, float]]]
+    """
+    if units == "radians":
+        return joints_limits
+
+    converted: Dict[str, Optional[Dict[str, float]]] = {}
+    for name, limits in joints_limits.items():
+        if limits is None:
+            converted[name] = None
+            continue
+        new_limits = dict(limits)
+        lower, upper = limits.get("lower"), limits.get("upper")
+        if units == "degrees":
+            for key in ("lower", "upper", "velocity"):
+                if limits.get(key) is not None:
+                    new_limits[key] = float(np.degrees(limits[key]))
+        elif units == "normalized":
+            if lower is None or upper is None or upper <= lower:
+                get_logger("joint_limits").warning(
+                    f"Joint '{name}' has no usable lower/upper limits in the URDF — "
+                    "cannot normalize; leaving limits unset for this joint."
+                )
+                converted[name] = None
+                continue
+            is_gripper = any(h in name.lower() for h in _GRIPPER_NAME_HINTS)
+            norm_lower, norm_upper = (0.0, 100.0) if is_gripper else (-100.0, 100.0)
+            new_limits["lower"] = norm_lower
+            new_limits["upper"] = norm_upper
+            if limits.get("velocity") is not None:
+                scale = (norm_upper - norm_lower) / (upper - lower)
+                new_limits["velocity"] = float(limits["velocity"] * scale)
+        converted[name] = new_limits
+    return converted

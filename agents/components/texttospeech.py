@@ -1,6 +1,7 @@
 import queue
 import socket
 import threading
+from collections.abc import Iterator
 from io import BytesIO
 from typing import Any, Union, Optional, List, Dict
 import base64
@@ -146,14 +147,11 @@ class TextToSpeech(ModelComponent):
             model_path=load_model_repo("local_tts", self.config.local_model_path),
             device=self.config.device_local_model,
             ncpu=self.config.ncpu_local_model,
+            speaker_id=self.config.speaker_id,
+            stream=self.config.stream,
+            model_options=self.config.local_model_options,
         )
-        # Local TTS does not support streaming
-        if self.config.stream:
-            self.get_logger().warning(
-                "Local TTS model does not support streaming. Setting stream to False."
-            )
-            self.config.stream = False
-            self.inference_params = self.config.get_inference_params()
+        self.inference_params = self.config.get_inference_params()
 
     def __get_audio_bytes(self, chunk: Union[bytes, str]) -> bytes:
         """Get audio bytes"""
@@ -489,11 +487,19 @@ class TextToSpeech(ModelComponent):
         # conduct inference
         result = self._call_inference(inference_input)
         if result:
-            if self.config.play_on_device:
-                self._play(result["output"])
+            output = result["output"]
+            # handle streaming local model generator of audio chunks
+            if isinstance(output, Iterator):
+                for chunk in output:
+                    if self.config.play_on_device:
+                        self._play(chunk)
+                    self._publish({"output": chunk})
+            else:
+                if self.config.play_on_device:
+                    self._play(output)
 
-            # publish result
-            self._publish(result)
+                # publish result
+                self._publish(result)
 
     def _warmup(self):
         """Warm up and stat check"""
@@ -503,17 +509,23 @@ class TextToSpeech(ModelComponent):
             **self.inference_params,
         }
 
+        def _drain(result):
+            # Consume streaming model generator
+            if result and isinstance(result.get("output"), Iterator):
+                for _ in result["output"]:
+                    pass
+
         # Run inference once to warm up and once to measure time
         if self.model_client:
             self.model_client.inference(inference_input)
         elif hasattr(self, "local_model"):
-            self.local_model(inference_input)
+            _drain(self.local_model(inference_input))
 
         start_time = time.time()
         if self.model_client:
             self.model_client.inference(inference_input)
         elif hasattr(self, "local_model"):
-            self.local_model(inference_input)
+            _drain(self.local_model(inference_input))
         elapsed_time = time.time() - start_time
 
         self.get_logger().warning(f"Approximate Inference time: {elapsed_time} seconds")

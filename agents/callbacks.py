@@ -149,14 +149,28 @@ class RGBDCallback(GenericCallback):
                 "RGBD message cannot be read from a fixed file"
             )
 
-    def _get_output(self, get_depth=False, **_) -> Optional[np.ndarray]:
+    def _get_output(
+        self, get_depth=False, depth_only=False, **_
+    ) -> Optional[np.ndarray]:
         """
         Gets RGBD image as a numpy array.
-        :returns:   Image and Depth as nd_array
+        Returns the RGB part by default. With `get_depth`, returns RGB and
+        depth concatenated as (H, W, 4). With `depth_only`, returns just the
+        depth part as (H, W, 1).
+        :returns:   Image and/or Depth as nd_array
         :rtype:     np.ndarray
         """
         if not self.msg or not self.msg.rgb:
             return None
+
+        if depth_only:
+            if not self.msg.depth:
+                return None
+            if not getattr(self, "depth_encoding", None):
+                self.depth_encoding = process_encoding(self.msg.depth.encoding)
+            depth = image_pre_processing(self.msg.depth, *self.depth_encoding)
+            # Ensure depth has shape (H, W, 1)
+            return np.expand_dims(depth, axis=-1)
 
         # pre-process and reshape the RGB image
         if not getattr(self, "rgb_encoding", None):

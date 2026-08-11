@@ -188,6 +188,7 @@ class LLM(ModelComponent):
         if self.config.stream:
             # initialize think block state for streaming
             self._in_think_block: bool = False
+            self._swallow_stream_ws: bool = False
             # initialize result buffers
             self.result_partial: List = []
             self.result_complete: List = []
@@ -286,7 +287,14 @@ class LLM(ModelComponent):
     def _strip_think_tokens(self, text: str) -> str:
         """Strip <think>...</think> blocks from model output."""
         if self.config.strip_think_tokens:
-            return strip_think_tokens(text)
+            stripped = strip_think_tokens(text)
+            if not stripped and "<think>" in text:
+                self.get_logger().warning(
+                    "Model output was an unterminated <think> block — generation"
+                    " likely hit max_new_tokens before an answer was produced."
+                    " Increase max_new_tokens or disable thinking in the model."
+                )
+            return stripped
         return text
 
     def _deploy_local_model(self):
@@ -299,6 +307,7 @@ class LLM(ModelComponent):
             model_path=self.config.local_model_path,
             device=self.config.device_local_model,
             ncpu=self.config.ncpu_local_model,
+            model_options=self.config.local_model_options,
         )
 
     def _handle_rag_query(self, query: str) -> Optional[str]:
@@ -507,9 +516,16 @@ class LLM(ModelComponent):
                 return
             if "</think>" in token:
                 self._in_think_block = False
+                # swallow the whitespace models emit after the think block
+                self._swallow_stream_ws = True
                 return
             if self._in_think_block:
                 return
+            if self._swallow_stream_ws:
+                token = token.lstrip()
+                if not token:
+                    return
+                self._swallow_stream_ws = False
         if self.config.break_character:
             self.result_partial.append(token)
             if self.config.break_character in token:
@@ -532,7 +548,14 @@ class LLM(ModelComponent):
         Finalizes the stream by publishing any remaining partial results and
         appending the complete message to the message history.
         """
+        if self._in_think_block:
+            self.get_logger().warning(
+                "Model output was an unterminated <think> block — generation"
+                " likely hit max_new_tokens before an answer was produced."
+                " Increase max_new_tokens or disable thinking in the model."
+            )
         self._in_think_block = False
+        self._swallow_stream_ws = False
         # Send remaining result after break character or termination if any
         if self.config.break_character:
             if self.result_partial:
@@ -564,8 +587,9 @@ class LLM(ModelComponent):
 
     def __handle_streaming_generator(self, result: MutableMapping) -> Optional[List]:
         """Handle streaming output"""
+        stream = result["output"]
         try:
-            for token in result["output"]:
+            for token in stream:
                 # Handle ollama client result format
                 if isinstance(self.model_client, OllamaClient):
                     token = token["message"]["content"]
@@ -580,6 +604,11 @@ class LLM(ModelComponent):
             self.get_logger().error(str(e))
             # raise a fallback trigger via health status
             self.health_status.set_fail_algorithm()
+        finally:
+            # Finalize the generator even when iteration was abandoned by an
+            # exception (so the iterator doesnt wait for garbage collection)
+            if close := getattr(stream, "close", None):
+                close()
 
     def _execution_step(self, *args, **kwargs):
         """_execution_step.

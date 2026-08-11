@@ -168,6 +168,97 @@ class TestLLMExecutionStep:
         mock_tool.assert_called_once()
 
 
+class TestLLMThinkTokens:
+    THINKING = "<think>\nreasoning here\n</think>\n\nParis."
+
+    def _run_step(self, llm, mock_model_client, text=None):
+        mock_model_client.inference.return_value = {"output": text or self.THINKING}
+        mock_cb = MagicMock()
+        mock_cb.get_output.return_value = "capital of France?"
+        llm.trig_callbacks = {"in": mock_cb}
+        llm.callbacks = {}
+        llm._execution_step(topic=Topic(name="in", msg_type="String"))
+        return llm.publishers_dict["out"].publish.call_args[0][0]
+
+    def test_stripped_by_default(self, llm, mock_model_client):
+        assert self._run_step(llm, mock_model_client) == "Paris."
+
+    def test_kept_when_disabled(self, llm, mock_model_client):
+        llm.config.strip_think_tokens = False
+        assert self._run_step(llm, mock_model_client) == self.THINKING
+
+    def test_unterminated_think_block_stripped_with_warning(
+        self, llm, mock_model_client
+    ):
+        """A block truncated by max_new_tokens has no closing tag but must
+        still be stripped, and the component should warn about it."""
+        truncated = "<think>\nreasoning cut off by the token limit"
+        assert self._run_step(llm, mock_model_client, text=truncated) == ""
+        llm.get_logger.return_value.warning.assert_called_once()
+
+    def test_stream_tokens_filtered(self, llm):
+        """Think tokens are dropped, including the whitespace models emit
+        after the closing tag — the answer must not start with blank lines."""
+        llm.config.break_character = ""
+        llm._in_think_block = False
+        llm._swallow_stream_ws = False
+        llm.result_partial = []
+        llm.result_complete = []
+
+        for token in ["<think>", "\n", "reasoning", "</think>", "\n\n", "\nParis."]:
+            llm._LLM__process_stream_token(token)
+
+        publish = llm.publishers_dict["out"].publish
+        publish.assert_called_once()
+        assert publish.call_args[0][0] == "Paris."
+
+    def test_stream_unterminated_think_warns(self, llm):
+        """A stream that ends inside a think block must warn, same as the
+        non-streaming path."""
+        llm.config.break_character = ""
+        llm._in_think_block = False
+        llm._swallow_stream_ws = False
+        llm.result_partial = []
+        llm.result_complete = []
+
+        for token in ["<think>", "reasoning cut off by the token limit"]:
+            llm._LLM__process_stream_token(token)
+        llm._LLM__finalize_stream()
+
+        llm.get_logger.return_value.warning.assert_called_once()
+        llm.publishers_dict["out"].publish.assert_not_called()
+
+
+class TestLLMStreamCleanup:
+    def test_generator_closed_when_publish_raises(self, llm):
+        """An abandoned stream must be finalized immediately so it releases
+        held resources (e.g. the local model lock) instead of waiting for
+        garbage collection."""
+        closed = []
+
+        def stream():
+            try:
+                yield "one. "
+                yield "two. "
+            finally:
+                closed.append(True)
+
+        llm.config.break_character = ""
+        llm._in_think_block = False
+        llm._swallow_stream_ws = False
+        llm.result_partial = []
+        llm.result_complete = []
+        llm.publishers_dict["out"].publish.side_effect = RuntimeError(
+            "publisher destroyed"
+        )
+
+        # keep a reference so finalization cannot come from refcounting
+        result = {"output": stream()}
+        llm._LLM__handle_streaming_generator(result)
+
+        assert closed == [True]
+
+
 class TestLLMWarmup:
     def test_with_model_client(self, llm, mock_model_client):
         llm._warmup()

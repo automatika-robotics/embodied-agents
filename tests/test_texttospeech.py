@@ -74,3 +74,134 @@ class TestTTSCreateInput:
         result = tts._create_input(text="Direct text")
         assert result is not None
         assert result["query"] == "Direct text"
+
+
+class TestLocalTTSModelDetection:
+    """Family detection from bundle contents — pure filesystem, no sherpa."""
+
+    @staticmethod
+    def _make_bundle(tmp_path, files, dirname="bundle"):
+        bundle = tmp_path / dirname
+        bundle.mkdir()
+        for name in files:
+            if name.endswith("/"):
+                (bundle / name.rstrip("/")).mkdir()
+            else:
+                (bundle / name).touch()
+        return str(bundle)
+
+    def test_pocket_detected(self, tmp_path):
+        from agents.utils.local_tts import detect_model_family
+
+        bundle = self._make_bundle(
+            tmp_path,
+            [
+                "lm_main.int8.onnx",
+                "lm_flow.int8.onnx",
+                "encoder.onnx",
+                "decoder.int8.onnx",
+                "text_conditioner.onnx",
+                "vocab.json",
+                "token_scores.json",
+            ],
+        )
+        family, files = detect_model_family(bundle)
+        assert family == "pocket"
+        assert files["lm_main"].endswith("lm_main.int8.onnx")
+        assert files["vocab_json"].endswith("vocab.json")
+
+    def test_kokoro_detected(self, tmp_path):
+        from agents.utils.local_tts import detect_model_family
+
+        bundle = self._make_bundle(
+            tmp_path,
+            ["model.onnx", "voices.bin", "tokens.txt", "espeak-ng-data/"],
+        )
+        family, files = detect_model_family(bundle)
+        assert family == "kokoro"
+        assert files["data_dir"].endswith("espeak-ng-data")
+
+    def test_kitten_needs_name_hint(self, tmp_path):
+        from agents.utils.local_tts import detect_model_family
+
+        files = ["model.onnx", "voices.bin", "tokens.txt", "espeak-ng-data/"]
+        # same layout as kokoro: kitten only wins on a name hint
+        bundle = self._make_bundle(tmp_path, files, dirname="kitten-nano-en")
+        family, _ = detect_model_family(bundle)
+        assert family == "kitten"
+
+    def test_model_type_override(self, tmp_path):
+        from agents.utils.local_tts import detect_model_family
+
+        bundle = self._make_bundle(
+            tmp_path, ["model.onnx", "voices.bin", "tokens.txt"]
+        )
+        family, _ = detect_model_family(bundle, model_type="kitten")
+        assert family == "kitten"
+
+    def test_vits_detected_without_voices(self, tmp_path):
+        from agents.utils.local_tts import detect_model_family
+
+        bundle = self._make_bundle(tmp_path, ["en_US-amy.onnx", "tokens.txt"])
+        family, _ = detect_model_family(bundle)
+        assert family == "vits"
+
+    def test_undetectable_raises_with_hint(self, tmp_path):
+        from agents.utils.local_tts import detect_model_family
+
+        bundle = self._make_bundle(tmp_path, ["README.md"])
+        with pytest.raises(ValueError, match="model_type"):
+            detect_model_family(bundle)
+
+    def test_unknown_model_type_raises(self, tmp_path):
+        from agents.utils.local_tts import detect_model_family
+
+        bundle = self._make_bundle(tmp_path, ["model.onnx", "tokens.txt"])
+        with pytest.raises(ValueError, match="Unknown model_type"):
+            detect_model_family(bundle, model_type="not_a_family")
+
+
+class TestLocalTTSModelOptions:
+    """Option splitting/validation against sherpa-onnx config fields."""
+
+    def test_options_split_and_unknown_key(self):
+        sherpa_onnx = pytest.importorskip("sherpa_onnx")
+        from agents.utils.local_tts import split_model_options
+
+        sub, top, generation = split_model_options(
+            sherpa_onnx.OfflineTtsVitsModelConfig,
+            {
+                "noise_scale": 0.5,
+                "length_scale": 1.2,
+                "silence_scale": 0.1,
+                "voice": "loona",
+            },
+        )
+        assert sub == {"noise_scale": 0.5, "length_scale": 1.2}
+        assert top == {"silence_scale": 0.1}
+        assert generation == {"voice": "loona"}
+
+        with pytest.raises(ValueError, match="Valid family options"):
+            split_model_options(
+                sherpa_onnx.OfflineTtsVitsModelConfig, {"not_a_real_option": 1}
+            )
+
+    def test_voice_resolution(self, tmp_path):
+        from agents.utils.local_tts import resolve_voice_wav
+
+        bundle = tmp_path / "bundle"
+        (bundle / "test_wavs").mkdir(parents=True)
+        (bundle / "test_wavs" / "bria.wav").touch()
+        (bundle / "test_wavs" / "loona.wav").touch()
+
+        # default: first bundle voice
+        assert resolve_voice_wav(bundle, None).endswith("bria.wav")
+        # by name
+        assert resolve_voice_wav(bundle, "loona").endswith("loona.wav")
+        # unknown name lists available voices
+        with pytest.raises(ValueError, match="bria"):
+            resolve_voice_wav(bundle, "not_a_voice")
+        # no wavs in bundle
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        assert resolve_voice_wav(empty, None) is None

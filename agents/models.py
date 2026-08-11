@@ -3,7 +3,7 @@ The following model specification classes are meant to define a comman interface
 """
 
 from typing import Optional, Dict, Any, Literal, List
-from attrs import define, field, validators
+from attrs import Factory, define, field, validators
 from .ros import BaseAttrs, base_validators
 from .utils import build_lerobot_features_from_dataset_info, _LANGUAGE_CODES
 
@@ -555,19 +555,22 @@ class LeRobotPolicy(Model):
     :type checkpoint: str
     :param policy_type:
     The type of LeRobot policy to load.
-    Supported values are:
+    Supported values (all policy types servable through the LeRobot Async Policy Server as of LeRobot 0.6.0) are:
+    - `"smolvla"` — General VLA from HuggingFace
     - `"diffusion"` — Diffusion-based action generation policy
     - `"act"` — Action Chunk Transformer policy
-    - `"smolvla"` — General VLA from HuggingFace
     - `"pi0"` — General VLA from Physical Intelligence
     - `"pi05"` — General VLA from Physical Intelligence
+    - `"groot"` — NVIDIA Isaac GR00T N1.7 cross-embodiment VLA (e.g. checkpoint `"nvidia/GR00T-N1.7-3B"`, requires LeRobot >= 0.6.0 on the server)
+    - `"tdmpc"` — Temporal Difference MPC policy
+    - `"vqbet"` — Vector-Quantized Behavior Transformer policy
     This field determines how the checkpoint is interpreted and which policy architecture is instantiated.
     Default: `"smolvla"`.
     :param dataset_info_file:
         URL or local path to the dataset metadata file (`info.json`).
         This file defines the input features and action structure that the policy must follow. Empty by default. If not provided, an attempt will be made by the VLA component to auto-generate it from the component config.
     :type dataset_info_file: str, optional
-    :param policy_type:
+    :param policy_device:
     The device on which the server should initialize the policy.
     Supported values are:
     - `"cuda"` — NVIDIA GPU available on server
@@ -577,6 +580,10 @@ class LeRobotPolicy(Model):
         The number of predicted actions produced per inference chunk. This is only applicable for certain policy types that implement Real Time Chunking (RTC) such as Pi0, and SmolVLA
         Default: `50`.
     :type actions_per_chunk: int
+    :param rename_map:
+        Advanced option, you normally do NOT need this — leave empty. Only needed when the checkpoint was trained with feature names different from those in your dataset metadata (e.g. a fine-tune of a generalist policy that expects `"observation.images.top"` while your dataset calls the same camera `"observation.images.front"`). This is unrelated to `joint_names_map`/`camera_inputs_map` in VLAConfig, which map your robot's joint names and topics to the dataset feature names and are always required.
+        Default: `{}`.
+    :type rename_map: Dict[str, str]
     :param init_timeout:
         Optional timeout (in seconds) for initialization.
         Default: `None`.
@@ -600,13 +607,16 @@ class LeRobotPolicy(Model):
     """
 
     checkpoint: str = field(default="lerobot/smolvla_base")
-    policy_type: Literal["smolvla", "diffusion", "act", "pi0", "pi05"] = field(
-        default="smolvla"
-    )
+    policy_type: Literal[
+        "smolvla", "diffusion", "act", "pi0", "pi05", "groot", "tdmpc", "vqbet"
+    ] = field(default="smolvla")
     actions_per_chunk: int = field(default=50)
     policy_device: Literal["cpu", "cuda"] = field(default="cuda")
     dataset_info_file: Optional[str] = field(default=None)
-    _features: Dict = field(default={})  # Created in the component if missing
+    rename_map: Dict[str, str] = field(default=Factory(dict))
+    _features: Dict = field(
+        default=Factory(dict)
+    )  # Created in the component if missing
     _actions: Optional[Dict] = field(default=None)
     _image_keys: Optional[List] = field(default=None)
     _joint_keys: Optional[List] = field(default=None)
@@ -628,4 +638,5 @@ class LeRobotPolicy(Model):
             "features": self._features,
             "actions_per_chunk": self.actions_per_chunk,
             "device": self.policy_device,
+            "rename_map": self.rename_map,
         }
