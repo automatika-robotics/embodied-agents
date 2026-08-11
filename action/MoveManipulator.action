@@ -1,0 +1,34 @@
+# Action definition for MoveIt components.
+
+# mode: one of "pose", "joints", "named", "cartesian".
+# If left empty, the mode is inferred from whichever target fields are populated.
+string mode
+
+# Target end-effector pose (mode: "pose"). header.frame_id defaults to the planning frame.
+geometry_msgs/PoseStamped target_pose
+# Joint-space target (mode: "joints"). Parallel arrays.
+string[] joint_names
+float64[] joint_positions
+# SRDF named target, e.g. "home" or "ready" (mode: "named")
+string named_target
+# End-effector waypoints for a straight-line Cartesian path (mode: "cartesian")
+geometry_msgs/Pose[] cartesian_waypoints
+# Reference frame for cartesian_waypoints. Empty = planning frame.
+string frame_id
+# Plan without executing (motion validity check)
+bool plan_only
+
+# Per-goal overrides of the configured scaling factors. 0.0 = use the config value
+float32 velocity_scaling
+float32 acceleration_scaling
+---
+bool success
+# Raw MoveItErrorCodes value returned by MoveIt
+int32 error_code
+# Human readable success/error description
+string message
+# Fraction of the requested Cartesian path that was achieved (cartesian mode only)
+float32 cartesian_fraction
+---
+# Current MoveIt state, PLANNING / MONITOR / EXECUTING
+string state
