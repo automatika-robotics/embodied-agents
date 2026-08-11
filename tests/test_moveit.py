@@ -446,3 +446,381 @@ class TestRequestBuilders:
             == "PLANNING_FAILED"
         )
         assert moveit_error_string(-987654) == "UNKNOWN_ERROR(-987654)"
+
+
+class TestGoalExecution:
+    """Goal handling in main_action_callback, with mocked move_group clients."""
+
+    @pytest.fixture
+    def component(self, rclpy_init):
+        pytest.importorskip("moveit_msgs.msg")
+        from agents.components.moveit import MoveIt
+        from agents.config import MoveItConfig
+
+        comp = MoveIt(
+            config=MoveItConfig(
+                arm_group_name="panda_arm",
+                gripper_group_name="hand",
+                end_effector_link="panda_link8",
+            ),
+            component_name="test_moveit_goals",
+        )
+        comp.get_logger = MagicMock()
+        comp.health_status = MagicMock()
+        comp._named_targets = {
+            "panda_arm": {"ready": {"panda_joint1": 0.0}},
+            "hand": {"open": {"panda_finger_joint1": 0.035}},
+        }
+        return comp
+
+    @staticmethod
+    def _client(error_code=None, returned=True, accepted=True):
+        """Action client handler that has already returned a result."""
+        from moveit_msgs.msg import MoveItErrorCodes
+
+        client = MagicMock()
+        client.send_request.return_value = accepted
+        client.action_returned = returned
+        client.cancel_request.return_value = (True, "canceled")
+        client.action_result = MagicMock(
+            error_code=MagicMock(
+                val=MoveItErrorCodes.SUCCESS if error_code is None else error_code
+            )
+        )
+        return client
+
+    @staticmethod
+    def _goal_handle(goal, active=True, cancel_requested=False):
+        handle = MagicMock()
+        handle.request = goal
+        handle.is_active = active
+        handle.is_cancel_requested = cancel_requested
+        return handle
+
+    @staticmethod
+    def _joint_goal():
+        from automatika_embodied_agents.action import MoveManipulator
+
+        goal = MoveManipulator.Goal()
+        goal.mode = "joints"
+        goal.joint_names = ["panda_joint1"]
+        goal.joint_positions = [0.5]
+        return goal
+
+    def test_successful_motion_succeeds_goal(self, component):
+        component._move_client = self._client()
+        handle = self._goal_handle(self._joint_goal())
+
+        result = component.main_action_callback(handle)
+
+        assert result.success is True
+        assert result.message == "SUCCESS"
+        handle.succeed.assert_called_once()
+        handle.abort.assert_not_called()
+        component.health_status.set_healthy.assert_called_once()
+
+    def test_planning_failure_aborts_with_reason(self, component):
+        from moveit_msgs.msg import MoveItErrorCodes
+
+        component._move_client = self._client(
+            error_code=MoveItErrorCodes.PLANNING_FAILED
+        )
+        handle = self._goal_handle(self._joint_goal())
+
+        result = component.main_action_callback(handle)
+
+        assert result.success is False
+        assert result.message == "PLANNING_FAILED"
+        assert result.error_code == MoveItErrorCodes.PLANNING_FAILED
+        handle.abort.assert_called_once()
+        component.health_status.set_fail_component.assert_called_once()
+
+    def test_cancel_is_propagated_to_move_group(self, component):
+        # goal never returns, so the wait loop sees the cancel request
+        component._move_client = self._client(returned=False)
+        handle = self._goal_handle(self._joint_goal(), cancel_requested=True)
+
+        component.main_action_callback(handle)
+
+        component._move_client.cancel_request.assert_called_once()
+        handle.canceled.assert_called_once()
+        handle.abort.assert_not_called()
+
+    def test_preempted_goal_is_not_transitioned(self, component):
+        """A goal aborted by preemption is terminal — transitioning it again
+        would be an invalid state transition."""
+        component._move_client = self._client(returned=False)
+        handle = self._goal_handle(self._joint_goal(), active=False)
+
+        component.main_action_callback(handle)
+
+        component._move_client.cancel_request.assert_called_once()
+        handle.canceled.assert_not_called()
+        handle.abort.assert_not_called()
+        handle.succeed.assert_not_called()
+
+    def test_rejected_goal_aborts(self, component):
+        component._move_client = self._client(accepted=False)
+        handle = self._goal_handle(self._joint_goal())
+
+        result = component.main_action_callback(handle)
+
+        assert result.success is False
+        assert "did not accept" in result.message
+        handle.abort.assert_called_once()
+
+    def test_invalid_goal_aborts_without_sending(self, component):
+        from automatika_embodied_agents.action import MoveManipulator
+
+        component._move_client = self._client()
+        handle = self._goal_handle(MoveManipulator.Goal())  # no target set
+
+        result = component.main_action_callback(handle)
+
+        assert "No motion target" in result.message
+        component._move_client.send_request.assert_not_called()
+        handle.abort.assert_called_once()
+
+    def test_named_target_resolved_to_group_and_joints(self, component):
+        from automatika_embodied_agents.action import MoveManipulator
+
+        component._move_client = self._client()
+        goal = MoveManipulator.Goal()
+        goal.named_target = "ready"
+
+        component.main_action_callback(self._goal_handle(goal))
+
+        sent = component._move_client.send_request.call_args[0][0]
+        assert sent.request.group_name == "panda_arm"
+        constraint = sent.request.goal_constraints[0].joint_constraints[0]
+        assert constraint.joint_name == "panda_joint1"
+
+    def test_unknown_named_target_aborts(self, component):
+        from automatika_embodied_agents.action import MoveManipulator
+
+        component._move_client = self._client()
+        goal = MoveManipulator.Goal()
+        goal.named_target = "nowhere"
+
+        result = component.main_action_callback(self._goal_handle(goal))
+
+        assert "not defined in the robot SRDF" in result.message
+        component._move_client.send_request.assert_not_called()
+
+    def test_pose_goal_uses_configured_link_and_scalings(self, component):
+        from automatika_embodied_agents.action import MoveManipulator
+
+        component._move_client = self._client()
+        goal = MoveManipulator.Goal()
+        goal.mode = "pose"
+        goal.target_pose.header.frame_id = "panda_link0"
+        goal.target_pose.pose.orientation.w = 1.0
+        goal.velocity_scaling = 0.5
+
+        component.main_action_callback(self._goal_handle(goal))
+
+        sent = component._move_client.send_request.call_args[0][0]
+        position = sent.request.goal_constraints[0].position_constraints[0]
+        assert position.link_name == "panda_link8"
+        # per-goal override wins, unset scaling falls back to the config value
+        assert sent.request.max_velocity_scaling_factor == pytest.approx(0.5)
+        assert sent.request.max_acceleration_scaling_factor == pytest.approx(0.1)
+
+    def test_mismatched_joint_arrays_abort(self, component):
+        component._move_client = self._client()
+        goal = self._joint_goal()
+        goal.joint_positions = [0.5, 0.7]
+
+        result = component.main_action_callback(self._goal_handle(goal))
+
+        assert "same length" in result.message
+        component._move_client.send_request.assert_not_called()
+
+
+class TestCartesianGoals:
+    @pytest.fixture
+    def component(self, rclpy_init):
+        pytest.importorskip("moveit_msgs.msg")
+        from agents.components.moveit import MoveIt
+        from agents.config import MoveItConfig
+
+        comp = MoveIt(
+            config=MoveItConfig(arm_group_name="panda_arm"),
+            component_name="test_moveit_cartesian",
+        )
+        comp.get_logger = MagicMock()
+        comp.health_status = MagicMock()
+        return comp
+
+    @staticmethod
+    def _cartesian_goal(plan_only=False):
+        from automatika_embodied_agents.action import MoveManipulator
+        from geometry_msgs.msg import Pose
+
+        goal = MoveManipulator.Goal()
+        goal.mode = "cartesian"
+        waypoint = Pose()
+        waypoint.position.z = 0.5
+        waypoint.orientation.w = 1.0
+        goal.cartesian_waypoints = [waypoint]
+        goal.frame_id = "panda_link0"
+        goal.plan_only = plan_only
+        return goal
+
+    @staticmethod
+    def _path_response(fraction):
+        from moveit_msgs.msg import MoveItErrorCodes, RobotTrajectory
+
+        return SimpleNamespace(
+            fraction=fraction,
+            solution=RobotTrajectory(),
+            error_code=MoveItErrorCodes(val=MoveItErrorCodes.SUCCESS),
+        )
+
+    def test_full_path_is_executed(self, component):
+        from moveit_msgs.msg import MoveItErrorCodes
+
+        component._cartesian_client = MagicMock()
+        component._cartesian_client.send_request.return_value = self._path_response(1.0)
+        component._exec_client = TestGoalExecution._client()
+        handle = TestGoalExecution._goal_handle(self._cartesian_goal())
+
+        result = component.main_action_callback(handle)
+
+        assert result.success is True
+        assert result.cartesian_fraction == pytest.approx(1.0)
+        assert result.error_code == MoveItErrorCodes.SUCCESS
+        component._exec_client.send_request.assert_called_once()
+        handle.succeed.assert_called_once()
+
+    def test_partial_path_aborts_without_executing(self, component):
+        component._cartesian_client = MagicMock()
+        component._cartesian_client.send_request.return_value = self._path_response(0.4)
+        component._exec_client = TestGoalExecution._client()
+        handle = TestGoalExecution._goal_handle(self._cartesian_goal())
+
+        result = component.main_action_callback(handle)
+
+        assert result.success is False
+        assert result.cartesian_fraction == pytest.approx(0.4)
+        assert "below the configured threshold" in result.message
+        # nothing is executed when too little of the path is achievable
+        component._exec_client.send_request.assert_not_called()
+        handle.abort.assert_called_once()
+
+    def test_plan_only_does_not_execute(self, component):
+        component._cartesian_client = MagicMock()
+        component._cartesian_client.send_request.return_value = self._path_response(1.0)
+        component._exec_client = TestGoalExecution._client()
+        handle = TestGoalExecution._goal_handle(self._cartesian_goal(plan_only=True))
+
+        result = component.main_action_callback(handle)
+
+        assert result.success is True
+        component._exec_client.send_request.assert_not_called()
+        handle.succeed.assert_called_once()
+
+    def test_no_service_response_aborts(self, component):
+        component._cartesian_client = MagicMock()
+        component._cartesian_client.send_request.return_value = None
+        handle = TestGoalExecution._goal_handle(self._cartesian_goal())
+
+        result = component.main_action_callback(handle)
+
+        assert result.success is False
+        assert "No response" in result.message
+        handle.abort.assert_called_once()
+
+
+class TestGripperActions:
+    @staticmethod
+    def _component(rclpy_init, **config_fields):
+        from agents.components.moveit import MoveIt
+        from agents.config import MoveItConfig
+
+        comp = MoveIt(
+            config=MoveItConfig(
+                arm_group_name="panda_arm", gripper_group_name="hand", **config_fields
+            ),
+            component_name=f"test_moveit_gripper_{len(config_fields)}",
+        )
+        comp.get_logger = MagicMock()
+        comp._named_targets = {"hand": {"open": {"f1": 0.035}, "close": {"f1": 0.0}}}
+        return comp
+
+    @pytest.fixture
+    def move_group_component(self, rclpy_init):
+        pytest.importorskip("moveit_msgs.msg")
+        return self._component(rclpy_init)
+
+    @pytest.fixture
+    def controller_component(self, rclpy_init):
+        pytest.importorskip("moveit_msgs.msg")
+        return self._component(
+            rclpy_init,
+            gripper_mode="gripper_command",
+            gripper_command_action="/gripper_controller/gripper_cmd",
+        )
+
+    def test_open_gripper_sends_named_target(self, move_group_component):
+        comp = move_group_component
+        comp._gripper_client = TestGoalExecution._client()
+
+        message = comp.open_gripper.__wrapped__(comp)
+
+        sent = comp._gripper_client.send_request.call_args[0][0]
+        assert sent.request.group_name == "hand"
+        assert sent.request.goal_constraints[0].joint_constraints[0].position == 0.035
+        assert "open" in message
+
+    def test_close_gripper_uses_controller_position(self, controller_component):
+        comp = controller_component
+        comp._gripper_client = TestGoalExecution._client()
+        comp._gripper_client.action_result = MagicMock(spec=[])  # no error_code field
+
+        comp.close_gripper.__wrapped__(comp)
+
+        sent = comp._gripper_client.send_request.call_args[0][0]
+        assert sent.command.position == pytest.approx(0.0)
+
+    def test_set_gripper_needs_controller_mode(self, move_group_component):
+        comp = move_group_component
+        comp._gripper_client = TestGoalExecution._client()
+
+        message = comp.set_gripper.__wrapped__(comp, 0.02)
+
+        assert "gripper_command" in message
+        comp._gripper_client.send_request.assert_not_called()
+
+    def test_set_gripper_sends_position(self, controller_component):
+        comp = controller_component
+        comp._gripper_client = TestGoalExecution._client()
+        comp._gripper_client.action_result = MagicMock(spec=[])
+
+        comp.set_gripper.__wrapped__(comp, 0.02)
+
+        sent = comp._gripper_client.send_request.call_args[0][0]
+        assert sent.command.position == pytest.approx(0.02)
+
+    def test_stop_motion_cancels_active_goals(self, move_group_component):
+        comp = move_group_component
+        comp._move_client = TestGoalExecution._client()
+        comp._move_client.goal_accepted = True
+        comp._exec_client = TestGoalExecution._client()
+        comp._exec_client.goal_accepted = False
+        comp._gripper_client = None
+
+        message = comp.stop_motion.__wrapped__(comp)
+
+        comp._move_client.cancel_request.assert_called_once()
+        comp._exec_client.cancel_request.assert_not_called()
+        assert "arm" in message
+
+    def test_stop_motion_without_active_goals(self, move_group_component):
+        comp = move_group_component
+        comp._move_client = TestGoalExecution._client()
+        comp._move_client.goal_accepted = False
+        comp._exec_client = None
+        comp._gripper_client = None
+
+        assert "No motion" in comp.stop_motion.__wrapped__(comp)
