@@ -630,6 +630,13 @@ class Vision(ModelComponent):
 
         return {"images": images, **self.inference_params}
 
+    def _source_frame(self) -> Optional[str]:
+        """Frame of the camera the detections were made in"""
+        if len(self._images) != 1:
+            return None
+        source = getattr(self._images[0], "rgb", self._images[0])
+        return getattr(getattr(source, "header", None), "frame_id", None) or None
+
     def _execution_step(self, *args, **kwargs):
         """_execution_step.
 
@@ -661,6 +668,7 @@ class Vision(ModelComponent):
         self._publish(
             result,
             images=self._images,
+            frame_id=self._source_frame(),
             time_stamp=self.get_ros_time(),
         )
         if self.config.enable_visualization:

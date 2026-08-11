@@ -293,6 +293,32 @@ class Video(SupportedType):
         return msg
 
 
+def _attach_source_image(msg: Any, image: Any) -> None:
+    """Attach a source image (and its depth, if any) to a perception message.
+    Also copies the image's header onto the message, so the detections carry
+    the frame they were made in.
+
+    :param msg: Perception message with image/compressed_image/depth fields
+    :param image: Source ROS image message (Image, CompressedImage or RGBD)
+    """
+    if image is None:
+        return
+    if isinstance(image, ROSCompressedImage):
+        msg.compressed_image = CompressedImage.convert(image)
+        source = image
+    # Handle RealSense RGBD msgs
+    elif hasattr(image, "depth"):
+        msg.image = Image.convert(image.rgb)
+        msg.depth = Image.convert(image.depth)
+        source = image.rgb
+    else:
+        msg.image = Image.convert(image)
+        source = image
+
+    if hasattr(source, "header") and hasattr(msg, "header"):
+        msg.header = source.header
+
+
 class Detections(SupportedType):
     """
     Wraps the `automatika_embodied_agents.msg.Detections2D` message type.
@@ -343,14 +369,7 @@ class Detections(SupportedType):
 
         msg.boxes = boxes
         if images:
-            if isinstance(images, ROSCompressedImage):
-                msg.compressed_image = CompressedImage.convert(images)
-            # Handle RealSense RGBD msgs
-            elif hasattr(images, "depth"):
-                msg.image = Image.convert(images.rgb)
-                msg.depth = Image.convert(images.depth)
-            else:
-                msg.image = Image.convert(images)
+            _attach_source_image(msg, images)
         return msg
 
 
@@ -418,14 +437,7 @@ class PointsOfInterest(SupportedType):
             points.append(point)
         msg.points = points
 
-        if isinstance(image, ROSCompressedImage):
-            msg.compressed_image = CompressedImage.convert(image)
-        # Handle RealSense RGBD msgs
-        elif hasattr(image, "depth"):
-            msg.image = Image.convert(image.rgb)
-            msg.depth = Image.convert(image.depth)
-        else:
-            msg.image = Image.convert(image)
+        _attach_source_image(msg, image)
         return msg
 
 
@@ -500,14 +512,7 @@ class Trackings(SupportedType):
         msg.boxes = tracked_boxes
         msg.centroids = centroids
         msg.estimated_velocities = estimated_velocities
-        if isinstance(images, ROSCompressedImage):
-            msg.compressed_image = CompressedImage.convert(images)
-        # Handle RealSense RGBD msgs
-        elif hasattr(images, "depth"):
-            msg.image = Image.convert(images.rgb)
-            msg.depth = Image.convert(images.depth)
-        else:
-            msg.image = Image.convert(images)
+        _attach_source_image(msg, images)
         return msg
 
 
