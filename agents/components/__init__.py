@@ -16,6 +16,9 @@ A Component is the main execution unit in _EmbodiedAgents_ and in essence each c
 * - **[VLA](agents.components.vla.md)**
   - Provides an interface to utilize Vision Language Action (VLA) models for manipulation and control tasks. It can use VLA Policies (such as SmolVLA, Pi0/Pi0.5, NVIDIA GR00T N1.7 etc.) served with HuggingFace LeRobot Async Policy Server and publish them to common topic formats in MoveIt Servo and ROS2 Control.
 
+* - **[MoveIt](agents.components.moveit.md)**
+  - Provides classical, collision aware manipulation by driving a running [MoveIt 2](https://moveit.ai) `move_group` node. Plans and executes end-effector pose goals, joint goals, named targets from the robot's SRDF and straight-line Cartesian paths, and controls the gripper. Complements the VLA component, which learns manipulation skills, by providing planned and collision checked motion.
+
 * - **[SpeechToText](agents.components.speechtotext.md)**
   - Converts spoken audio into text using speech-to-text models (e.g., Whisper). Suitable for voice command recognition. It also implements small on-board models for Voice Activity Detection (VAD) and Wakeword recognition, using audio capture devices onboard the robot.
 
@@ -51,6 +54,7 @@ from .map_encoding import MapEncoding
 from .memory import Memory
 from .mllm import MLLM, VLM
 from .model_component import ModelComponent
+from .moveit import MoveIt
 from .semantic_router import SemanticRouter
 from .speechtotext import SpeechToText
 from .texttospeech import TextToSpeech
@@ -67,6 +71,7 @@ __all__ = [
     "VLM",
     "LLM",
     "VLA",
+    "MoveIt",
     "SpeechToText",
     "TextToSpeech",
     "Vision",
