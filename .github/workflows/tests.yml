@@ -26,7 +26,8 @@ jobs:
           apt-get update
           apt-get install -y python3-pip \
               ros-${{ matrix.ros_distro }}-control-msgs \
-              ros-${{ matrix.ros_distro }}-realsense2-camera-msgs
+              ros-${{ matrix.ros_distro }}-realsense2-camera-msgs \
+              ros-${{ matrix.ros_distro }}-moveit-msgs
 
       - name: Build workspace
         run: |
