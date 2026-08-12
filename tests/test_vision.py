@@ -23,6 +23,15 @@ def _image(frame_id="camera_optical_frame"):
     return image
 
 
+def _callback(msg=None, output=None, msg_type="Image", name="topic"):
+    """A stand-in for an input callback, carrying the topic it subscribes to."""
+    callback = MagicMock()
+    callback.input_topic = Topic(name=name, msg_type=msg_type)
+    callback.msg = msg
+    callback.get_output.return_value = output
+    return callback
+
+
 @pytest.fixture
 def vision(rclpy_init, mock_model_client):
     # Vision rejects clients that do not serve a VisionModel
@@ -79,16 +88,202 @@ class TestDetectionFrames:
         assert vision._source_frame() is None
 
 
+class TestDetectionSet:
+    """Which image inputs reach the model. The rest stay subscribed for
+    take_picture and record_video rather than being inferred on and thrown
+    away, which is what used to happen."""
+
+    @staticmethod
+    def _build(mock_model_client, inputs, outputs, trigger=1.0):
+        type(mock_model_client).model_type = PropertyMock(return_value="VisionModel")
+        component = Vision(
+            inputs=inputs,
+            outputs=outputs,
+            model_client=mock_model_client,
+            config=VisionConfig(),
+            component_name="test_set",
+            trigger=trigger,
+        )
+        return mock_component_internals(component)
+
+    @staticmethod
+    def _cameras(*names):
+        return [Topic(name=name, msg_type="Image") for name in names]
+
+    def test_timed_single_source_detects_on_one_camera(
+        self, rclpy_init, mock_model_client
+    ):
+        component = self._build(
+            mock_model_client,
+            self._cameras("front", "rear"),
+            [Topic(name="detections", msg_type="Detections")],
+        )
+        assert component._inference_set == ["front"]
+        assert component._spectators == ["rear"]
+
+    def test_a_spectator_camera_never_reaches_the_model(
+        self, rclpy_init, mock_model_client
+    ):
+        """Inferring on it and discarding the result costs a full model pass
+        per tick."""
+        component = self._build(
+            mock_model_client,
+            self._cameras("front", "rear"),
+            [Topic(name="detections", msg_type="Detections")],
+        )
+        component.callbacks = {
+            "front": _callback(_image("front_optical"), [[1]], name="front"),
+            "rear": _callback(_image("rear_optical"), [[2]], name="rear"),
+        }
+        component.trig_callbacks = {}
+
+        assert component._create_input()["images"] == [[[1]]]
+
+    def test_it_is_named_rather_than_quietly_ignored(
+        self, rclpy_init, mock_model_client, monkeypatch
+    ):
+        component = self._build(
+            mock_model_client,
+            self._cameras("front", "rear"),
+            [Topic(name="detections", msg_type="Detections")],
+        )
+        monkeypatch.setattr(
+            "agents.components.model_component.ModelComponent.custom_on_configure",
+            lambda _: None,
+        )
+
+        component.custom_on_configure()
+
+        warning = " ".join(
+            str(call[0][0]) for call in component.get_logger().warning.call_args_list
+        )
+        assert "rear" in warning and "take_picture" in warning
+
+    def test_timed_multi_source_detects_on_all_cameras(
+        self, rclpy_init, mock_model_client
+    ):
+        component = self._build(
+            mock_model_client,
+            self._cameras("front", "rear"),
+            [Topic(name="detections", msg_type="DetectionsMultiSource")],
+        )
+        assert component._inference_set == ["front", "rear"]
+        assert component._spectators == []
+
+    def test_single_source_alongside_multi_source_is_refused(
+        self, rclpy_init, mock_model_client
+    ):
+        """The multi source output pulls both cameras into the same pass, and
+        a Detections topic cannot describe both."""
+        with pytest.raises(TypeError, match="MultiSource"):
+            self._build(
+                mock_model_client,
+                self._cameras("front", "rear"),
+                [
+                    Topic(name="all", msg_type="DetectionsMultiSource"),
+                    Topic(name="one", msg_type="Detections"),
+                ],
+            )
+
+    def test_triggered_cameras_are_the_detection_set(
+        self, rclpy_init, mock_model_client
+    ):
+        """A tick reads only the topic that fired, so several triggers still
+        mean one picture per tick and a single source output stays valid."""
+        cameras = self._cameras("front", "rear", "spare")
+        component = self._build(
+            mock_model_client,
+            cameras,
+            [Topic(name="detections", msg_type="Detections")],
+            trigger=cameras[:2],
+        )
+        assert component._inference_set == ["front", "rear"]
+        assert component._spectators == ["spare"]
+
+    def test_trackers_are_allocated_per_camera_detected_on(
+        self, rclpy_init, mock_model_client
+    ):
+        type(mock_model_client).model_type = PropertyMock(return_value="VisionModel")
+        mock_model_client._model = MagicMock(setup_trackers=True)
+        Vision(
+            inputs=self._cameras("front", "rear"),
+            outputs=[Topic(name="detections", msg_type="Detections")],
+            model_client=mock_model_client,
+            config=VisionConfig(),
+            component_name="test_trackers",
+        )
+        assert mock_model_client._model._num_trackers == 1
+
+
+class TestPublishRouting:
+    """Inference returns one set of detections per image; each output topic
+    gets the shape it can carry."""
+
+    def test_single_source_gets_one_cameras_detections(
+        self, vision, mock_model_client
+    ):
+        mock_model_client.inference.return_value = {
+            "output": [{"bboxes": [[0, 0, 1, 1]], "labels": ["cup"], "scores": [0.9]}]
+        }
+        vision.callbacks = {"image": _callback(_image("front"), [[0]], name="image")}
+        vision.trig_callbacks = {}
+
+        vision._execution_step()
+
+        published = vision.publishers_dict["out"].publish.call_args[0][0]
+        assert published["labels"] == ["cup"]
+
+    def test_multi_source_gets_the_whole_list(self, rclpy_init, mock_model_client):
+        type(mock_model_client).model_type = PropertyMock(return_value="VisionModel")
+        component = mock_component_internals(
+            Vision(
+                inputs=[
+                    Topic(name="front", msg_type="Image"),
+                    Topic(name="rear", msg_type="Image"),
+                ],
+                outputs=[Topic(name="all", msg_type="DetectionsMultiSource")],
+                model_client=mock_model_client,
+                config=VisionConfig(),
+                component_name="test_multi",
+            )
+        )
+        mock_model_client.inference.return_value = {
+            "output": [
+                {"bboxes": [[0, 0, 1, 1]], "labels": ["cup"], "scores": [0.9]},
+                {"bboxes": [[1, 1, 2, 2]], "labels": ["bowl"], "scores": [0.8]},
+            ]
+        }
+        component.callbacks = {
+            "front": _callback(_image("front_optical"), [[1]], name="front"),
+            "rear": _callback(_image("rear_optical"), [[2]], name="rear"),
+        }
+        component.trig_callbacks = {}
+
+        component._execution_step()
+
+        published = component.publishers_dict["out"].publish.call_args[0][0]
+        assert [d["labels"] for d in published] == [["cup"], ["bowl"]]
+
+
 class TestConvertHeaders:
     """The per-source detections nested in a multi-source message need their
     own frames — the outer header can only name one camera."""
 
     def test_detections_convert_copies_header(self):
         message = Detections.convert(
-            [{"bboxes": [[0, 0, 2, 2]], "labels": ["cup"], "scores": [0.8]}],
-            [_image("left_camera")],
+            {"bboxes": [[0, 0, 2, 2]], "labels": ["cup"], "scores": [0.8]},
+            _image("left_camera"),
         )
         assert message.header.frame_id == "left_camera"
+
+    def test_detections_refuses_several_cameras(self):
+        """Silently keeping the first camera's detections and dropping the
+        rest is what this message type used to do."""
+        with pytest.raises(TypeError, match="MultiSource"):
+            Detections.convert(
+                [{"bboxes": [[0, 0, 2, 2]], "labels": ["cup"], "scores": [0.8]}],
+                [_image("left_camera")],
+            )
 
     def test_multi_source_nests_per_camera_frames(self):
         output = [
@@ -105,7 +300,7 @@ class TestConvertHeaders:
 
     def test_convert_without_image_is_unchanged(self):
         message = Detections.convert(
-            [{"bboxes": [[0, 0, 1, 1]], "labels": ["cup"], "scores": [0.8]}], []
+            {"bboxes": [[0, 0, 1, 1]], "labels": ["cup"], "scores": [0.8]}
         )
         assert message.header.frame_id == ""
         assert message.labels == ["cup"]
