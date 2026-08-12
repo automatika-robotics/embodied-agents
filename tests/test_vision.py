@@ -215,6 +215,212 @@ class TestDetectionSet:
         assert mock_model_client._model._num_trackers == 1
 
 
+class Test3DContract:
+    """Asking for a Detections3D output is what turns lifting on, so the
+    component says up front when it was not given what that takes: one camera,
+    depth registered to its pictures, that depth's calibration, and a frame to
+    report boxes in."""
+
+    @staticmethod
+    def _build(mock_model_client, inputs, config=None, outputs=None, **kwargs):
+        type(mock_model_client).model_type = PropertyMock(return_value="VisionModel")
+        return Vision(
+            inputs=inputs,
+            outputs=outputs or [Topic(name="d3", msg_type="Detections3D")],
+            model_client=mock_model_client,
+            config=config or VisionConfig(detections_frame="base_link"),
+            component_name="test_3d",
+            **kwargs,
+        )
+
+    def test_an_rgbd_input_carries_everything(self, rclpy_init, mock_model_client):
+        """Depth registered to the picture, plus both calibrations, in one
+        message — so it needs no other topic."""
+        component = self._build(
+            mock_model_client, [Topic(name="rgbd", msg_type="RGBD")]
+        )
+        assert component._lift_to_3d and component._inference_set == ["rgbd"]
+
+    def test_a_named_depth_topic_is_accepted(self, rclpy_init, mock_model_client):
+        """Every stereo camera other than RealSense publishes its registered
+        depth on its own topic."""
+        component = self._build(
+            mock_model_client,
+            [Topic(name="image", msg_type="Image")],
+            depth=Topic(name="depth", msg_type="Image"),
+            camera_info=Topic(name="camera_info", msg_type="CameraInfo"),
+        )
+        # both become inputs, but neither is a picture to detect on
+        assert component._aux_inputs == {"depth", "camera_info"}
+        assert component._inference_set == ["image"]
+        assert component._spectators == []
+        assert {"depth", "camera_info"} <= {t.name for t in component.in_topics}
+
+    def test_depth_is_required(self, rclpy_init, mock_model_client):
+        """An image topic cannot be guessed to be depth."""
+        with pytest.raises(TypeError, match="requires depth"):
+            self._build(mock_model_client, [Topic(name="image", msg_type="Image")])
+
+    def test_depth_needs_its_calibration(self, rclpy_init, mock_model_client):
+        with pytest.raises(TypeError, match="camera_info"):
+            self._build(
+                mock_model_client,
+                [Topic(name="image", msg_type="Image")],
+                depth=Topic(name="depth", msg_type="Image"),
+            )
+
+    def test_depth_cannot_be_compressed(self, rclpy_init, mock_model_client):
+        with pytest.raises(TypeError, match="uncompressed"):
+            self._build(
+                mock_model_client,
+                [Topic(name="image", msg_type="Image")],
+                depth=Topic(name="depth", msg_type="CompressedImage"),
+                camera_info=Topic(name="camera_info", msg_type="CameraInfo"),
+            )
+
+    def test_a_frame_to_report_in_is_required(self, rclpy_init, mock_model_client):
+        """Boxes are axis aligned in the frame they are measured in, so it is
+        chosen before they exist."""
+        with pytest.raises(TypeError, match="detections_frame"):
+            self._build(
+                mock_model_client,
+                [Topic(name="rgbd", msg_type="RGBD")],
+                config=VisionConfig(),
+            )
+
+    def test_the_first_of_several_cameras_is_lifted(
+        self, rclpy_init, mock_model_client
+    ):
+        """Only one camera's depth and calibration are given, so the rest are
+        left for the component actions, as with 2D outputs."""
+        component = self._build(
+            mock_model_client,
+            [
+                Topic(name="left", msg_type="RGBD"),
+                Topic(name="right", msg_type="RGBD"),
+            ],
+        )
+        assert component._lift_camera == "left"
+        assert component._inference_set == ["left"]
+        assert component._spectators == ["right"]
+
+    def test_an_rgbd_wins_over_a_plain_camera_whatever_the_order(
+        self, rclpy_init, mock_model_client
+    ):
+        """An RGBD frame identifies its own camera, so it needs no ordering
+        convention to be chosen."""
+        component = self._build(
+            mock_model_client,
+            [
+                Topic(name="spare", msg_type="Image"),
+                Topic(name="rgbd", msg_type="RGBD"),
+            ],
+        )
+        assert component._lift_camera == "rgbd"
+        assert component._inference_set == ["rgbd"]
+        assert component._spectators == ["spare"]
+
+    def test_the_lifted_camera_is_named_when_others_are_inferenced_on(
+        self, rclpy_init, mock_model_client, monkeypatch
+    ):
+        """A multi source output pulls every camera into the pass, but only one
+        of them can be placed in space."""
+        component = self._build(
+            mock_model_client,
+            [
+                Topic(name="rgbd", msg_type="RGBD"),
+                Topic(name="spare", msg_type="Image"),
+            ],
+            outputs=[
+                Topic(name="d3", msg_type="Detections3D"),
+                Topic(name="all", msg_type="DetectionsMultiSource"),
+            ],
+        )
+        mock_component_internals(component)
+        monkeypatch.setattr(
+            "agents.components.model_component.ModelComponent.custom_on_configure",
+            lambda _: None,
+        )
+        assert component._inference_set == ["rgbd", "spare"]
+
+        component.custom_on_configure()
+
+        warning = " ".join(
+            str(call[0][0]) for call in component.get_logger().warning.call_args_list
+        )
+        assert "rgbd" in warning and "spare" in warning and "2D only" in warning
+
+    def test_camera_info_may_override_what_an_rgbd_carries(
+        self, rclpy_init, mock_model_client
+    ):
+        component = self._build(
+            mock_model_client,
+            [Topic(name="rgbd", msg_type="RGBD")],
+            camera_info=Topic(name="camera_info", msg_type="CameraInfo"),
+        )
+        assert component.camera_info.name == "camera_info"
+        assert component._inference_set == ["rgbd"]
+
+    def test_camera_info_in_inputs_is_refused(self, rclpy_init, mock_model_client):
+        """Depth cannot be told from a camera in `inputs`, so neither is looked
+        for there: both have exactly one way in."""
+        with pytest.raises(TypeError, match="camera_info=Topic"):
+            self._build(
+                mock_model_client,
+                [
+                    Topic(name="rgbd", msg_type="RGBD"),
+                    Topic(name="camera_info", msg_type="CameraInfo"),
+                ],
+            )
+
+    def test_depth_cannot_be_the_trigger(self, rclpy_init, mock_model_client):
+        depth = Topic(name="depth", msg_type="Image")
+        with pytest.raises(TypeError, match="trigger"):
+            self._build(
+                mock_model_client,
+                [Topic(name="image", msg_type="Image")],
+                depth=depth,
+                camera_info=Topic(name="camera_info", msg_type="CameraInfo"),
+                trigger=depth,
+            )
+
+    def test_depth_without_a_3d_output_is_ignored_and_said_so(
+        self, rclpy_init, mock_model_client, monkeypatch
+    ):
+        """Unused config rather than an impossibility, so the component builds
+        and says what it is leaving out."""
+        component = self._build(
+            mock_model_client,
+            [Topic(name="image", msg_type="Image")],
+            outputs=[Topic(name="detections", msg_type="Detections")],
+            depth=Topic(name="depth", msg_type="Image"),
+            camera_info=Topic(name="camera_info", msg_type="CameraInfo"),
+        )
+        # nothing reads them, so nothing subscribes to them either
+        assert {t.name for t in component.in_topics} == {"image"}
+
+        mock_component_internals(component)
+        monkeypatch.setattr(
+            "agents.components.model_component.ModelComponent.custom_on_configure",
+            lambda _: None,
+        )
+        component.custom_on_configure()
+
+        warning = " ".join(
+            str(call[0][0]) for call in component.get_logger().warning.call_args_list
+        )
+        assert "depth" in warning and "camera_info" in warning
+
+    def test_2d_only_components_are_untouched(self, rclpy_init, mock_model_client):
+        component = self._build(
+            mock_model_client,
+            [Topic(name="image", msg_type="Image")],
+            config=VisionConfig(),
+            outputs=[Topic(name="detections", msg_type="Detections")],
+        )
+        assert not component._lift_to_3d and component._aux_inputs == set()
+
+
 class TestPublishRouting:
     """Inference returns one set of detections per image; each output topic
     gets the shape it can carry."""
