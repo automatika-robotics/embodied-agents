@@ -1,5 +1,6 @@
 from .ros import (
     Detections,
+    Detections3D,
     DetectionsMultiSource,
     PointsOfInterest,
     RGBD,
@@ -32,6 +33,8 @@ OUTPUT_ELEMENTS = {
     DetectionsMultiSource: _out_image_element,
     PointsOfInterest: _out_image_element,
     RGBD: _out_image_element,
+    # 3D detections dont have an image; displayed as text
+    Detections3D: _log_text_element,
 }
 
 INPUT_ELEMENTS = {}

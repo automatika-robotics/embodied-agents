@@ -109,3 +109,78 @@ class TestConvertHeaders:
         )
         assert message.header.frame_id == ""
         assert message.labels == ["cup"]
+
+
+class TestDetections3DMessage:
+    """The 3D detection message and its conversion."""
+
+    @staticmethod
+    def _boxes():
+        return [((0.3, 0.0, 0.15), (0.06, 0.06, 0.08))]
+
+    def test_convert_round_trip(self):
+        from agents.ros import Detections3D
+
+        message = Detections3D.convert(
+            self._boxes(),
+            labels=["orange"],
+            scores=[0.87],
+            depth_validity=[0.64],
+            source_frame="front_optical",
+        )
+        assert message.labels == ["orange"]
+        assert list(message.scores) == [0.87]
+        assert list(message.depth_validity) == [0.64]
+        assert message.source_frame == "front_optical"
+        box = message.boxes[0]
+        assert (box.center.position.x, box.center.position.z) == (0.3, 0.15)
+        assert (box.size.x, box.size.y, box.size.z) == (0.06, 0.06, 0.08)
+        # a bare Pose has w=0, which is not a valid rotation
+        assert box.center.orientation.w == 1.0
+
+    def test_convert_without_metadata(self):
+        from agents.ros import Detections3D
+
+        message = Detections3D.convert(self._boxes())
+        assert len(message.boxes) == 1
+        assert message.labels == [] and list(message.scores) == []
+
+    def test_box_maps_onto_ros_and_moveit_types(self):
+        """The message is shaped so neither perception nor planning needs a
+        conversion layer."""
+        vision_msgs = pytest.importorskip("vision_msgs.msg")
+        shape_msgs = pytest.importorskip("shape_msgs.msg")
+        from agents.ros import Detections3D
+
+        box = Detections3D.convert(self._boxes()).boxes[0]
+
+        bounding_box = vision_msgs.BoundingBox3D()
+        bounding_box.center = box.center
+        bounding_box.size = box.size
+        assert bounding_box.size.x == 0.06
+
+        primitive = shape_msgs.SolidPrimitive(
+            type=shape_msgs.SolidPrimitive.BOX,
+            dimensions=[box.size.x, box.size.y, box.size.z],
+        )
+        assert list(primitive.dimensions) == [0.06, 0.06, 0.08]
+
+    def test_callback_gives_context_by_default_and_the_message_on_request(self):
+        """Prompts and memory want the classes; a planner wants the boxes."""
+        from agents.callbacks import Detections3DCallback
+        from agents.ros import Detections3D, Topic
+
+        callback = Detections3DCallback(Topic(name="d3", msg_type="Detections3D"))
+        assert callback.get_output() is None
+        assert callback.get_output(get_msg=True) is None
+        assert "No objects" in callback._get_ui_content()
+
+        message = Detections3D.convert(self._boxes(), labels=["orange"])
+        message.header.frame_id = "base_link"
+        callback.msg = message
+
+        assert callback.get_output() == "1 orange"
+        assert callback.get_output(get_msg=True) is message
+
+        content = callback._get_ui_content()
+        assert "orange" in content and "base_link" in content

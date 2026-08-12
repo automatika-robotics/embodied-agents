@@ -14,6 +14,7 @@ from ros_sugar.supported_types import (
     SupportedType,
     Audio,
     Bool,
+    CameraInfo,
     Image,
     CompressedImage,
     OccupancyGrid,
@@ -65,8 +66,10 @@ from rcl_interfaces.srv import GetParameters
 from automatika_embodied_agents.msg import (
     Point2D,
     Bbox2D,
+    Bbox3D as ROSBbox3D,
     Detections2D,
     Detections2DMultiSource,
+    Detections3D as ROSDetections3D,
 )
 from automatika_embodied_agents.msg import (
     StreamingString as ROSStreamingString,
@@ -78,6 +81,7 @@ from automatika_embodied_agents.msg import (
 from automatika_embodied_agents.action import MoveManipulator, VisionLanguageAction
 from .callbacks import (
     DetectionsCallback,
+    Detections3DCallback,
     DetectionsMultiSourceCallback,
     PointsOfInterestCallback,
     RGBDCallback,
@@ -94,6 +98,7 @@ __all__ = [
     "Video",
     "Audio",
     "Bool",
+    "CameraInfo",
     "Image",
     "CompressedImage",
     "OccupancyGrid",
@@ -103,6 +108,7 @@ __all__ = [
     "PoseArray",
     "PoseStamped",
     "Detections",
+    "Detections3D",
     "DetectionsMultiSource",
     "PointsOfInterest",
     "Trackings",
@@ -399,6 +405,60 @@ class DetectionsMultiSource(SupportedType):
         for img, detection in zip(images, output):
             detections.append(Detections.convert(detection, img))
         msg.detections = detections
+        return msg
+
+
+class Detections3D(SupportedType):
+    """
+    Wraps the `automatika_embodied_agents.msg.Detections3D` message type.
+
+    This type represents detected objects in metric space, each with a
+    labelled 3D bounding box in a named frame rather than in image space.
+
+    **ROS2 Message Type**: `automatika_embodied_agents/msg/Detections3D`
+    """
+
+    _ros_type = ROSDetections3D
+    callback = Detections3DCallback
+
+    @classmethod
+    def convert(
+        cls,
+        output: List,
+        labels: Optional[List[str]] = None,
+        scores: Optional[List[float]] = None,
+        depth_validity: Optional[List[float]] = None,
+        boxes_2d: Optional[List] = None,
+        source_frame: str = "",
+        **_,
+    ) -> ROSDetections3D:
+        """
+        Takes 3D object detections and converts them into a ROS message
+        of type Detections3D
+
+        :param output: Boxes as (center, size) pairs, each in meters
+        :return: Detections3D
+        """
+        msg = ROSDetections3D()
+        boxes = []
+        for center, size in output:
+            box = ROSBbox3D()
+            box.center.position.x = float(center[0])
+            box.center.position.y = float(center[1])
+            box.center.position.z = float(center[2])
+            # Boxes are axis aligned in the frame they are given in
+            box.center.orientation.w = 1.0
+            box.size.x = float(size[0])
+            box.size.y = float(size[1])
+            box.size.z = float(size[2])
+            boxes.append(box)
+
+        msg.boxes = boxes
+        msg.labels = labels or []
+        msg.scores = [float(score) for score in scores or []]
+        msg.depth_validity = [float(value) for value in depth_validity or []]
+        msg.boxes_2d = boxes_2d or []
+        msg.source_frame = source_frame
         return msg
 
 
@@ -758,6 +818,7 @@ agent_types = [
     StreamingString,
     Video,
     Detections,
+    Detections3D,
     DetectionsMultiSource,
     Trackings,
     TrackingsMultiSource,

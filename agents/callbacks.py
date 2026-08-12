@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Any, Optional
 import os
 import cv2
 import numpy as np
@@ -444,3 +444,57 @@ class JointStateCallback(GenericCallback):
             velocities=np.array(self.msg.velocity),
             efforts=np.array(self.msg.effort),
         )
+
+
+class Detections3DCallback(GenericCallback):
+    """
+    Callback class for Detections3D msg
+
+    Its get method returns a context string of the detected classes, like the
+    2D detections callback, so the output can be used in prompts and stored as
+    semantic memory. Consumers that need the geometry ask for the message itself
+    with `get_msg=True`.
+    """
+
+    def __init__(self, input_topic, node_name: Optional[str] = None) -> None:
+        """
+        Constructs a new instance.
+
+        :param      input_topic:  Subscription topic
+        :type       input_topic:  str
+        """
+        super().__init__(input_topic, node_name)
+        self.msg = input_topic.fixed if hasattr(input_topic, "fixed") else None
+
+    def _get_output(self, get_msg: bool = False, **_) -> Optional[Any]:
+        """
+        Processes labels and returns a context string for prompt engineering,
+        or the message itself when the metric boxes are needed.
+
+        :param      get_msg:  Return the Detections3D message instead of a
+                              context string
+        :type       get_msg:  bool
+
+        :returns:   Comma separated classnames, or the Detections3D message
+        :rtype:     Optional[Union[str, Detections3D]]
+        """
+        if not self.msg:
+            return None
+
+        if get_msg:
+            return self.msg
+
+        return create_detection_context(list(self.msg.labels))
+
+    def _get_ui_content(self, **_) -> str:
+        """Get UI content for Detections3D: what was found and how far away."""
+        if not self.msg or not self.msg.labels:
+            return "No objects detected"
+
+        frame = self.msg.header.frame_id or "camera frame"
+        objects = ", ".join(
+            f"{label} at ({box.center.position.x:.2f}, {box.center.position.y:.2f}, "
+            f"{box.center.position.z:.2f})"
+            for label, box in zip(self.msg.labels, self.msg.boxes)
+        )
+        return f"In {frame}: {objects}"
