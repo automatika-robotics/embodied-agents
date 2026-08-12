@@ -91,7 +91,18 @@ class Vision(ModelComponent):
             TrackingsMultiSource,
         ]
 
+        # Raw image captures
         self._images: List[Union[np.ndarray, ROSImage, ROSCompressedImage]] = []
+
+        # Sort which image inputs are actually run through the model, and which are
+        # only there to be captured by component actions
+        self._inference_set = self._resolve_detection_set(inputs, outputs, trigger)
+        self._spectators = [
+            topic.name
+            for topic in inputs
+            if issubclass(topic.msg_type, (Image, RGBD))
+            and topic.name not in self._inference_set
+        ]
 
         super().__init__(
             inputs,
@@ -113,14 +124,75 @@ class Vision(ModelComponent):
                 hasattr(model_client, "_model")
                 and self.model_client._model.setup_trackers  # type: ignore
             ):
-                model_client._model._num_trackers = len(inputs)
+                # one tracker per camera inferenced on, not per input
+                model_client._model._num_trackers = len(self._inference_set)
         else:
             if not self.config.enable_local_classifier:
                 raise TypeError(
                     "Vision component either requires a model client or enable_local_classifier needs to be set True in the VisionConfig."
                 )
 
+    @staticmethod
+    def _resolve_detection_set(
+        inputs: List[Union[Topic, FixedInput]],
+        outputs: List[Topic],
+        trigger: Union[Topic, List[Topic], float],
+    ) -> List[str]:
+        """Decide which image inputs are run through the model each tick.
+
+        A component receives one picture per tick when it is triggered by a
+        topic (EVENT mode), and all of its images at once when it is timed (TIMED mode).
+
+        Single source outputs describe one camera, so they can only be used when
+        a tick produces one picture. Image inputs left out are still subscribed
+        and can be captured with component actions but they are not used for inference.
+
+        :returns: Names of the image topics to run detection on
+        """
+        pictures = [t for t in inputs if issubclass(t.msg_type, (Image, RGBD))]
+        multi_source = any(
+            issubclass(t.msg_type, (DetectionsMultiSource, TrackingsMultiSource))
+            for t in outputs
+        )
+        single_source = any(
+            issubclass(t.msg_type, (Detections, Trackings)) for t in outputs
+        )
+
+        if isinstance(trigger, (int, float)):
+            # Timed: the whole detection set reaches the model together, so
+            # several cameras need a message that can hold several
+            inference_on = pictures if multi_source else pictures[:1]
+            per_tick = len(inference_on)
+        else:
+            # Triggered: only the topic that fired is read, so a tick carries
+            # one picture however many topics can trigger one
+            triggers = trigger if isinstance(trigger, List) else [trigger]
+            inference_on = [t for t in pictures if t.name in {t.name for t in triggers}]
+            per_tick = 1
+
+        if single_source and per_tick > 1:
+            raise TypeError(
+                f"{[t.name for t in inference_on]} are all used for inference in the "
+                "same pass, so their inference results cannot be published on a "
+                "Detections or Trackings topic, which describes one camera. "
+                "Use a DetectionsMultiSource or TrackingsMultiSource output, "
+                "or trigger the component on the cameras to take them one at "
+                "a time."
+            )
+        return [t.name for t in inference_on]
+
     def custom_on_configure(self):
+        # Warn which image inputs are never used for inference
+        if self._spectators:
+            self.get_logger().warning(
+                f"Not running inference on {self._spectators}: this component "
+                f"runs inference on {self._inference_set}. Those topics can still be "
+                "captured with a component action (like take_picture and record_video). "
+                "To run inference on all of them, give the component a "
+                "DetectionsMultiSource or TrackingsMultiSource output topic, "
+                "or make them all component triggers."
+            )
+
         # deploy local model if enabled
         if not self.model_client and self.config.enable_local_classifier:
             self._deploy_local_model()
@@ -618,17 +690,40 @@ class Vision(ModelComponent):
         else:
             images = []
 
-            for i in self.callbacks.values():
+            for name, i in self.callbacks.items():
+                # Inputs outside the inference set are ignored
+                if name not in self._inference_set:
+                    continue
                 msg = i.msg
                 if (item := i.get_output(clear_last=True)) is not None:
                     images.append(item)
-                    if msg:
+                    if msg is not None:
                         self._images.append(msg)
 
         if not images:
             return None
 
         return {"images": images, **self.inference_params}
+
+    def _publish(self, result, **kwargs) -> None:
+        """Publish the detections, giving each topic the shape it can carry.
+
+        Inference returns one set of detections per image. A single source
+        message describes one camera and takes that camera's set on its own,
+        while a multi source message takes the whole list.
+        """
+        output = result.pop("output")
+        images = kwargs.pop("images", None)
+        for publisher in self.publishers_dict.values():
+            if issubclass(publisher.output_topic.msg_type, (Detections, Trackings)):
+                publisher.publish(
+                    output[0],
+                    images=images[0] if images else None,
+                    **result,
+                    **kwargs,
+                )
+            else:
+                publisher.publish(output, images=images, **result, **kwargs)
 
     def _source_frame(self) -> Optional[str]:
         """Frame of the camera the detections were made in"""
