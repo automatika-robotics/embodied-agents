@@ -162,29 +162,47 @@ class TestLifting:
         boxes = self._lift([PATCH])
         assert len(boxes) == 1
         box = boxes[0]
-        # the detector reports in a forward-left-up frame, so x is the distance
-        assert box.center[0] == pytest.approx(PATCH_DEPTH_M, abs=0.02)
+        # with no pose given, boxes come back in the camera's own optical
+        # frame: x right, y down, z forward
+        assert box.center[2] == pytest.approx(PATCH_DEPTH_M, abs=0.02)
         # 40 px wide at 0.5 m with a 500 px focal length is 4 cm
-        assert box.size[1] == pytest.approx(40 * PATCH_DEPTH_M / FX, abs=0.01)
-        assert box.size[2] == pytest.approx(20 * PATCH_DEPTH_M / FY, abs=0.01)
+        assert box.size[0] == pytest.approx(40 * PATCH_DEPTH_M / FX, abs=0.01)
+        assert box.size[1] == pytest.approx(20 * PATCH_DEPTH_M / FY, abs=0.01)
         assert box.validity == 1.0
+
+    def test_boxes_are_placed_along_the_optical_axes(self):
+        """An object right of and below the principal point has to come back
+        with a positive x and a positive y, or every box handed to a planner
+        is mirrored."""
+        right_and_low = (130, 80, 150, 95)
+        box = self._lift([right_and_low])[0]
+        assert box.center[0] > 0 and box.center[1] > 0
+
+    def test_a_pose_places_boxes_in_the_frame_it_is_given_in(self):
+        """The detector works in forward-left-up axes internally. Handing it
+        the camera's own optical-to-body rotation must therefore land the box
+        in those axes, with the distance on x."""
+        optical_to_body = (-0.5, 0.5, -0.5, 0.5)
+        box = self._lift([PATCH], rotation=optical_to_body)[0]
+        assert box.center[0] == pytest.approx(PATCH_DEPTH_M, abs=0.02)
 
     def test_depth_is_that_of_whatever_fills_the_box(self):
         """The distance is a median, so a box padded well beyond its object
         reports the wall behind it. Detections must be tight."""
         tight = (PATCH[0] - 2, PATCH[1] - 2, PATCH[2] + 2, PATCH[3] + 2)
-        assert self._lift([tight])[0].center[0] == pytest.approx(
+        assert self._lift([tight])[0].center[2] == pytest.approx(
             PATCH_DEPTH_M, abs=0.05
         )
 
         loose = (PATCH[0] - 10, PATCH[1] - 10, PATCH[2] + 10, PATCH[3] + 10)
-        assert self._lift([loose])[0].center[0] == pytest.approx(
+        assert self._lift([loose])[0].center[2] == pytest.approx(
             BACKGROUND_DEPTH_M, abs=0.05
         )
 
     def test_translation_moves_the_box(self):
-        boxes = self._lift([PATCH], translation=(1.0, 0.0, 0.0))
-        assert boxes[0].center[0] == pytest.approx(1.0 + PATCH_DEPTH_M, abs=0.02)
+        here = self._lift([PATCH])[0]
+        moved = self._lift([PATCH], translation=(1.0, 0.0, 0.0))[0]
+        assert moved.center[0] - here.center[0] == pytest.approx(1.0, abs=0.01)
 
     def test_boxes_without_depth_are_dropped_and_indices_survive(self):
         """kompass drops boxes it cannot place, so the surviving boxes must
@@ -209,6 +227,8 @@ class TestLifting:
         message = Detections3D.convert(**fields)
         assert message.labels == ["orange"]
         assert list(message.depth_validity) == [1.0]
-        assert message.boxes[0].center.position.x == pytest.approx(
+        assert message.boxes[0].center.position.z == pytest.approx(
             PATCH_DEPTH_M, abs=0.02
         )
+        # the 2D boxes have to become messages, not stay as pixel tuples
+        assert message.boxes_2d[0].top_left_x == float(PATCH[0])
