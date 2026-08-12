@@ -299,6 +299,16 @@ class Video(SupportedType):
         return msg
 
 
+def _to_bbox_2d(bbox: Any) -> Bbox2D:
+    """Build a Bbox2D message from an (x1, y1, x2, y2) box in pixels"""
+    box = Bbox2D()
+    box.top_left_x = float(bbox[0])
+    box.top_left_y = float(bbox[1])
+    box.bottom_right_x = float(bbox[2])
+    box.bottom_right_y = float(bbox[3])
+    return box
+
+
 def _attach_source_image(msg: Any, image: Any) -> None:
     """Attach a source image (and its depth, if any) to a perception message.
     Also copies the image's header onto the message, so the detections carry
@@ -366,12 +376,7 @@ class Detections(SupportedType):
         msg.labels = output.get("labels") or []
         boxes = []
         for bbox in output.get("bboxes") or []:
-            box = Bbox2D()
-            box.top_left_x = float(bbox[0])
-            box.top_left_y = float(bbox[1])
-            box.bottom_right_x = float(bbox[2])
-            box.bottom_right_y = float(bbox[3])
-            boxes.append(box)
+            boxes.append(_to_bbox_2d(bbox))
 
         msg.boxes = boxes
         if images:
@@ -457,7 +462,11 @@ class Detections3D(SupportedType):
         msg.labels = labels or []
         msg.scores = [float(score) for score in scores or []]
         msg.depth_validity = [float(value) for value in depth_validity or []]
-        msg.boxes_2d = boxes_2d or []
+        # The 2D boxes come through as plain pixel tuples from the detector
+        msg.boxes_2d = [
+            box if isinstance(box, Bbox2D) else _to_bbox_2d(box)
+            for box in boxes_2d or []
+        ]
         msg.source_frame = source_frame
         return msg
 
@@ -562,12 +571,7 @@ class Trackings(SupportedType):
         # tracked_bboxes: list of [x1, y1, x2, y2] bounding boxes
         if o_tracked_bboxes := output.get("tracked_bboxes"):
             for bbox in o_tracked_bboxes:
-                box = Bbox2D()
-                box.top_left_x = float(bbox[0])
-                box.top_left_y = float(bbox[1])
-                box.bottom_right_x = float(bbox[2])
-                box.bottom_right_y = float(bbox[3])
-                tracked_boxes.append(box)
+                tracked_boxes.append(_to_bbox_2d(bbox))
 
         msg.boxes = tracked_boxes
         msg.centroids = centroids
