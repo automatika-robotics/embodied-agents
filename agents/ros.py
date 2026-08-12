@@ -378,8 +378,7 @@ class Detections(SupportedType):
             boxes.append(_to_bbox_2d(bbox))
 
         msg.boxes = boxes
-        if images:
-            _attach_source_image(msg, images)
+        _attach_source_image(msg, images)
         return msg
 
 
