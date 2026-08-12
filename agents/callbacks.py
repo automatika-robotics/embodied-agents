@@ -110,7 +110,7 @@ class VideoCallback(GenericCallback):
         :returns:   Video as nd_array
         :rtype:     np.ndarray
         """
-        if not self.msg:
+        if self.msg is None:
             return None
 
         # return np.ndarray if fixed video has been read

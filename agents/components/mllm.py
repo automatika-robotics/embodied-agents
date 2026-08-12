@@ -196,7 +196,7 @@ class MLLM(LLM):
             # get images from image topics
             if issubclass(msg_type, (Image, RGBD)):
                 images.append(item)
-                if msg:
+                if msg is not None:
                     self._images.append(msg)  # Collect all images for publishing
 
         if not query or not images:
