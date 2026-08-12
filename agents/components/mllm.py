@@ -398,21 +398,20 @@ class MLLM(LLM):
                     image=self._images[0],  # POI msg takes only one image
                     time_stamp=self.get_ros_time(),
                 )
-        elif self._task == "grounding":
-            result["output"] = [
-                {"bboxes": result["output"], "labels": [], "scores": []}
-            ]
+        elif self._task in ("grounding", "affordance"):
+            boxes = {"bboxes": result["output"], "labels": [], "scores": []}
             for pub_name in self._detections_publishers:
-                self.publishers_dict[pub_name].publish(
-                    **result, images=self._images, time_stamp=self.get_ros_time()
+                publisher = self.publishers_dict[pub_name]
+                # NOTE: The model grounds against the image set as a whole, so there
+                # is one set of boxes: a multi source topic takes it as a list
+                # of one, a single source topic takes it on its own
+                multi = issubclass(
+                    publisher.output_topic.msg_type, DetectionsMultiSource
                 )
-        elif self._task == "affordance":
-            result["output"] = [
-                {"bboxes": result["output"], "labels": [], "scores": []}
-            ]
-            for pub_name in self._detections_publishers:
-                self.publishers_dict[pub_name].publish(
-                    **result, images=self._images, time_stamp=self.get_ros_time()
+                publisher.publish(
+                    [boxes] if multi else boxes,
+                    images=self._images if multi else next(iter(self._images), None),
+                    time_stamp=self.get_ros_time(),
                 )
         elif self._task == "trajectory":
             for pub_name in self._poi_publishers:
