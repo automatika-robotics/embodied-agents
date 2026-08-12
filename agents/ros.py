@@ -352,25 +352,24 @@ class Detections(SupportedType):
     @classmethod
     def convert(
         cls,
-        output: Union[Dict, List[Dict]],
-        images: Union[
-            ROSImage,
-            ROSCompressedImage,
-            np.ndarray,
-            List[ROSImage],
-            List[ROSCompressedImage],
-            List[np.ndarray],
-        ],
+        output: Dict,
+        images: Union[ROSImage, ROSCompressedImage, np.ndarray, None] = None,
         **_,
     ) -> Detections2D:
         """
-        Takes object detection data and converts it into a ROS message
-        of type Detection2D
+        Takes one camera's object detection data and converts it into a ROS
+        message of type Detection2D
+
+        :param output: Detections found in a single image
+        :param images: The image they were found in
         :return: Detection2D
         """
         if isinstance(output, List):
-            output = output[0]
-            images = images[0] if images else []
+            raise TypeError(
+                "Detections2D describes a single camera and cannot carry "
+                "detections from several. Use a Detections2DMultiSource output "
+                "topic for a component that detects on more than one image."
+            )
         msg = Detections2D()
         msg.scores = output.get("scores") or []
         msg.labels = output.get("labels") or []
@@ -526,26 +525,24 @@ class Trackings(SupportedType):
     @classmethod
     def convert(
         cls,
-        output: Union[Dict, List[Dict]],
-        images: Union[
-            ROSImage,
-            ROSCompressedImage,
-            np.ndarray,
-            List[ROSImage],
-            List[ROSCompressedImage],
-            List[np.ndarray],
-        ],
+        output: Dict,
+        images: Union[ROSImage, ROSCompressedImage, np.ndarray, None] = None,
         **_,
     ) -> ROSTrackings:
         """
-        Takes tracking data and converts it into a ROS message
+        Takes one camera's tracking data and converts it into a ROS message
         of type Tracking
+
+        :param output: Tracks found in a single image
+        :param images: The image they were found in
         :return: ROSTracking
         """
-        # Only consider the first datapoint if a list is sent
         if isinstance(output, List):
-            output = output[0]
-            images = images[0]
+            raise TypeError(
+                "Trackings describes a single camera and cannot carry tracks "
+                "from several. Use a TrackingsMultiSource output topic for a "
+                "component that tracks in more than one image."
+            )
         msg = ROSTrackings()
         msg.ids = output.get("ids") or []
         msg.labels = output.get("tracked_labels") or []
