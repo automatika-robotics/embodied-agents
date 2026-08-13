@@ -7,6 +7,7 @@ from ..ros import (
     ActionClientHandler,
     ActionPhase,
     ComponentRunType,
+    Detections3D,
     GetParameters,
     MoveManipulator,
     ServiceClientConfig,
@@ -46,7 +47,7 @@ class MoveIt(Component):
 
     :param config: The configuration for the MoveIt component. `arm_group_name` is required and must match a planning group in the robot's SRDF.
     :type config: MoveItConfig
-    :param inputs: Optional input topics for the component. Not required for manipulation.
+    :param inputs: Optional input topics for the component, limited to Detections3D type: detected objects used to populate the planning scene (see `scene_update_mode` in the config), so that motions plan around what the robot's cameras see. Not required for manipulation.
     :type inputs: Optional[list[Topic]]
     :param outputs: Optional output topics for the component. Not required for manipulation.
     :type outputs: Optional[list[Topic]]
@@ -101,6 +102,9 @@ class MoveIt(Component):
         ensure_moveit_msgs()
 
         self.config: MoveItConfig = config
+
+        self.allowed_inputs = {"Required": [], "Optional": [Detections3D]}
+        self._detections_topic = inputs[0] if inputs else None
 
         # Set the component to run as an action server
         self.run_type = ComponentRunType.ACTION_SERVER

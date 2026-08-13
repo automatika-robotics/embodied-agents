@@ -1074,3 +1074,67 @@ class TestTouchLinks:
         from agents.utils.moveit import derive_touch_links
 
         assert derive_touch_links(None, "tool0") == ["tool0"]
+
+
+class TestSceneInputs:
+    """The component takes detected objects as an input topic, to feed the
+    planning scene with."""
+
+    @pytest.fixture(autouse=True)
+    def _needs_moveit_msgs(self):
+        pytest.importorskip("moveit_msgs.msg")
+
+    @staticmethod
+    def _config():
+        from agents.config import MoveItConfig
+
+        return MoveItConfig(arm_group_name="arm")
+
+    def test_a_detections_input_is_accepted_and_recorded(self, rclpy_init):
+        from agents.components import MoveIt
+        from agents.ros import Topic
+
+        component = MoveIt(
+            config=self._config(),
+            component_name="m_scene_in",
+            inputs=[Topic(name="detections_3d", msg_type="Detections3D")],
+        )
+        assert component._detections_topic.name == "detections_3d"
+
+    def test_other_input_types_are_rejected(self, rclpy_init):
+        """Regression: this used to raise AttributeError instead of a clear
+        TypeError, since `allowed_inputs` was never assigned."""
+        from agents.components import MoveIt
+        from agents.ros import Topic
+
+        with pytest.raises(TypeError, match="allowed"):
+            MoveIt(
+                config=self._config(),
+                component_name="m_scene_bad",
+                inputs=[Topic(name="image", msg_type="Image")],
+            )
+
+    def test_no_inputs_remains_valid(self, rclpy_init):
+        from agents.components import MoveIt
+
+        component = MoveIt(config=self._config(), component_name="m_scene_none")
+        assert component._detections_topic is None
+
+    def test_the_executable_reconstruction_shape_is_tolerated(self, rclpy_init):
+        """The launch executable's generic branch passes model_client,
+        db_client and trigger to every component it rebuilds in a child
+        process; MoveIt takes none of them and must swallow them."""
+        from agents.components import MoveIt
+        from agents.ros import Topic
+
+        component = MoveIt(
+            inputs=[Topic(name="detections_3d", msg_type="Detections3D")],
+            outputs=None,
+            model_client=None,
+            db_client=None,
+            trigger=1.0,
+            config=self._config(),
+            component_name="m_scene_relaunch",
+            config_file=None,
+        )
+        assert component._detections_topic.name == "detections_3d"
