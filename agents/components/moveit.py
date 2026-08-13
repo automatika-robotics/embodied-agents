@@ -696,6 +696,312 @@ class MoveIt(Component):
                 self.health_status.set_healthy()
         return result
 
+    def _command_gripper(
+        self, named_target: Optional[str], position: float, description: str
+    ) -> Tuple[bool, str]:
+        """Send a gripper command through the configured backend
+
+        :returns: (success, human readable description of what happened)
+        """
+        if not self._gripper_client:
+            return False, "The component is not active, cannot command the gripper"
+
+        handler = self._gripper_client
+        handler.reset()
+
+        if self.config.gripper_mode == "gripper_command":
+            from control_msgs.action import GripperCommand
+
+            goal = GripperCommand.Goal()
+            goal.command.position = position
+            goal.command.max_effort = self.config.gripper_max_effort
+        else:
+            if not self.config.gripper_group_name:
+                return False, (
+                    "No gripper is configured. Set 'gripper_group_name' in "
+                    "MoveItConfig to control a gripper through move_group."
+                )
+            try:
+                group, joint_positions = self._resolve_named_target(named_target)
+            except ValueError as e:
+                return False, str(e)
+            goal = build_move_group_goal(
+                joints_to_constraints(
+                    joint_positions, tolerance=self.config.goal_joint_tolerance
+                ),
+                group,
+                pipeline_id=self.config.planning_pipeline,
+                planner_id=self.config.planner_id,
+                num_attempts=self.config.num_planning_attempts,
+                allowed_time=self.config.allowed_planning_time,
+                velocity_scaling=self.config.max_velocity_scaling,
+                acceleration_scaling=self.config.max_acceleration_scaling,
+            )
+
+        if not handler.send_request(goal):
+            return False, f"Gripper '{description}' command was not accepted"
+
+        deadline = time.time() + self.config.execution_timeout
+        while not handler.action_returned and time.time() < deadline:
+            time.sleep(1 / self.config.loop_rate)
+
+        if not handler.action_returned:
+            handler.cancel_request()
+            return False, f"Gripper '{description}' command timed out"
+
+        error_code = getattr(handler.action_result, "error_code", None)
+        if error_code is not None:
+            status = moveit_error_string(getattr(error_code, "val", 0))
+            if status != "SUCCESS":
+                return False, f"Gripper '{description}' command failed: {status}"
+        return True, f"Gripper moved to '{description}'"
+
+    # =========================================================================
+    # PLANNING SCENE
+    # =========================================================================
+
+    def _apply_scene(
+        self, collision_objects=(), attached_objects=()
+    ) -> bool:
+        """Apply scene changes as one diff through move_group.
+
+        :param collision_objects: World objects to add, move or remove
+        :param attached_objects: Objects to attach to or detach from the robot
+        :returns: Whether move_group confirmed the change
+        """
+        from moveit_msgs.srv import ApplyPlanningScene
+
+        from ..utils.moveit import build_scene_diff
+
+        if not self._apply_scene_client:
+            self.get_logger().error(
+                "The planning scene client is not available, is the component active?"
+            )
+            return False
+
+        request = ApplyPlanningScene.Request()
+        request.scene = build_scene_diff(collision_objects, attached_objects)
+        response = self._apply_scene_client.send_request(request)
+        if response is None or not response.success:
+            self.get_logger().error(
+                "move_group did not apply the planning scene change"
+            )
+            return False
+        return True
+
+    def _resolve_touch_links(self, explicit: Optional[List[str]]) -> List[str]:
+        """Links allowed to stay in contact with an attached object.
+
+        Priority: the `touch_links` passed to the `attach_object` call, then
+        the configured `touch_links`, then the robot SRDF (gripper group
+        links or the end effector's neighborhood), then the end effector
+        link alone with a warning.
+        """
+        from ..utils.moveit import derive_touch_links
+
+        if not explicit and not self.config.touch_links and self._srdf is None:
+            # Fetch SRDF and cache along with the named targets
+            self._named_target_states()
+        return derive_touch_links(
+            self._srdf,
+            self.config.end_effector_link,
+            gripper_group=self.config.gripper_group_name or "",
+            explicit=explicit or self.config.touch_links,
+            logger_name=self.node_name,
+        )
+
+    def _do_attach(
+        self,
+        object_id: str,
+        link_name: str = "",
+        touch_links: Optional[List[str]] = None,
+    ) -> Tuple[bool, str]:
+        """Attach a scene object to a robot link.
+
+        :returns: (success, human readable description of what happened)
+        """
+        from ..utils.moveit import build_attached_object
+
+        link = link_name or self.config.end_effector_link
+        if not link:
+            return False, (
+                "No link to attach to: pass link_name or set "
+                "'end_effector_link' in the component config"
+            )
+
+        links = self._resolve_touch_links(touch_links)
+        if not self._apply_scene(
+            attached_objects=[build_attached_object(object_id, link, links)]
+        ):
+            return False, f"Could not attach '{object_id}' to '{link}'"
+
+        with self._scene_lock:
+            if entry := self._scene_objects.get(object_id):
+                entry["attached"] = link
+        return True, (
+            f"Attached '{object_id}' to '{link}' (touch links: {', '.join(links)})"
+        )
+
+    def _do_detach(self, object_id: str, remove: bool = False) -> Tuple[bool, str]:
+        """Detach an attached object, returning it to the world.
+
+        :returns: (success, human readable description of what happened)
+        """
+        from ..utils.moveit import build_detach_object, build_remove_object
+
+        if not self._apply_scene(
+            attached_objects=[build_detach_object(object_id)]
+        ):
+            return False, f"Could not detach '{object_id}'"
+
+        with self._scene_lock:
+            if entry := self._scene_objects.get(object_id):
+                entry.pop("attached", None)
+
+        if not remove:
+            return True, f"Detached '{object_id}', it remains in the scene"
+
+        # Detaching returns the object to the world, so removing it is a
+        # separate scene change
+        if not self._apply_scene([build_remove_object(object_id)]):
+            return False, (
+                f"Detached '{object_id}' but could not remove it from the scene"
+            )
+        with self._scene_lock:
+            self._scene_objects.pop(object_id, None)
+        return True, f"Detached '{object_id}' and removed it from the scene"
+
+    def _refresh_scene_from_detections(self, message: Optional[Any] = None) -> str:
+        """Push detections into the planning scene as one diff.
+
+        Objects the detector stopped reporting are kept for
+        `scene_object_ttl` seconds before a refresh removes them, so
+        detection dropouts do not flicker. Attached objects are never evicted
+        or re-added.
+
+        :param message: Detections to refresh from, when the caller has
+            already read them. Default reads the latest received message
+        :returns: What happened, for the caller and for tool use
+        """
+        from ..utils.moveit import (
+            build_remove_object,
+            collision_objects_from_detections,
+        )
+
+        if message is None:
+            if not self._detections_topic:
+                return (
+                    "No detections input is connected to this component, so "
+                    "there is nothing to update the planning scene from"
+                )
+            callback = self.callbacks.get(self._detections_topic.name)
+            # the callback's default output is a text summary for prompts, get
+            # the message itself for the boxes
+            message = callback.get_output(get_msg=True) if callback else None
+            if message is None:
+                return "No detections have been received yet"
+
+        now = time.time()
+        objects, stale = self._partition_scene_changes(
+            collision_objects_from_detections(
+                message,
+                min_thickness=self.config.min_object_thickness,
+                padding=self.config.object_padding,
+            ),
+            now,
+        )
+
+        changes = objects + [build_remove_object(object_id) for object_id in stale]
+        if not changes:
+            return "The planning scene is already up to date"
+        if not self._apply_scene(changes):
+            return "Could not update the planning scene"
+
+        added = []
+        with self._scene_lock:
+            for obj in objects:
+                # allocate only on first sighting, bump the rest in place
+                entry = self._scene_objects.setdefault(
+                    obj.id, {"source": "detection", "last_seen": now}
+                )
+                entry["last_seen"] = now
+                # an ADD moves an existing object, so the geometry follows it
+                position = obj.primitive_poses[0].position
+                dimensions = obj.primitives[0].dimensions
+                entry["center"] = (position.x, position.y, position.z)
+                entry["size"] = (dimensions[0], dimensions[1], dimensions[2])
+                added.append(obj.id)
+            for object_id in stale:
+                self._scene_objects.pop(object_id, None)
+
+        summary = f"Planning scene updated with {len(added)} detected object(s)"
+        if added:
+            summary += f": {', '.join(added)}"
+        if stale:
+            summary += f"; removed {len(stale)} stale object(s)"
+        return summary
+
+    def _partition_scene_changes(
+        self, objects: List[Any], now: float
+    ) -> Tuple[List[Any], List[str]]:
+        """Split a refresh into objects to add and tracked ids gone stale.
+
+        Attached objects are exempt from both sides, the rest expire by
+        their last sighting.
+
+        :param objects: Collision objects built from the latest detections
+        :param now: Refresh time, for the TTL comparison
+        :returns: (objects to add, tracked ids to remove)
+        """
+        seen = {obj.id for obj in objects}
+        attached, stale = set(), []
+        with self._scene_lock:
+            for object_id, entry in self._scene_objects.items():
+                if entry.get("attached"):
+                    attached.add(object_id)
+                elif (
+                    entry["source"] == "detection"
+                    and object_id not in seen
+                    and now - entry["last_seen"] > self.config.scene_object_ttl
+                ):
+                    stale.append(object_id)
+        if attached:
+            objects = [obj for obj in objects if obj.id not in attached]
+        return objects, stale
+
+    def _scene_refresh_tick(self):
+        """Continuous mode refresh, skipping ticks that would change nothing.
+
+        A tick refreshes only when a detections message arrived since the
+        last applied one, or a tracked object has outlived its TTL and is due
+        for removal.
+        """
+        callback = self.callbacks.get(self._detections_topic.name)
+        # the callback's default output is a text summary for prompts, get
+        # the message itself for the boxes
+        message = callback.get_output(get_msg=True) if callback else None
+        if message is None:
+            return
+
+        now = time.time()
+        if message is self._last_scene_message and not self._has_stale_objects(now):
+            # Dont refresh
+            return
+
+        self._last_scene_message = message
+        result = self._refresh_scene_from_detections(message)
+        self.get_logger().debug(result)
+
+    def _has_stale_objects(self, now: float) -> bool:
+        """Whether any tracked detection has outlived the TTL"""
+        with self._scene_lock:
+            return any(
+                entry["source"] == "detection"
+                and not entry.get("attached")
+                and now - entry["last_seen"] > self.config.scene_object_ttl
+                for entry in self._scene_objects.values()
+            )
+
     # =========================================================================
     # COMPONENT ACTIONS
     # =========================================================================
@@ -714,11 +1020,12 @@ class MoveIt(Component):
     )
     def open_gripper(self) -> str:
         """Open the gripper"""
-        return self._command_gripper(
+        _, message = self._command_gripper(
             named_target=self.config.gripper_open_target,
             position=self.config.gripper_open_position,
             description="open",
         )
+        return message
 
     @component_action(
         description={
@@ -734,11 +1041,12 @@ class MoveIt(Component):
     )
     def close_gripper(self) -> str:
         """Close the gripper"""
-        return self._command_gripper(
+        _, message = self._command_gripper(
             named_target=self.config.gripper_close_target,
             position=self.config.gripper_close_position,
             description="close",
         )
+        return message
 
     @component_action(
         description={
@@ -768,9 +1076,10 @@ class MoveIt(Component):
                 "Setting a specific gripper position requires gripper_mode to be "
                 "'gripper_command'. Use open_gripper or close_gripper instead."
             )
-        return self._command_gripper(
+        _, message = self._command_gripper(
             named_target=None, position=float(position), description=str(position)
         )
+        return message
 
     @component_action(
         description={
@@ -822,96 +1131,6 @@ class MoveIt(Component):
             for group, group_states in states.items()
             if group_states
         )
-
-    def _command_gripper(
-        self, named_target: Optional[str], position: float, description: str
-    ) -> str:
-        """Send a gripper command through the configured backend"""
-        if not self._gripper_client:
-            return "The component is not active, cannot command the gripper"
-
-        handler = self._gripper_client
-        handler.reset()
-
-        if self.config.gripper_mode == "gripper_command":
-            from control_msgs.action import GripperCommand
-
-            goal = GripperCommand.Goal()
-            goal.command.position = position
-            goal.command.max_effort = self.config.gripper_max_effort
-        else:
-            if not self.config.gripper_group_name:
-                return (
-                    "No gripper is configured. Set 'gripper_group_name' in "
-                    "MoveItConfig to control a gripper through move_group."
-                )
-            try:
-                group, joint_positions = self._resolve_named_target(named_target)
-            except ValueError as e:
-                return str(e)
-            goal = build_move_group_goal(
-                joints_to_constraints(
-                    joint_positions, tolerance=self.config.goal_joint_tolerance
-                ),
-                group,
-                pipeline_id=self.config.planning_pipeline,
-                planner_id=self.config.planner_id,
-                num_attempts=self.config.num_planning_attempts,
-                allowed_time=self.config.allowed_planning_time,
-                velocity_scaling=self.config.max_velocity_scaling,
-                acceleration_scaling=self.config.max_acceleration_scaling,
-            )
-
-        if not handler.send_request(goal):
-            return f"Gripper '{description}' command was not accepted"
-
-        deadline = time.time() + self.config.execution_timeout
-        while not handler.action_returned and time.time() < deadline:
-            time.sleep(1 / self.config.loop_rate)
-
-        if not handler.action_returned:
-            handler.cancel_request()
-            return f"Gripper '{description}' command timed out"
-
-        error_code = getattr(handler.action_result, "error_code", None)
-        if error_code is not None:
-            status = moveit_error_string(getattr(error_code, "val", 0))
-            if status != "SUCCESS":
-                return f"Gripper '{description}' command failed: {status}"
-        return f"Gripper moved to '{description}'"
-
-    # =========================================================================
-    # PLANNING SCENE
-    # =========================================================================
-
-    def _apply_scene(
-        self, collision_objects=(), attached_objects=()
-    ) -> bool:
-        """Apply scene changes as one diff through move_group.
-
-        :param collision_objects: World objects to add, move or remove
-        :param attached_objects: Objects to attach to or detach from the robot
-        :returns: Whether move_group confirmed the change
-        """
-        from moveit_msgs.srv import ApplyPlanningScene
-
-        from ..utils.moveit import build_scene_diff
-
-        if not self._apply_scene_client:
-            self.get_logger().error(
-                "The planning scene client is not available, is the component active?"
-            )
-            return False
-
-        request = ApplyPlanningScene.Request()
-        request.scene = build_scene_diff(collision_objects, attached_objects)
-        response = self._apply_scene_client.send_request(request)
-        if response is None or not response.success:
-            self.get_logger().error(
-                "move_group did not apply the planning scene change"
-            )
-            return False
-        return True
 
     @component_action(
         description={
@@ -1149,27 +1368,6 @@ class MoveIt(Component):
             return "move_group did not answer the octomap clear request"
         return "Cleared the planning scene octomap"
 
-    def _resolve_touch_links(self, explicit: Optional[List[str]]) -> List[str]:
-        """Links allowed to stay in contact with an attached object.
-
-        Priority: the `touch_links` passed to the `attach_object` call, then
-        the configured `touch_links`, then the robot SRDF (gripper group
-        links or the end effector's neighborhood), then the end effector
-        link alone with a warning.
-        """
-        from ..utils.moveit import derive_touch_links
-
-        if not explicit and not self.config.touch_links and self._srdf is None:
-            # Fetch SRDF and cache along with the named targets
-            self._named_target_states()
-        return derive_touch_links(
-            self._srdf,
-            self.config.end_effector_link,
-            gripper_group=self.config.gripper_group_name or "",
-            explicit=explicit or self.config.touch_links,
-            logger_name=self.node_name,
-        )
-
     @component_action(
         description={
             "type": "function",
@@ -1213,25 +1411,8 @@ class MoveIt(Component):
             Default resolves them from the config or the robot SRDF
         :returns: What happened, for the caller and for tool use
         """
-        from ..utils.moveit import build_attached_object
-
-        link = link_name or self.config.end_effector_link
-        if not link:
-            return (
-                "No link to attach to: pass link_name or set "
-                "'end_effector_link' in the component config"
-            )
-
-        links = self._resolve_touch_links(touch_links)
-        if not self._apply_scene(
-            attached_objects=[build_attached_object(object_id, link, links)]
-        ):
-            return f"Could not attach '{object_id}' to '{link}'"
-
-        with self._scene_lock:
-            if entry := self._scene_objects.get(object_id):
-                entry["attached"] = link
-        return f"Attached '{object_id}' to '{link}' (touch links: {', '.join(links)})"
+        _, message = self._do_attach(object_id, link_name, touch_links)
+        return message
 
     @component_action(
         description={
@@ -1267,162 +1448,8 @@ class MoveIt(Component):
             physically happened
         :returns: What happened, for the caller and for tool use
         """
-        from ..utils.moveit import build_detach_object, build_remove_object
-
-        if not self._apply_scene(
-            attached_objects=[build_detach_object(object_id)]
-        ):
-            return f"Could not detach '{object_id}'"
-
-        with self._scene_lock:
-            if entry := self._scene_objects.get(object_id):
-                entry.pop("attached", None)
-
-        if not remove:
-            return f"Detached '{object_id}', it remains in the scene"
-
-        # Detaching returns the object to the world, so removing it is a
-        # separate scene change
-        if not self._apply_scene([build_remove_object(object_id)]):
-            return f"Detached '{object_id}' but could not remove it from the scene"
-        with self._scene_lock:
-            self._scene_objects.pop(object_id, None)
-        return f"Detached '{object_id}' and removed it from the scene"
-
-    def _refresh_scene_from_detections(self, message: Optional[Any] = None) -> str:
-        """Push detections into the planning scene as one diff.
-
-        Objects the detector stopped reporting are kept for
-        `scene_object_ttl` seconds before a refresh removes them, so
-        detection dropouts do not flicker. Attached objects are never evicted
-        or re-added.
-
-        :param message: Detections to refresh from, when the caller has
-            already read them. Default reads the latest received message
-        :returns: What happened, for the caller and for tool use
-        """
-        from ..utils.moveit import (
-            build_remove_object,
-            collision_objects_from_detections,
-        )
-
-        if message is None:
-            if not self._detections_topic:
-                return (
-                    "No detections input is connected to this component, so "
-                    "there is nothing to update the planning scene from"
-                )
-            callback = self.callbacks.get(self._detections_topic.name)
-            # the callback's default output is a text summary for prompts, get
-            # the message itself for the boxes
-            message = callback.get_output(get_msg=True) if callback else None
-            if message is None:
-                return "No detections have been received yet"
-
-        now = time.time()
-        objects, stale = self._partition_scene_changes(
-            collision_objects_from_detections(
-                message,
-                min_thickness=self.config.min_object_thickness,
-                padding=self.config.object_padding,
-            ),
-            now,
-        )
-
-        changes = objects + [build_remove_object(object_id) for object_id in stale]
-        if not changes:
-            return "The planning scene is already up to date"
-        if not self._apply_scene(changes):
-            return "Could not update the planning scene"
-
-        added = []
-        with self._scene_lock:
-            for obj in objects:
-                # allocate only on first sighting, bump the rest in place
-                entry = self._scene_objects.setdefault(
-                    obj.id, {"source": "detection", "last_seen": now}
-                )
-                entry["last_seen"] = now
-                # an ADD moves an existing object, so the geometry follows it
-                position = obj.primitive_poses[0].position
-                dimensions = obj.primitives[0].dimensions
-                entry["center"] = (position.x, position.y, position.z)
-                entry["size"] = (dimensions[0], dimensions[1], dimensions[2])
-                added.append(obj.id)
-            for object_id in stale:
-                self._scene_objects.pop(object_id, None)
-
-        summary = f"Planning scene updated with {len(added)} detected object(s)"
-        if added:
-            summary += f": {', '.join(added)}"
-        if stale:
-            summary += f"; removed {len(stale)} stale object(s)"
-        return summary
-
-    def _partition_scene_changes(
-        self, objects: List[Any], now: float
-    ) -> Tuple[List[Any], List[str]]:
-        """Split a refresh into objects to add and tracked ids gone stale.
-
-        Attached objects are exempt from both sides, the rest expire by
-        their last sighting.
-
-        :param objects: Collision objects built from the latest detections
-        :param now: Refresh time, for the TTL comparison
-        :returns: (objects to add, tracked ids to remove)
-        """
-        seen = {obj.id for obj in objects}
-        attached, stale = set(), []
-        with self._scene_lock:
-            for object_id, entry in self._scene_objects.items():
-                if entry.get("attached"):
-                    attached.add(object_id)
-                elif (
-                    entry["source"] == "detection"
-                    and object_id not in seen
-                    and now - entry["last_seen"] > self.config.scene_object_ttl
-                ):
-                    stale.append(object_id)
-        if attached:
-            objects = [obj for obj in objects if obj.id not in attached]
-        return objects, stale
-
-    def _scene_refresh_tick(self):
-        """Continuous mode refresh, skipping ticks that would change nothing.
-
-        A tick refreshes only when a detections message arrived since the
-        last applied one, or a tracked object has outlived its TTL and is due
-        for removal. With a source
-        slower than the timer (e.g. VLM), objects from the
-        last message are re-applied about once per TTL period, keeping the
-        snapshot alive rather than evicting a scene that was simply not
-        re-observed.
-        """
-        callback = self.callbacks.get(self._detections_topic.name)
-        # the callback's default output is a text summary for prompts, get
-        # the message itself for the boxes
-        message = callback.get_output(get_msg=True) if callback else None
-        if message is None:
-            return
-
-        now = time.time()
-        if message is self._last_scene_message and not self._has_stale_objects(now):
-            # Dont refresh
-            return
-
-        self._last_scene_message = message
-        result = self._refresh_scene_from_detections(message)
-        self.get_logger().debug(result)
-
-    def _has_stale_objects(self, now: float) -> bool:
-        """Whether any tracked detection has outlived the TTL"""
-        with self._scene_lock:
-            return any(
-                entry["source"] == "detection"
-                and not entry.get("attached")
-                and now - entry["last_seen"] > self.config.scene_object_ttl
-                for entry in self._scene_objects.values()
-            )
+        _, message = self._do_detach(object_id, remove)
+        return message
 
     @component_action(
         description={
