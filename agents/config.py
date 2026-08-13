@@ -319,6 +319,20 @@ class MLLMConfig(LLMConfig):
     :type ncpu_local_model: int
     :param local_model_path: HuggingFace repository ID for a GGUF VLM model (default: ``ggml-org/Qwen3-VL-2B-Instruct-GGUF``), a local directory with the GGUF and mmproj files, or a local path to a ``.gguf`` file. The VLM family (qwen_vl, gemma, moondream, minicpm, llava, llava16, nanollava) is detected from the model name. This parameter is only effective when ``enable_local_model`` is True.
     :type local_model_path: Optional[str]
+    :param detections_frame: Frame that 3D detections are published in, usually the frame the consumer plans in, e.g. "base_link". Boxes are axis aligned in this frame and it is chosen before they are measured, so it cannot be changed after the fact. Required when a Detections3D output topic is given. Only meaningful with the "grounding" or "affordance" task.
+    :type detections_frame: str
+    :param static_camera_tf: Whether the transform from the camera to `detections_frame` is fixed, which it is for a camera bolted to the robot. Set False for a camera that moves with a moving joint, so the transform keeps being looked up. Default is True.
+    :type static_camera_tf: bool
+    :param depth_scale: Multiplier from the depth image's units to millimeters, overriding what its encoding implies. Default is None, which derives it from the encoding.
+    :type depth_scale: Optional[float]
+    :param min_depth: Closest depth reading to treat as usable, in meters. Default is 0.05.
+    :type min_depth: float
+    :param max_depth: Furthest depth reading to treat as usable, in meters. Default is 5.0.
+    :type max_depth: float
+    :param max_depth_age: How far apart in time the color and depth frames may be before the pair is treated as mismatched, in seconds. Default is 0.2.
+    :type max_depth_age: float
+    :param min_depth_validity: Minimum fraction of usable depth pixels inside a detection's 2D box for its 3D box to be published, in [0, 1]. A box built from a handful of readings is not a shape, and a planner would take it for one. Default is 0.1.
+    :type min_depth_validity: float
 
     Example of usage:
     ```python
@@ -344,6 +358,31 @@ class MLLMConfig(LLMConfig):
     local_model_path: Optional[str] = field(
         default="ggml-org/Qwen3-VL-2B-Instruct-GGUF"
     )
+    # NOTE: 3D lift fields, kept identical to VisionConfig
+    detections_frame: str = field(default="")
+    static_camera_tf: bool = field(default=True)
+    depth_scale: Optional[float] = field(default=None)
+    min_depth: float = field(default=0.05, validator=base_validators.gt(0.0))
+    max_depth: float = field(default=5.0, validator=base_validators.gt(0.0))
+    max_depth_age: float = field(default=0.2, validator=base_validators.gt(0.0))
+    min_depth_validity: float = field(
+        default=0.1, validator=base_validators.in_range(min_value=0.0, max_value=1.0)
+    )
+    # serialized topics
+    _depth_topic: Optional[Topic] = field(
+        default=None, converter=_get_optional_topic, alias="_depth_topic"
+    )
+    _camera_info_topic: Optional[Topic] = field(
+        default=None, converter=_get_optional_topic, alias="_camera_info_topic"
+    )
+
+    @max_depth.validator
+    def _check_depth_range(self, _, value):
+        """A sensor cannot see further than it can see"""
+        if value <= self.min_depth:
+            raise ValueError(
+                f"max_depth ({value}) must be greater than min_depth ({self.min_depth})"
+            )
 
     @task.validator
     def _check_task(self, _, value):
@@ -756,6 +795,7 @@ class VisionConfig(ModelComponentConfig):
     local_classifier_model_path: str = field(
         default="https://github.com/automatika-robotics/embodied-agents/releases/download/0.3.3/deim_dfine_hgnetv2_n_coco_160e.onnx"
     )
+    # NOTE: 3D lift fields, kept identical to MLLMConfig
     detections_frame: str = field(default="")
     static_camera_tf: bool = field(default=True)
     depth_scale: Optional[float] = field(default=None)
