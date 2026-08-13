@@ -17,6 +17,8 @@ from .utils import (
     build_url,
     build_lerobot_features_from_dataset_info,
     find_missing_values,
+    get_frame_id,
+    get_stamp_secs,
     _LANGUAGE_CODES,
 )
 
@@ -26,6 +28,8 @@ __all__ = [
     "build_url",
     "find_missing_values",
     "flatten",
+    "get_frame_id",
+    "get_stamp_secs",
     "create_detection_context",
     "draw_detection_bounding_boxes",
     "draw_points_2d",

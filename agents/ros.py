@@ -55,6 +55,7 @@ from ros_sugar.base_clients import (
     ServiceClientConfig,
     ServiceClientHandler,
 )
+from ros_sugar.io.datatypes import read_camera_info
 
 from .launcher import Launcher
 
@@ -142,6 +143,7 @@ __all__ = [
     "MoveManipulator",
     "GetParameters",
     "run_external_processor",
+    "read_camera_info",
     "ServiceClientConfig",
     "ServiceClientHandler",
     "ActionClientConfig",

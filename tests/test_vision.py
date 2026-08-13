@@ -10,16 +10,18 @@ from agents.ros import Detections, DetectionsMultiSource, Topic
 from tests.conftest import mock_component_internals
 
 
-def _image(frame_id="camera_optical_frame"):
+def _image(frame_id="camera_optical_frame", width=2, height=2, stamp=0.0):
     """A minimal ROS image carrying a frame."""
     from sensor_msgs.msg import Image as ROSImage
 
     image = ROSImage()
     image.header.frame_id = frame_id
-    image.height, image.width = 2, 2
+    image.header.stamp.sec = int(stamp)
+    image.header.stamp.nanosec = int((stamp % 1) * 1e9)
+    image.height, image.width = height, width
     image.encoding = "rgb8"
-    image.step = 6
-    image.data = bytes(12)
+    image.step = width * 3
+    image.data = bytes(width * height * 3)
     return image
 
 
@@ -30,6 +32,12 @@ def _callback(msg=None, output=None, msg_type="Image", name="topic"):
     callback.msg = msg
     callback.get_output.return_value = output
     return callback
+
+
+def _warnings(component) -> str:
+    return " ".join(
+        str(call[0][0]) for call in component.get_logger().warning.call_args_list
+    )
 
 
 @pytest.fixture
@@ -348,7 +356,7 @@ class Test3DContract:
         warning = " ".join(
             str(call[0][0]) for call in component.get_logger().warning.call_args_list
         )
-        assert "rgbd" in warning and "spare" in warning and "2D only" in warning
+        assert "rgbd" in warning and "spare" in warning and "3D" in warning
 
     def test_camera_info_may_override_what_an_rgbd_carries(
         self, rclpy_init, mock_model_client
@@ -358,7 +366,7 @@ class Test3DContract:
             [Topic(name="rgbd", msg_type="RGBD")],
             camera_info=Topic(name="camera_info", msg_type="CameraInfo"),
         )
-        assert component.camera_info.name == "camera_info"
+        assert component.camera_info_topic.name == "camera_info"
         assert component._inference_set == ["rgbd"]
 
     def test_camera_info_in_inputs_is_refused(self, rclpy_init, mock_model_client):
@@ -419,6 +427,308 @@ class Test3DContract:
             outputs=[Topic(name="detections", msg_type="Detections")],
         )
         assert not component._lift_to_3d and component._aux_inputs == set()
+
+
+class _SyntheticCamera:
+    """A camera looking at a patch half a meter away on a far wall. Shared by
+    the two ways depth reaches the component."""
+
+    FX = FY = 500.0
+    WIDTH, HEIGHT = 200, 120
+    PATCH = (100, 40, 140, 60)
+    PATCH_DEPTH_M = 0.5
+
+    @pytest.fixture(autouse=True)
+    def _needs_kompass_core(self):
+        pytest.importorskip("kompass_core.vision")
+
+    @classmethod
+    def _depth_scene(cls, frame_id="cam", stamp=0.0, background_m=3.0):
+        import numpy as np
+        from sensor_msgs.msg import Image as ROSImage
+
+        pixels = np.full((cls.HEIGHT, cls.WIDTH), int(background_m * 1000), np.uint16)
+        x1, y1, x2, y2 = cls.PATCH
+        pixels[y1:y2, x1:x2] = int(cls.PATCH_DEPTH_M * 1000)
+
+        msg = ROSImage()
+        msg.header.frame_id = frame_id
+        msg.header.stamp.sec = int(stamp)
+        msg.header.stamp.nanosec = int((stamp % 1) * 1e9)
+        msg.height, msg.width = cls.HEIGHT, cls.WIDTH
+        msg.encoding = "16UC1"
+        msg.step = cls.WIDTH * 2
+        msg.data = pixels.tobytes()
+        return msg
+
+    @classmethod
+    def _intrinsics(cls, frame_id="cam", width=None, height=None):
+        from ros_sugar.io import CameraIntrinsics
+
+        return CameraIntrinsics(
+            fx=cls.FX,
+            fy=cls.FY,
+            cx=cls.WIDTH / 2,
+            cy=cls.HEIGHT / 2,
+            width=width or cls.WIDTH,
+            height=height or cls.HEIGHT,
+            frame_id=frame_id,
+        )
+
+    @classmethod
+    def _detections(cls, boxes=None):
+        return {
+            "output": [
+                {
+                    "bboxes": boxes if boxes is not None else [list(cls.PATCH)],
+                    "labels": ["orange"],
+                    "scores": [0.9],
+                }
+            ]
+        }
+
+    @staticmethod
+    def _published(component):
+        """The boxes and the fields they were published with."""
+        args, kwargs = component.publishers_dict["out"].publish.call_args
+        return args[0], kwargs
+
+
+class TestLiftingWithADepthTopic(_SyntheticCamera):
+    """Depth on its own topic, as ZED, Orbbec and OAK publish it."""
+
+    @pytest.fixture
+    def vision_3d(self, rclpy_init, mock_model_client):
+        type(mock_model_client).model_type = PropertyMock(return_value="VisionModel")
+        component = Vision(
+            inputs=[Topic(name="image", msg_type="Image")],
+            outputs=[Topic(name="d3", msg_type="Detections3D")],
+            depth=Topic(name="depth", msg_type="Image"),
+            camera_info=Topic(name="camera_info", msg_type="CameraInfo"),
+            model_client=mock_model_client,
+            config=VisionConfig(detections_frame="cam"),
+            component_name="test_lift",
+        )
+        return mock_component_internals(component)
+
+    def _wire(self, component, stamp=0.0, depth_stamp=0.0, intrinsics=None):
+        component.callbacks = {
+            "image": _callback(
+                _image("cam", width=self.WIDTH, height=self.HEIGHT, stamp=stamp),
+                [[0]],
+                name="image",
+            ),
+            "depth": _callback(self._depth_scene("cam", depth_stamp), name="depth"),
+            "camera_info": _callback(
+                msg_type="CameraInfo",
+                output=intrinsics or self._intrinsics(),
+                name="camera_info",
+            ),
+        }
+        component.trig_callbacks = {}
+
+    def test_detections_are_published_in_metric_space(
+        self, vision_3d, mock_model_client
+    ):
+        mock_model_client.inference.return_value = self._detections()
+        self._wire(vision_3d)
+
+        vision_3d._execution_step()
+
+        boxes, published = self._published(vision_3d)
+        assert published["labels"] == ["orange"] and published["scores"] == [0.9]
+        assert published["frame_id"] == "cam"
+        # published in the camera's own frame, where distance runs along z
+        (center, size), = boxes
+        assert center[2] == pytest.approx(self.PATCH_DEPTH_M, abs=0.02)
+        assert size[0] == pytest.approx(40 * self.PATCH_DEPTH_M / self.FX, abs=0.01)
+        assert published["boxes_2d"] == [list(self.PATCH)]
+
+    def test_an_empty_scene_is_still_reported(self, vision_3d, mock_model_client):
+        """Seeing nothing is an observation, and consumers need it to let go of
+        objects that are no longer there."""
+        mock_model_client.inference.return_value = self._detections(boxes=[])
+        self._wire(vision_3d)
+
+        vision_3d._execution_step()
+
+        boxes, _ = self._published(vision_3d)
+        assert boxes == []
+
+    def test_depth_is_paired_when_the_picture_is_taken(
+        self, vision_3d, mock_model_client
+    ):
+        """Which depth frame pairs with the picture must not depend on how
+        long inference takes."""
+        self._wire(vision_3d)
+
+        def _slow_inference(*_, **__):
+            # a much later depth frame lands while the model is busy
+            vision_3d.callbacks["depth"].msg = self._depth_scene("cam", stamp=99.0)
+            return self._detections()
+
+        mock_model_client.inference.side_effect = _slow_inference
+
+        vision_3d._execution_step()
+
+        # had the late frame been read, max_depth_age would have refused it
+        boxes, _ = self._published(vision_3d)
+        assert boxes[0][0][2] == pytest.approx(self.PATCH_DEPTH_M, abs=0.02)
+
+    def test_stale_depth_publishes_nothing(self, vision_3d, mock_model_client):
+        """Silence differs from an empty message: one says the camera cannot be
+        used, the other that the scene is clear."""
+        mock_model_client.inference.return_value = self._detections()
+        self._wire(vision_3d, stamp=10.0, depth_stamp=9.0)
+
+        vision_3d._execution_step()
+
+        assert vision_3d.publishers_dict["out"].publish.call_count == 0
+        assert "max_depth_age" in _warnings(vision_3d)
+
+    def test_intrinsics_for_another_resolution_are_refused(
+        self, vision_3d, mock_model_client
+    ):
+        mock_model_client.inference.return_value = self._detections()
+        self._wire(vision_3d, intrinsics=self._intrinsics(width=1280, height=720))
+
+        vision_3d._execution_step()
+
+        assert vision_3d.publishers_dict["out"].publish.call_count == 0
+        assert "1280x720" in vision_3d.get_logger().error.call_args[0][0]
+
+    def test_boxes_built_from_too_little_depth_are_dropped(
+        self, vision_3d, mock_model_client
+    ):
+        vision_3d.config.min_depth_validity = 0.9
+        vision_3d.config.max_depth = 5.0
+        mock_model_client.inference.return_value = self._detections(
+            boxes=[[80, 20, 160, 80]]
+        )
+        self._wire(vision_3d)
+        # the wall is beyond max_depth, so only the patch itself reads back
+        vision_3d.callbacks["depth"].msg = self._depth_scene("cam", background_m=9.0)
+
+        vision_3d._execution_step()
+
+        boxes, _ = self._published(vision_3d)
+        assert boxes == []
+
+    def test_boxes_are_transformed_into_the_configured_frame(
+        self, vision_3d, mock_model_client
+    ):
+        """A planner works in the robot's frame, not the camera's."""
+        vision_3d.config.detections_frame = "base_link"
+        mock_model_client.inference.return_value = self._detections()
+        self._wire(vision_3d)
+        # a camera looking straight ahead, a meter up on the robot
+        vision_3d.get_transform_listener = MagicMock(
+            return_value=MagicMock(
+                got_transform=True,
+                translation=[0.0, 0.0, 1.0],
+                rotation=[-0.5, 0.5, -0.5, 0.5],
+            )
+        )
+
+        vision_3d._execution_step()
+
+        boxes, published = self._published(vision_3d)
+        assert published["frame_id"] == "base_link"
+        (center, _), = boxes
+        assert center[0] == pytest.approx(self.PATCH_DEPTH_M, abs=0.02)
+        assert center[2] == pytest.approx(1.0, abs=0.02)
+
+    def test_nothing_is_published_before_the_transform_resolves(
+        self, vision_3d, mock_model_client
+    ):
+        vision_3d.config.detections_frame = "base_link"
+        mock_model_client.inference.return_value = self._detections()
+        self._wire(vision_3d)
+        vision_3d.get_transform_listener = MagicMock(
+            return_value=MagicMock(got_transform=False)
+        )
+
+        vision_3d._execution_step()
+
+        assert vision_3d.publishers_dict["out"].publish.call_count == 0
+        assert "has not been resolved" in _warnings(vision_3d)
+
+
+class TestLiftingFromRGBD(_SyntheticCamera):
+    """A RealSense publishes everything lifting needs in one message."""
+
+    @pytest.fixture(autouse=True)
+    def _needs_realsense_msgs(self):
+        pytest.importorskip("realsense2_camera_msgs.msg")
+
+    @classmethod
+    def _camera_info_msg(cls, frame_id="cam"):
+        from sensor_msgs.msg import CameraInfo as ROSCameraInfo
+
+        info = ROSCameraInfo()
+        info.header.frame_id = frame_id
+        info.width, info.height = cls.WIDTH, cls.HEIGHT
+        info.k = [cls.FX, 0.0, cls.WIDTH / 2, 0.0, cls.FY, cls.HEIGHT / 2, 0.0, 0.0, 1.0]
+        return info
+
+    @classmethod
+    def _rgbd_frame(cls, frame_id="cam", stamp=0.0):
+        from realsense2_camera_msgs.msg import RGBD as ROSRGBD
+
+        frame = ROSRGBD()
+        frame.header.frame_id = frame_id
+        frame.rgb = _image(frame_id, width=cls.WIDTH, height=cls.HEIGHT, stamp=stamp)
+        frame.depth = cls._depth_scene(frame_id, stamp)
+        frame.rgb_camera_info = cls._camera_info_msg(frame_id)
+        frame.depth_camera_info = cls._camera_info_msg(frame_id)
+        return frame
+
+    @pytest.fixture
+    def vision_rgbd(self, rclpy_init, mock_model_client):
+        type(mock_model_client).model_type = PropertyMock(return_value="VisionModel")
+        component = Vision(
+            inputs=[Topic(name="rgbd", msg_type="RGBD")],
+            outputs=[Topic(name="d3", msg_type="Detections3D")],
+            model_client=mock_model_client,
+            config=VisionConfig(detections_frame="cam"),
+            component_name="test_rgbd",
+        )
+        return mock_component_internals(component)
+
+    def test_intrinsics_are_parsed_once_and_reused(self, vision_rgbd):
+        """Intrinsics do not change in ordinary operation, so they are read
+        from the captured frame whenever needed and parsed only once."""
+        vision_rgbd._lift_msg = self._rgbd_frame()
+        parsed = vision_rgbd._camera_intrinsics()
+        assert parsed.fx == self.FX and parsed.frame_id == "cam"
+
+        vision_rgbd._lift_msg = self._rgbd_frame(stamp=1.0)
+        assert vision_rgbd._camera_intrinsics() is parsed
+
+    def test_a_new_calibration_is_picked_up(self, vision_rgbd):
+        vision_rgbd._lift_msg = self._rgbd_frame()
+        vision_rgbd._camera_intrinsics()
+
+        changed = self._rgbd_frame()
+        changed.depth_camera_info.k[0] = 999.0
+        vision_rgbd._lift_msg = changed
+        assert vision_rgbd._camera_intrinsics().fx == 999.0
+
+    def test_an_rgbd_frame_lifts_with_no_other_topic(
+        self, vision_rgbd, mock_model_client
+    ):
+        mock_model_client.inference.return_value = self._detections()
+        vision_rgbd.callbacks = {
+            "rgbd": _callback(self._rgbd_frame(), [[0]], msg_type="RGBD", name="rgbd")
+        }
+        vision_rgbd.trig_callbacks = {}
+
+        vision_rgbd._execution_step()
+
+        boxes, published = self._published(vision_rgbd)
+        assert published["frame_id"] == "cam"
+        (center, _), = boxes
+        assert center[2] == pytest.approx(self.PATCH_DEPTH_M, abs=0.02)
 
 
 class TestPublishRouting:

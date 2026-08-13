@@ -8,6 +8,7 @@ from enum import Enum
 from io import BytesIO
 from pathlib import Path
 from typing import (
+    Any,
     List,
     Dict,
     Literal,
@@ -555,6 +556,27 @@ def load_model_repo(
         raise
 
     return str(model_dir)
+
+
+def get_frame_id(msg: Any) -> str:
+    """Frame a ROS message was captured in, empty when it does not say.
+
+    :param msg: Any ROS message, with or without a header
+    :rtype: str
+    """
+    return getattr(getattr(msg, "header", None), "frame_id", "") or ""
+
+
+def get_stamp_secs(msg: Any) -> float:
+    """Capture time of a ROS message in seconds, 0 when it does not say.
+
+    :param msg: Any ROS message, with or without a header
+    :rtype: float
+    """
+    stamp = getattr(getattr(msg, "header", None), "stamp", None)
+    if stamp is None:
+        return 0.0
+    return stamp.sec + stamp.nanosec * 1e-9
 
 
 def flatten(xs):
