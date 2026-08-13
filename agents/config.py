@@ -112,7 +112,9 @@ class LLMConfig(ModelComponentConfig):
 
     enable_rag: bool = field(default=False)
     collection_name: Optional[str] = field(default=None)
-    distance_func: Literal["l2", "ip", "cosine"] = field(default="l2")
+    distance_func: Literal["l2", "ip", "cosine"] = field(
+        default="l2", validator=base_validators.in_(["l2", "ip", "cosine"])
+    )
     n_results: int = field(default=1)
     add_metadata: bool = field(default=False)
     chat_history: bool = field(default=False)
@@ -127,7 +129,9 @@ class LLMConfig(ModelComponentConfig):
     response_terminator: str = field(default="<<Response Ended>>")
     strip_think_tokens: bool = field(default=True)
     enable_local_model: bool = field(default=False)
-    device_local_model: Literal["cpu", "cuda"] = field(default="cuda")
+    device_local_model: Literal["cpu", "cuda"] = field(
+        default="cuda", validator=base_validators.in_(["cpu", "cuda"])
+    )
     ncpu_local_model: int = field(default=1)
     local_model_path: Optional[str] = field(default="Qwen/Qwen3-0.6B-GGUF")
     local_model_options: Dict = field(default=Factory(dict))
@@ -329,7 +333,14 @@ class MLLMConfig(LLMConfig):
 
     task: Optional[
         Literal["general", "pointing", "affordance", "trajectory", "grounding"]
-    ] = field(default=None)
+    ] = field(
+        default=None,
+        validator=validators.optional(
+            base_validators.in_(
+                ["general", "pointing", "affordance", "trajectory", "grounding"]
+            )
+        ),
+    )
     local_model_path: Optional[str] = field(
         default="ggml-org/Qwen3-VL-2B-Instruct-GGUF"
     )
@@ -447,13 +458,23 @@ class VLAConfig(ModelComponentConfig):
     # TODO: One can make models that take multiple state input types.
     # This parameter would have to be revised in that case
     state_input_type: Literal["positions", "velocities", "accelerations", "efforts"] = (
-        field(default="positions")
+        field(
+            default="positions",
+            validator=base_validators.in_(
+                ["positions", "velocities", "accelerations", "efforts"]
+            ),
+        )
     )
     # TODO: One can make models that produce multiple action output types.
     # This parameter would have to be revised in that case
     action_output_type: Literal[
         "positions", "velocities", "accelerations", "efforts"
-    ] = field(default="positions")
+    ] = field(
+        default="positions",
+        validator=base_validators.in_(
+            ["positions", "velocities", "accelerations", "efforts"]
+        ),
+    )
     observation_sending_rate: float = field(
         default=10.0, validator=base_validators.in_range(min_value=1e-6, max_value=1e6)
     )
@@ -466,11 +487,17 @@ class VLAConfig(ModelComponentConfig):
     robot_urdf_file: Optional[str] = field(default=None)
     joint_limits: Optional[Dict] = field(default=None)
     policy_action_units: Literal["radians", "degrees", "normalized"] = field(
-        default="radians"
+        default="radians",
+        validator=base_validators.in_(["radians", "degrees", "normalized"]),
     )
     aggregate_fn_name: Literal[
         "latest_only", "weighted_average", "average", "conservative"
-    ] = field(default="latest_only")
+    ] = field(
+        default="latest_only",
+        validator=base_validators.in_(
+            ["latest_only", "weighted_average", "average", "conservative"]
+        ),
+    )
     _termination_mode: Literal["timesteps", "keyboard", "event"] = field(
         default="timesteps", alias="_termination_mode"
     )
@@ -558,6 +585,18 @@ class MoveItConfig(BaseComponentConfig):
     :type server_timeout: float
     :param execution_timeout: Maximum wall time in seconds for a single plan+execute goal. Default is 120.0.
     :type execution_timeout: float
+    :param scene_update_mode: WHEN detected objects are pushed into the planning scene: "manual" (default) only on the `update_planning_scene` component action, "on_goal" additionally refreshes the scene right before each motion goal is planned, "continuous" keeps refreshing at `scene_update_rate` while detections arrive. Only effective when the component is given a Detections3D input topic.
+    :type scene_update_mode: Literal["manual", "on_goal", "continuous"]
+    :param scene_update_rate: Scene refreshes per second in "continuous" mode. Default is 1.0.
+    :type scene_update_rate: float
+    :param scene_object_ttl: Seconds a detection-sourced object stays in the scene after the detector stops reporting it, before a refresh removes it. Bridges detection dropouts without keeping ghost obstacles around. Default is 5.0.
+    :type scene_object_ttl: float
+    :param object_padding: Margin in meters added on every side of detected objects, for planning clearance around imperfectly measured geometry. Default is 0.0.
+    :type object_padding: float
+    :param min_object_thickness: Floor in meters for each extent of a detected object. Surfaces seen head-on are lifted with no measurable extent along the view axis, and a zero-thickness box is invisible to collision checking. Default is 0.01.
+    :type min_object_thickness: float
+    :param touch_links: Links allowed to stay in contact with an attached object, e.g. the gripper's links. Default is None, which resolves them from the robot SRDF at attach time.
+    :type touch_links: Optional[List[str]]
 
     Example of usage:
     ```python
@@ -593,7 +632,8 @@ class MoveItConfig(BaseComponentConfig):
         default=0.95, validator=base_validators.in_range(min_value=0.0, max_value=1.0)
     )
     gripper_mode: Literal["move_group", "gripper_command"] = field(
-        default="move_group"
+        default="move_group",
+        validator=base_validators.in_(["move_group", "gripper_command"]),
     )
     gripper_command_action: str = field(default="")
     gripper_open_target: str = field(default="open")
@@ -607,6 +647,17 @@ class MoveItConfig(BaseComponentConfig):
     srdf_file: Optional[str] = field(default=None)
     server_timeout: float = field(default=30.0, validator=base_validators.gt(0.0))
     execution_timeout: float = field(default=120.0, validator=base_validators.gt(0.0))
+    scene_update_mode: Literal["manual", "on_goal", "continuous"] = field(
+        default="manual",
+        validator=base_validators.in_(["manual", "on_goal", "continuous"]),
+    )
+    scene_update_rate: float = field(default=1.0, validator=base_validators.gt(0.0))
+    scene_object_ttl: float = field(default=5.0, validator=base_validators.gt(0.0))
+    object_padding: float = field(
+        default=0.0, validator=base_validators.in_range(min_value=0.0, max_value=1.0)
+    )
+    min_object_thickness: float = field(default=0.01, validator=base_validators.gt(0.0))
+    touch_links: Optional[List[str]] = field(default=None)
 
     @goal_orientation_tolerance.validator
     def _check_orientation_tolerance(self, _, value):
@@ -692,7 +743,9 @@ class VisionConfig(ModelComponentConfig):
     input_height: int = field(default=640)
     input_width: int = field(default=640)
     dataset_labels: Optional[Dict] = field(default=None)
-    device_local_classifier: Literal["cpu", "cuda", "tensorrt"] = field(default="cuda")
+    device_local_classifier: Literal["cpu", "cuda", "tensorrt"] = field(
+        default="cuda", validator=base_validators.in_(["cpu", "cuda", "tensorrt"])
+    )
     ncpu_local_classifier: int = field(default=1)
     local_classifier_model_path: str = field(
         default="https://github.com/automatika-robotics/embodied-agents/releases/download/0.3.3/deim_dfine_hgnetv2_n_coco_160e.onnx"
@@ -778,7 +831,9 @@ class TextToSpeechConfig(ModelComponentConfig):
     """
 
     enable_local_model: bool = field(default=False)
-    device_local_model: Literal["cpu", "cuda"] = field(default="cuda")
+    device_local_model: Literal["cpu", "cuda"] = field(
+        default="cuda", validator=base_validators.in_(["cpu", "cuda"])
+    )
     ncpu_local_model: int = field(default=1)
     local_model_path: Optional[str] = field(
         default="csukuangfj2/sherpa-onnx-pocket-tts-int8-2026-01-26"
@@ -986,7 +1041,9 @@ class SpeechToTextConfig(ModelComponentConfig):
     """
 
     enable_local_model: bool = field(default=False)
-    device_local_model: Literal["cpu", "cuda"] = field(default="cuda")
+    device_local_model: Literal["cpu", "cuda"] = field(
+        default="cuda", validator=base_validators.in_(["cpu", "cuda"])
+    )
     ncpu_local_model: int = field(default=1)
     local_model_path: Optional[str] = field(
         default="csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8"
@@ -1013,8 +1070,12 @@ class SpeechToTextConfig(ModelComponentConfig):
     speech_buffer_max_len: int = field(default=30000)
     stream: bool = field(default=False)
     min_chunk_size: int = field(default=2000, validator=base_validators.gt(500))
-    device_vad: Literal["cpu", "cuda", "tensorrt"] = field(default="cpu")
-    device_wakeword: Literal["cpu", "cuda", "tensorrt"] = field(default="cpu")
+    device_vad: Literal["cpu", "cuda", "tensorrt"] = field(
+        default="cpu", validator=base_validators.in_(["cpu", "cuda", "tensorrt"])
+    )
+    device_wakeword: Literal["cpu", "cuda", "tensorrt"] = field(
+        default="cpu", validator=base_validators.in_(["cpu", "cuda", "tensorrt"])
+    )
     ncpu_vad: int = field(default=1)
     ncpu_wakeword: int = field(default=1)
     vad_model_path: str = field(
@@ -1078,7 +1139,9 @@ class MapConfig(BaseComponentConfig):
     """
 
     map_name: str = field()
-    distance_func: Literal["l2", "ip", "cosine"] = field(default="l2")
+    distance_func: Literal["l2", "ip", "cosine"] = field(
+        default="l2", validator=base_validators.in_(["l2", "ip", "cosine"])
+    )
     _position: Optional[Topic] = field(
         default=None, converter=_get_optional_topic, alias="_position"
     )
@@ -1202,7 +1265,9 @@ class SemanticRouterConfig(ModelComponentConfig):
     """
 
     router_name: str = field()
-    distance_func: Literal["l2", "ip", "cosine"] = field(default="l2")
+    distance_func: Literal["l2", "ip", "cosine"] = field(
+        default="l2", validator=base_validators.in_(["l2", "ip", "cosine"])
+    )
     maximum_distance: float = field(
         default=0.4, validator=base_validators.in_range(min_value=0.1, max_value=1.0)
     )
@@ -1285,12 +1350,19 @@ class MotionDetectorConfig(BaseComponentConfig):
     )
     publish_bool_on_change_only: bool = field(default=False)
     process_rate: Optional[float] = field(default=None)
-    device: Literal["cpu", "cuda"] = field(default="cpu")
+    device: Literal["cpu", "cuda"] = field(
+        default="cpu", validator=base_validators.in_(["cpu", "cuda"])
+    )
 
     min_video_frames: int = field(default=15)  # assuming 0.5 second video at 30 fps
     max_video_frames: int = field(default=600)  # assuming 20 second video at 30 fps
     motion_estimation_func: Optional[Literal["frame_difference", "optical_flow"]] = (
-        field(default=None)
+        field(
+            default=None,
+            validator=validators.optional(
+                base_validators.in_(["frame_difference", "optical_flow"])
+            ),
+        )
     )
     threshold: float = field(
         default=0.3, validator=base_validators.in_range(min_value=0.1, max_value=5.0)

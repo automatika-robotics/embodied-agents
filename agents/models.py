@@ -609,9 +609,16 @@ class LeRobotPolicy(Model):
     checkpoint: str = field(default="lerobot/smolvla_base")
     policy_type: Literal[
         "smolvla", "diffusion", "act", "pi0", "pi05", "groot", "tdmpc", "vqbet"
-    ] = field(default="smolvla")
+    ] = field(
+        default="smolvla",
+        validator=base_validators.in_(
+            ["smolvla", "diffusion", "act", "pi0", "pi05", "groot", "tdmpc", "vqbet"]
+        ),
+    )
     actions_per_chunk: int = field(default=50)
-    policy_device: Literal["cpu", "cuda"] = field(default="cuda")
+    policy_device: Literal["cpu", "cuda"] = field(
+        default="cuda", validator=base_validators.in_(["cpu", "cuda"])
+    )
     dataset_info_file: Optional[str] = field(default=None)
     rename_map: Dict[str, str] = field(default=Factory(dict))
     _features: Dict = field(
