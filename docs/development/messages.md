@@ -25,6 +25,7 @@ The following custom messages are defined in the `automatika_embodied_agents` pa
 | Action | File | Description |
 |---|---|---|
 | `VisionLanguageAction` | `VisionLanguageAction.action` | ROS2 action for VLA inference. Defines goal, feedback, and result for vision-language-action loops. |
+| `MoveManipulator` | `MoveManipulator.action` | ROS2 action served by the MoveIt component. The goal carries a motion `mode` (pose, joints, named, cartesian, pick, place) with its target fields; feedback reports the current step; the result carries success, a message and the MoveIt error code. |
 
 ## The `SupportedType` System
 

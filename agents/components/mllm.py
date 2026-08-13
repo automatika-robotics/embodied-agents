@@ -39,6 +39,9 @@ class MLLM(DepthLiftMixin, LLM):
     :type inputs: list[Topic | FixedInput]
     :param outputs: The output topics for the MLLM component.
         This should be a list of Topic objects. String, Detections2D and PointsOfInterest2D types is handled automatically.
+        With the "grounding" or "affordance" task, a Detections3D output additionally lifts the
+        grounded boxes into metric space (see the `depth` and `camera_info` parameters), labeled
+        with the query that grounded them.
     :type outputs: list[Topic]
     :param model_client: The model client for the MLLM component.
         This should be an instance of ModelClient. Optional if ``enable_local_model`` is set to True in the config.

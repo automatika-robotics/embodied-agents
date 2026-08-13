@@ -45,6 +45,9 @@ class Vision(DepthLiftMixin, ModelComponent):
     :type inputs: list[Union[Topic, FixedInput]]
     :param outputs: The output topics for the object detection.
         This should be a list of Topic objects, Detection and Tracking types are handled automatically.
+        A Detections3D output turns on the 3D lift: detections are placed in metric space using
+        depth (from an RGBD input or the `depth` topic) and published as boxes in the configured
+        `detections_frame`.
     :type outputs: list[Topic]
     :param model_client: Optional model client for the vision component to access remote vision models. If not provided, enable_local_classifier should be set to True in VisionConfig
         This should be an instance of ModelClient. Defaults to None.
