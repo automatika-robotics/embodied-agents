@@ -1852,3 +1852,70 @@ class TestSceneUpdateModes:
         component._scene_refresh_tick()
 
         component._refresh_scene_from_detections.assert_not_called()
+
+
+class TestSceneGeometryCache:
+    """Scene entries carry the geometry they were applied with, so targets
+    can be resolved by name without asking move_group."""
+
+    @pytest.fixture(autouse=True)
+    def _needs_messages(self):
+        pytest.importorskip("moveit_msgs.msg")
+        pytest.importorskip("automatika_embodied_agents.msg")
+
+    def test_manual_objects_cache_their_applied_geometry(self, rclpy_init):
+        from agents.components import MoveIt
+        from agents.config import MoveItConfig
+
+        comp = MoveIt(
+            config=MoveItConfig(arm_group_name="arm", min_object_thickness=0.05),
+            component_name="m_geo_manual",
+        )
+        comp.get_logger = MagicMock()
+        comp._apply_scene_client = MagicMock()
+        comp._apply_scene_client.send_request.return_value = SimpleNamespace(
+            success=True
+        )
+
+        comp.add_collision_object.__wrapped__(
+            comp, "sheet", [0.4, 0.0, 0.1], [0.3, 0.3, 0.0]
+        )
+
+        entry = comp._scene_objects["sheet"]
+        assert entry["center"] == (0.4, 0.0, 0.1)
+        # the cached size is what was applied: thickness floor included
+        assert entry["size"] == (0.3, 0.3, 0.05)
+
+    def test_detection_objects_geometry_follows_the_object(self, rclpy_init):
+        from agents.components import MoveIt
+        from agents.config import MoveItConfig
+        from agents.ros import Topic
+
+        comp = MoveIt(
+            config=MoveItConfig(arm_group_name="arm"),
+            component_name="m_geo_det",
+            inputs=[Topic(name="d3", msg_type="Detections3D")],
+        )
+        comp.get_logger = MagicMock()
+        comp._apply_scene_client = MagicMock()
+        comp._apply_scene_client.send_request.return_value = SimpleNamespace(
+            success=True
+        )
+
+        def wire(center):
+            callback = MagicMock()
+            callback.get_output.return_value = TestDetectionObjects._detections(
+                [("mug", 0.9, center, (0.06, 0.06, 0.1))]
+            )
+            comp.callbacks = {"d3": callback}
+
+        wire((0.3, 0.0, 0.05))
+        comp.update_planning_scene.__wrapped__(comp)
+        assert comp._scene_objects["det__mug_0"]["center"] == (0.3, 0.0, 0.05)
+
+        # the mug moved: a refresh moves the cached geometry with it
+        wire((0.5, 0.1, 0.05))
+        comp.update_planning_scene.__wrapped__(comp)
+        entry = comp._scene_objects["det__mug_0"]
+        assert entry["center"] == (0.5, 0.1, 0.05)
+        assert entry["size"] == (0.06, 0.06, 0.1)

@@ -984,9 +984,14 @@ class MoveIt(Component):
             return f"Could not add '{object_id}' to the planning scene"
 
         with self._scene_lock:
+            # geometry as applied (thickness floor included)
+            position = obj.primitive_poses[0].position
+            dimensions = obj.primitives[0].dimensions
             self._scene_objects[object_id] = {
                 "source": "manual",
                 "last_seen": time.time(),
+                "center": (position.x, position.y, position.z),
+                "size": (dimensions[0], dimensions[1], dimensions[2]),
             }
         return f"Added '{object_id}' to the planning scene"
 
@@ -1338,6 +1343,11 @@ class MoveIt(Component):
                     obj.id, {"source": "detection", "last_seen": now}
                 )
                 entry["last_seen"] = now
+                # an ADD moves an existing object, so the geometry follows it
+                position = obj.primitive_poses[0].position
+                dimensions = obj.primitives[0].dimensions
+                entry["center"] = (position.x, position.y, position.z)
+                entry["size"] = (dimensions[0], dimensions[1], dimensions[2])
                 added.append(obj.id)
             for object_id in stale:
                 self._scene_objects.pop(object_id, None)
