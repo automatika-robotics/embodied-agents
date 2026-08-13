@@ -1,11 +1,18 @@
 # Action definition for MoveIt components.
 
-# mode: one of "pose", "joints", "named", "cartesian".
+# mode: one of "pose", "joints", "named", "cartesian", "pick", "place".
 # If left empty, the mode is inferred from whichever target fields are populated.
 string mode
 
-# Target end-effector pose (mode: "pose"). header.frame_id defaults to the planning frame.
+# Target end-effector pose (mode: "pose"), or the pick/place location
+# (modes: "pick", "place"). header.frame_id defaults to the planning frame.
 geometry_msgs/PoseStamped target_pose
+# Planning scene object to pick (mode: "pick"): an object id (e.g.
+# "det__mug_0") or a label (e.g. "mug"), resolved against the objects this
+# component has placed in the scene. Alternative to locating the pick by
+# target_pose. The named object becomes the grasp target; everything else in
+# the scene remains an obstacle.
+string target_object
 # Joint-space target (mode: "joints"). Parallel arrays.
 string[] joint_names
 float64[] joint_positions
