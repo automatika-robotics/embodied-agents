@@ -597,6 +597,8 @@ class MoveItConfig(BaseComponentConfig):
     :type min_object_thickness: float
     :param touch_links: Links allowed to stay in contact with an attached object, e.g. the gripper's links. Default is None, which resolves them from the robot SRDF at attach time.
     :type touch_links: Optional[List[str]]
+    :param approach_clearance: Height in meters above a pick or place target at which the collision-aware approach motion ends and the straight-line descent begins; also the height objects are lifted or retreated to. Default is 0.1.
+    :type approach_clearance: float
 
     Example of usage:
     ```python
@@ -658,6 +660,7 @@ class MoveItConfig(BaseComponentConfig):
     )
     min_object_thickness: float = field(default=0.01, validator=base_validators.gt(0.0))
     touch_links: Optional[List[str]] = field(default=None)
+    approach_clearance: float = field(default=0.1, validator=base_validators.gt(0.0))
 
     @goal_orientation_tolerance.validator
     def _check_orientation_tolerance(self, _, value):
