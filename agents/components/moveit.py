@@ -1,3 +1,4 @@
+import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -142,6 +143,11 @@ class MoveIt(Component):
 
         # Named targets read from the SRDF, resolved lazily and cached
         self._named_targets: Optional[Dict[str, Dict[str, Dict[str, float]]]] = None
+
+        # Objects this component has placed in the planning scene, as
+        # id -> {"source": "manual" | "detection", "last_seen": time}
+        self._scene_objects: Dict[str, Dict[str, Any]] = {}
+        self._scene_lock = threading.Lock()
 
     # =========================================================================
     # LIFECYCLE
@@ -833,3 +839,267 @@ class MoveIt(Component):
             if status != "SUCCESS":
                 return f"Gripper '{description}' command failed: {status}"
         return f"Gripper moved to '{description}'"
+
+    # =========================================================================
+    # PLANNING SCENE
+    # =========================================================================
+
+    def _apply_scene(
+        self, collision_objects=(), attached_objects=()
+    ) -> bool:
+        """Apply scene changes as one diff through move_group.
+
+        :param collision_objects: World objects to add, move or remove
+        :param attached_objects: Objects to attach to or detach from the robot
+        :returns: Whether move_group confirmed the change
+        """
+        from moveit_msgs.srv import ApplyPlanningScene
+
+        from ..utils.moveit import build_scene_diff
+
+        if not self._apply_scene_client:
+            self.get_logger().error(
+                "The planning scene client is not available, is the component active?"
+            )
+            return False
+
+        request = ApplyPlanningScene.Request()
+        request.scene = build_scene_diff(collision_objects, attached_objects)
+        response = self._apply_scene_client.send_request(request)
+        if response is None or not response.success:
+            self.get_logger().error(
+                "move_group did not apply the planning scene change"
+            )
+            return False
+        return True
+
+    @component_action(
+        description={
+            "type": "function",
+            "function": {
+                "name": "add_collision_object",
+                "description": "Add a box-shaped obstacle to the motion planning scene, so that subsequent arm motions avoid it. Use for known fixed objects like tables, walls or shelves.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "object_id": {
+                            "type": "string",
+                            "description": "Name for the object in the scene. Re-using a name moves the existing object.",
+                        },
+                        "center": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "description": "Center of the box as [x, y, z] in meters.",
+                        },
+                        "size": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "description": "Full extents of the box as [x, y, z] in meters.",
+                        },
+                        "frame_id": {
+                            "type": "string",
+                            "description": "Frame the center is given in. Empty uses the planning frame.",
+                        },
+                    },
+                    "required": ["object_id", "center", "size"],
+                },
+            },
+        },
+        active=True,
+        phase=ActionPhase.EXECUTION,
+    )
+    def add_collision_object(
+        self,
+        object_id: str,
+        center: List[float],
+        size: List[float],
+        frame_id: str = "",
+    ) -> str:
+        """Add a box-shaped collision object to the planning scene.
+
+        :param object_id: Scene-wide name; re-using one moves the object
+        :param center: Center of the box as [x, y, z] in meters
+        :param size: Full extents of the box as [x, y, z] in meters
+        :param frame_id: Frame the center is given in. Empty falls back to the
+            configured `pose_reference_frame`, and an empty frame is read by
+            move_group as its planning frame
+        :returns: What happened, for the caller and for tool use
+        """
+        from ..utils.moveit import build_collision_object
+
+        if len(center) != 3 or len(size) != 3:
+            raise ValueError(
+                "center and size must each have 3 values (x, y, z), got "
+                f"{len(center)} and {len(size)}"
+            )
+
+        obj = build_collision_object(
+            object_id,
+            frame_id or self.config.pose_reference_frame,
+            tuple(float(value) for value in center),
+            tuple(float(value) for value in size),
+            min_thickness=self.config.min_object_thickness,
+        )
+        if not self._apply_scene([obj]):
+            return f"Could not add '{object_id}' to the planning scene"
+
+        with self._scene_lock:
+            self._scene_objects[object_id] = {
+                "source": "manual",
+                "last_seen": time.time(),
+            }
+        return f"Added '{object_id}' to the planning scene"
+
+    @component_action(
+        description={
+            "type": "function",
+            "function": {
+                "name": "remove_collision_object",
+                "description": "Remove an obstacle from the motion planning scene by its name.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "object_id": {
+                            "type": "string",
+                            "description": "Name of the object to remove, as it was added or as listed by list_collision_objects.",
+                        },
+                    },
+                    "required": ["object_id"],
+                },
+            },
+        },
+        active=True,
+        phase=ActionPhase.EXECUTION,
+    )
+    def remove_collision_object(self, object_id: str) -> str:
+        """Remove one collision object from the planning scene.
+
+        :param object_id: Id the object was added under
+        :returns: What happened, for the caller and for tool use
+        """
+        from ..utils.moveit import build_remove_object
+
+        if not self._apply_scene([build_remove_object(object_id)]):
+            return f"Could not remove '{object_id}' from the planning scene"
+
+        with self._scene_lock:
+            self._scene_objects.pop(object_id, None)
+        return f"Removed '{object_id}' from the planning scene"
+
+    @component_action(
+        description={
+            "type": "function",
+            "function": {
+                "name": "clear_collision_objects",
+                "description": "Remove the obstacles this component has added to the motion planning scene.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "detections_only": {
+                            "type": "boolean",
+                            "description": "Only remove objects that came from detections, keeping manually added ones. Default is false.",
+                        },
+                    },
+                    "required": [],
+                },
+            },
+        },
+        active=True,
+        phase=ActionPhase.EXECUTION,
+    )
+    def clear_collision_objects(self, detections_only: bool = False) -> str:
+        """Remove the collision objects this component put in the scene.
+
+        Only objects this component knows it added are touched, so obstacles
+        placed by other tools stay where they are.
+
+        :param detections_only: Only remove detection-sourced objects,
+            keeping manually added ones
+        :returns: What happened, for the caller and for tool use
+        """
+        from ..utils.moveit import build_remove_object
+
+        with self._scene_lock:
+            ids = [
+                object_id
+                for object_id, entry in self._scene_objects.items()
+                if not detections_only or entry["source"] == "detection"
+            ]
+        if not ids:
+            return "The planning scene holds no objects added by this component"
+
+        if not self._apply_scene([build_remove_object(i) for i in ids]):
+            return "Could not clear the planning scene objects"
+
+        with self._scene_lock:
+            for object_id in ids:
+                self._scene_objects.pop(object_id, None)
+        return f"Removed {len(ids)} object(s) from the planning scene"
+
+    @component_action(
+        description={
+            "type": "function",
+            "function": {
+                "name": "list_collision_objects",
+                "description": "List the obstacles currently in the motion planning scene.",
+                "parameters": {"type": "object", "properties": {}, "required": []},
+            },
+        },
+        active=True,
+        phase=ActionPhase.BOTH,
+    )
+    def list_collision_objects(self) -> str:
+        """List the collision objects in the planning scene.
+
+        The scene is read back from move_group, which is authoritative: it
+        also shows objects placed there by other tools. When move_group does
+        not answer, the objects this component itself added are listed.
+
+        :returns: The object names, for the caller and for tool use
+        """
+        from moveit_msgs.msg import PlanningSceneComponents
+        from moveit_msgs.srv import GetPlanningScene
+
+        if self._get_scene_client:
+            request = GetPlanningScene.Request()
+            request.components.components = PlanningSceneComponents.WORLD_OBJECT_NAMES
+            response = self._get_scene_client.send_request(request)
+            if response is not None:
+                names = sorted(o.id for o in response.scene.world.collision_objects)
+                if not names:
+                    return "The planning scene contains no collision objects"
+                return f"Collision objects in the planning scene: {', '.join(names)}"
+
+        with self._scene_lock:
+            names = sorted(self._scene_objects)
+        if not names:
+            return "The planning scene contains no collision objects"
+        return (
+            "move_group did not answer; objects added by this component: "
+            f"{', '.join(names)}"
+        )
+
+    @component_action(
+        description={
+            "type": "function",
+            "function": {
+                "name": "clear_octomap",
+                "description": "Clear the octomap built from depth sensors in the motion planning scene. Use when stale sensor data blocks valid motions.",
+                "parameters": {"type": "object", "properties": {}, "required": []},
+            },
+        },
+        active=True,
+        phase=ActionPhase.EXECUTION,
+    )
+    def clear_octomap(self) -> str:
+        """Clear the octomap accumulated in the planning scene.
+
+        :returns: What happened, for the caller and for tool use
+        """
+        if not self._clear_octomap_client:
+            return "The octomap client is not available, is the component active?"
+
+        response = self._clear_octomap_client.send_request(Empty.Request())
+        if response is None:
+            return "move_group did not answer the octomap clear request"
+        return "Cleared the planning scene octomap"

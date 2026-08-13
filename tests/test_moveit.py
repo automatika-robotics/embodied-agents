@@ -1206,3 +1206,158 @@ class TestSceneServiceClients:
         assert component._apply_scene_client is None
         assert component._get_scene_client is None
         assert component._clear_octomap_client is None
+
+
+class TestSceneActions:
+    """The component actions that manage collision objects in the scene."""
+
+    @pytest.fixture(autouse=True)
+    def _needs_moveit_msgs(self):
+        pytest.importorskip("moveit_msgs.msg")
+
+    @pytest.fixture
+    def component(self, rclpy_init):
+        from agents.components import MoveIt
+        from agents.config import MoveItConfig
+
+        comp = MoveIt(
+            config=MoveItConfig(
+                arm_group_name="arm", pose_reference_frame="base_link"
+            ),
+            component_name="m_scene_actions",
+        )
+        comp.get_logger = MagicMock()
+        comp._apply_scene_client = MagicMock()
+        comp._apply_scene_client.send_request.return_value = SimpleNamespace(
+            success=True
+        )
+        return comp
+
+    @staticmethod
+    def _applied_scene(component):
+        request = component._apply_scene_client.send_request.call_args[0][0]
+        return request.scene
+
+    def test_add_sends_one_diff_and_tracks_the_object(self, component):
+        from moveit_msgs.msg import CollisionObject
+
+        message = component.add_collision_object.__wrapped__(
+            component, "crate", [0.4, 0.0, 0.1], [0.2, 0.3, 0.2]
+        )
+
+        scene = self._applied_scene(component)
+        assert scene.is_diff and scene.robot_state.is_diff
+        (obj,) = scene.world.collision_objects
+        assert obj.id == "crate" and obj.operation == CollisionObject.ADD
+        # empty frame falls back to the configured reference frame
+        assert obj.header.frame_id == "base_link"
+        assert list(obj.primitives[0].dimensions) == [0.2, 0.3, 0.2]
+        assert component._scene_objects["crate"]["source"] == "manual"
+        assert "Added" in message
+
+    def test_add_applies_the_thickness_floor(self, component):
+        component.config.min_object_thickness = 0.05
+        component.add_collision_object.__wrapped__(
+            component, "sheet", [0, 0, 0], [0.4, 0.4, 0.0]
+        )
+        (obj,) = self._applied_scene(component).world.collision_objects
+        assert list(obj.primitives[0].dimensions) == [0.4, 0.4, 0.05]
+
+    def test_add_reports_failure_and_tracks_nothing(self, component):
+        component._apply_scene_client.send_request.return_value = SimpleNamespace(
+            success=False
+        )
+        message = component.add_collision_object.__wrapped__(
+            component, "crate", [0, 0, 0], [0.1, 0.1, 0.1]
+        )
+        assert "Could not" in message
+        assert "crate" not in component._scene_objects
+
+    def test_add_rejects_malformed_geometry(self, component):
+        with pytest.raises(ValueError, match="3 values"):
+            component.add_collision_object.__wrapped__(
+                component, "crate", [0, 0], [0.1, 0.1, 0.1]
+            )
+
+    def test_remove_sends_remove_and_forgets_the_object(self, component):
+        from moveit_msgs.msg import CollisionObject
+
+        component._scene_objects["crate"] = {"source": "manual", "last_seen": 0.0}
+        message = component.remove_collision_object.__wrapped__(component, "crate")
+
+        (obj,) = self._applied_scene(component).world.collision_objects
+        assert obj.id == "crate" and obj.operation == CollisionObject.REMOVE
+        assert "crate" not in component._scene_objects
+        assert "Removed" in message
+
+    def test_clear_removes_tracked_objects_in_one_diff(self, component):
+        component._scene_objects = {
+            "crate": {"source": "manual", "last_seen": 0.0},
+            "det__orange_0": {"source": "detection", "last_seen": 0.0},
+        }
+        message = component.clear_collision_objects.__wrapped__(component)
+
+        removed = {o.id for o in self._applied_scene(component).world.collision_objects}
+        assert removed == {"crate", "det__orange_0"}
+        assert component._scene_objects == {}
+        assert "2" in message
+
+    def test_clear_detections_only_keeps_manual_objects(self, component):
+        component._scene_objects = {
+            "crate": {"source": "manual", "last_seen": 0.0},
+            "det__orange_0": {"source": "detection", "last_seen": 0.0},
+        }
+        component.clear_collision_objects.__wrapped__(component, detections_only=True)
+
+        removed = {o.id for o in self._applied_scene(component).world.collision_objects}
+        assert removed == {"det__orange_0"}
+        assert set(component._scene_objects) == {"crate"}
+
+    def test_clear_with_nothing_tracked_sends_nothing(self, component):
+        message = component.clear_collision_objects.__wrapped__(component)
+        component._apply_scene_client.send_request.assert_not_called()
+        assert "no objects" in message
+
+    def test_list_reads_the_scene_back_from_move_group(self, component):
+        """move_group is authoritative: it also shows objects other tools
+        placed there."""
+        component._get_scene_client = MagicMock()
+        component._get_scene_client.send_request.return_value = SimpleNamespace(
+            scene=SimpleNamespace(
+                world=SimpleNamespace(
+                    collision_objects=[
+                        SimpleNamespace(id="det__orange_0"),
+                        SimpleNamespace(id="table"),
+                    ]
+                )
+            )
+        )
+        message = component.list_collision_objects.__wrapped__(component)
+        assert "det__orange_0, table" in message
+
+    def test_list_falls_back_to_tracked_objects(self, component):
+        component._get_scene_client = MagicMock()
+        component._get_scene_client.send_request.return_value = None
+        component._scene_objects = {"crate": {"source": "manual", "last_seen": 0.0}}
+        message = component.list_collision_objects.__wrapped__(component)
+        assert "did not answer" in message and "crate" in message
+
+    def test_clear_octomap(self, component):
+        from std_srvs.srv import Empty
+
+        component._clear_octomap_client = MagicMock()
+        component._clear_octomap_client.send_request.return_value = Empty.Response()
+        message = component.clear_octomap.__wrapped__(component)
+        assert isinstance(
+            component._clear_octomap_client.send_request.call_args[0][0],
+            Empty.Request,
+        )
+        assert "Cleared" in message
+
+    def test_scene_failure_degrades_without_raising(self, component):
+        """A scene problem must never take the component down."""
+        component._apply_scene_client = None
+        message = component.add_collision_object.__wrapped__(
+            component, "crate", [0, 0, 0], [0.1, 0.1, 0.1]
+        )
+        assert "Could not" in message
