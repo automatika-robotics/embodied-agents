@@ -7,6 +7,7 @@ from ..clients.db_base import DBClient
 from ..clients.model_base import ModelClient
 from ..config import MLLMConfig
 from ..ros import (
+    CameraInfo,
     FixedInput,
     Event,
     Image,
@@ -15,6 +16,7 @@ from ..ros import (
     Topic,
     DetectionsMultiSource,
     Detections,
+    Detections3D,
     RGBD,
     PointsOfInterest,
     ComponentRunType,
@@ -23,6 +25,7 @@ from ..ros import (
     component_action,
 )
 from ..utils import validate_func_args
+from ..utils.perception3d import resolve_lift_camera
 from .llm import LLM
 
 
@@ -45,6 +48,10 @@ class MLLM(LLM):
     :param trigger: The trigger value or topic for the MLLM component.
         This can be a single Topic object, a list of Topic objects, or a float value for a timed component. Defaults to 1.
     :type trigger: Union[Topic, list[Topic], float]
+    :param depth: Depth image topic registered to the camera the VLM grounds on, used together with `camera_info` to lift grounded boxes into metric 3D boxes when a Detections3D output is given (requires the "grounding" or "affordance" task). The depth frame is latched when the picture is captured for inference, so the boxes measure the scene the VLM actually saw.
+    :type depth: Optional[Topic]
+    :param camera_info: Camera intrinsics topic of the stream `depth` was measured on. Required alongside `depth` for a Detections3D output.
+    :type camera_info: Optional[Topic]
     :param component_name: The name of the MLLM component.
         This should be a string and defaults to "mllm_component".
     :type component_name: str
@@ -87,12 +94,14 @@ class MLLM(LLM):
         config: Optional[MLLMConfig] = None,
         db_client: Optional[DBClient] = None,
         trigger: Union[Topic, List[Topic], float, Event] = 1.0,
+        depth: Optional[Topic] = None,
+        camera_info: Optional[Topic] = None,
         component_name: str,
         **kwargs,
     ):
         self.allowed_inputs = {
             "Required": [String, [Image, RGBD]],
-            "Optional": [DetectionsMultiSource, Detections],
+            "Optional": [DetectionsMultiSource, Detections, CameraInfo],
         }
 
         config = config or MLLMConfig()
@@ -101,6 +110,52 @@ class MLLM(LLM):
             raise RuntimeError(
                 "MLLM/VLM component requires a model_client or enable_local_model=True in MLLMConfig."
             )
+
+        depth = depth or config._depth_topic
+        camera_info = camera_info or config._camera_info_topic
+        config._depth_topic = depth
+        config._camera_info_topic = camera_info
+        self.depth_topic, self.camera_info_topic = depth, camera_info
+
+        # Reject camera info if present in inputs
+        stray_info = [
+            t.name
+            for t in inputs
+            if issubclass(t.msg_type, CameraInfo)
+            and (camera_info is None or t.name != camera_info.name)
+        ]
+        if stray_info:
+            raise TypeError(
+                f"MLLM was given CameraInfo topic(s) {stray_info} among its "
+                "inputs. Intrinsics describe a camera rather than deliver "
+                "pictures to reason on, so they are passed as "
+                "`camera_info=Topic(...)`, as depth is passed as `depth=Topic(...)`."
+            )
+        self._aux_inputs = {t.name for t in (depth, camera_info) if t}
+
+        # Asking for a Detections3D output turns 3D lifting on
+        self._lift_to_3d = any(issubclass(t.msg_type, Detections3D) for t in outputs)
+        self._lift_camera = None
+        if self._lift_to_3d:
+            # Lifting to 3d only works for bounding box outputs
+            if config.task not in ("grounding", "affordance"):
+                raise TypeError(
+                    "MLLM was given a Detections3D output, which only the "
+                    "'grounding' and 'affordance' tasks can produce boxes for. "
+                    f"Set `task` in the MLLMConfig (currently {config.task!r})."
+                )
+            # The contract check names the picture stream the lift applies to
+            self._lift_camera = resolve_lift_camera(
+                inputs,
+                depth,
+                camera_info,
+                frame=config.detections_frame,
+                component="MLLM",
+            )
+            # Intrinsics and depth only get subscribed to when they feed a lift
+            for topic in (depth, camera_info):
+                if topic and all(t.name != topic.name for t in inputs):
+                    inputs = [*inputs, topic]
 
         super().__init__(
             inputs=inputs,
@@ -120,6 +175,7 @@ class MLLM(LLM):
             Detections,
             DetectionsMultiSource,
             PointsOfInterest,
+            Detections3D,
         ]
         self._images: List[Union[np.ndarray, ROSImage, ROSCompressedImage]] = []
 
@@ -180,16 +236,19 @@ class MLLM(LLM):
             self.messages = []
             return None
 
-        # aggregate all inputs that are available
+        # aggregate all inputs that are available. Depth and camera_info
+        # only feed the 3D lift, not the model
         for i in self.callbacks.values():
-            msg = i.msg
-            if (item := i.get_output()) is None:
+            if (
+                i.input_topic.name in self._aux_inputs
+                or (item := i.get_output()) is None
+            ):
                 continue
+            msg = i.msg
             msg_type = i.input_topic.msg_type
             # set trigger equal to a topic with type String if trigger not found
             if msg_type == String:
-                if not query:
-                    query = item
+                query = query or item
                 context[i.input_topic.name] = item
             elif msg_type in [DetectionsMultiSource, Detections]:
                 context[i.input_topic.name] = item
