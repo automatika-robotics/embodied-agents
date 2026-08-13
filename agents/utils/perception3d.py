@@ -59,6 +59,85 @@ def ensure_kompass_core() -> None:
         raise ModuleNotFoundError(_KOMPASS_INSTALL_HINT)
 
 
+def resolve_lift_camera(
+    inputs: Sequence[Any],
+    depth: Optional[Any],
+    camera_info: Optional[Any],
+    *,
+    frame: str,
+    component: str,
+) -> str:
+    """Validate a component's 3D lifting contract and name its lift camera.
+
+    A component asked for Detections3D output needs a frame to report boxes
+    in, and depth registered to the picture stream the detections are made
+    on: either an RGBD input, or a plain depth topic with the calibration of
+    the stream it was measured on. Raises TypeError describing whichever
+    part of the contract is missing.
+
+    :param inputs: The component's input topics
+    :param depth: Topic given as the ``depth`` keyword, if any
+    :param camera_info: Topic given as the ``camera_info`` keyword, if any
+    :param frame: The configured ``detections_frame``
+    :param component: Component name for the error messages
+    :return: Name of the picture topic the lift applies to
+    """
+    from ..ros import CameraInfo, CompressedImage, Image, RGBD
+
+    # Check if detection frame has been set. 3D Boxes are axis aligned in it.
+    if not frame:
+        raise TypeError(
+            f"{component} was given a Detections3D output, which needs a frame "
+            "to report boxes in. Set `detections_frame` on the config to the "
+            "frame the consumer works in, such as a robotic arm's planning "
+            "frame."
+        )
+
+    pictures = [
+        t
+        for t in inputs
+        if issubclass(t.msg_type, (Image, RGBD))
+        and (not depth or t.name != depth.name)
+    ]
+    if camera_info and not issubclass(camera_info.msg_type, CameraInfo):
+        raise TypeError(
+            f"{component} camera_info topic must be of type CameraInfo, got "
+            f"{camera_info.msg_type.__name__}."
+        )
+
+    # Prefer RGBD over plain image. Return first RGBD if multiple.
+    # Otherwise the first Image topic is taken at the end.
+    rgbd = [t for t in pictures if issubclass(t.msg_type, RGBD)]
+    if rgbd:
+        return rgbd[0].name
+
+    if not depth:
+        raise TypeError(
+            f"{component} was given a Detections3D output, which requires "
+            "depth to place detections in space. Either give it an RGBD "
+            "input, which carries depth registered to its picture, or pass "
+            "the camera's registered depth topic as `depth=Topic(...)` along "
+            f"with its `camera_info=Topic(...)`. Inputs given: "
+            f"{[t.name for t in inputs]}"
+        )
+    if issubclass(depth.msg_type, CompressedImage) or not issubclass(
+        depth.msg_type, Image
+    ):
+        raise TypeError(
+            f"{component} depth topic must be an uncompressed Image, got "
+            f"{depth.msg_type.__name__}."
+        )
+    if not camera_info:
+        raise TypeError(
+            f"{component} was given a depth topic but no camera_info topic. "
+            "Depth pixels cannot be turned into distances without the "
+            "calibration of the stream they were measured on: pass it as "
+            "`camera_info=Topic(...)`."
+        )
+    # Take first image topic by default
+    return pictures[0].name
+
+
 @define
 class Box3D:
     """An object detected in metric space.

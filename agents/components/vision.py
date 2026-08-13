@@ -10,7 +10,6 @@ from ..clients.model_base import ModelClient
 from ..config import VisionConfig
 from ..ros import (
     CameraInfo,
-    CompressedImage,
     DetectionsMultiSource,
     Detections,
     Detections3D,
@@ -32,6 +31,7 @@ from ..utils import (
     get_frame_id,
     get_stamp_secs,
 )
+from ..utils.perception3d import resolve_lift_camera
 from .model_component import ModelComponent
 from .component_base import ComponentRunType
 
@@ -137,11 +137,17 @@ class Vision(ModelComponent):
 
         # Asking for a Detections3D output turns 3D lifting on
         self._lift_to_3d = any(issubclass(t.msg_type, Detections3D) for t in outputs)
-        self._lift_camera = self._check_3d_contract(inputs, depth, camera_info)
-
-        # Add intrinsics and depth to inputs. They only get subscribed to with a
-        # Detections3D output
+        self._lift_camera = None
         if self._lift_to_3d:
+            # The contract check names the picture stream the lift applies to
+            self._lift_camera = resolve_lift_camera(
+                inputs,
+                depth,
+                camera_info,
+                frame=self.config.detections_frame,
+                component="Vision",
+            )
+            # Intrinsics and depth only get subscribed to when they feed a lift
             for topic in (depth, camera_info):
                 if topic and all(t.name != topic.name for t in inputs):
                     inputs = [*inputs, topic]
@@ -207,70 +213,6 @@ class Vision(ModelComponent):
                 "than deliver pictures to run inference on, so they cannot be used"
                 " as the component trigger."
             )
-
-    def _check_3d_contract(
-        self,
-        inputs: List[Union[Topic, FixedInput]],
-        depth: Optional[Topic],
-        camera_info: Optional[Topic],
-    ) -> Optional[str]:
-        """Check the component can produce the 3D detections it was asked for."""
-        if not self._lift_to_3d:
-            return None
-
-        # Check if detection frame has been set. 3D Boxes are axis aligned in it.
-        if not self.config.detections_frame:
-            raise TypeError(
-                "Vision was given a Detections3D output, which needs a frame to "
-                "report boxes in. Set `detections_frame` on the VisionConfig to "
-                "the frame the consumer works in, such as a robotic arm's planning "
-                "frame."
-            )
-
-        pictures = [
-            t
-            for t in inputs
-            if issubclass(t.msg_type, (Image, RGBD))
-            and (not depth or t.name != depth.name)
-        ]
-        if camera_info and not issubclass(camera_info.msg_type, CameraInfo):
-            raise TypeError(
-                "Vision camera_info topic must be of type CameraInfo, got "
-                f"{camera_info.msg_type.__name__}."
-            )
-
-        # Prefer RGBD over plain image. Return first RGBD if multiple.
-        # Otherwise the first Image topic is taken at the end
-        # and the rest are named in a warning.
-        rgbd = [t for t in pictures if issubclass(t.msg_type, RGBD)]
-        if rgbd:
-            return rgbd[0].name
-
-        if not depth:
-            raise TypeError(
-                "Vision was given a Detections3D output, which requires depth "
-                "to place detections in space. Either give it an RGBD input, "
-                "which carries depth registered to its picture, or pass the "
-                "camera's registered depth topic as `depth=Topic(...)` along "
-                f"with its `camera_info=Topic(...)`. Inputs given: "
-                f"{[t.name for t in inputs]}"
-            )
-        if issubclass(depth.msg_type, CompressedImage) or not issubclass(
-            depth.msg_type, Image
-        ):
-            raise TypeError(
-                "Vision depth topic must be an uncompressed Image, got "
-                f"{depth.msg_type.__name__}."
-            )
-        if not camera_info:
-            raise TypeError(
-                "Vision was given a depth topic but no camera_info topic. Depth "
-                "pixels cannot be turned into distances without the calibration "
-                "of the stream they were measured on: pass it as "
-                "`camera_info=Topic(...)`."
-            )
-        # Take first image topic by default
-        return pictures[0].name
 
     @staticmethod
     def _resolve_detection_set(
