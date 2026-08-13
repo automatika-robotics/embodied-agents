@@ -824,3 +824,253 @@ class TestGripperActions:
         comp._gripper_client = None
 
         assert "No motion" in comp.stop_motion.__wrapped__(comp)
+
+
+class TestSceneBuilders:
+    """Collision objects and scene diffs the planning scene is fed with."""
+
+    @pytest.fixture(autouse=True)
+    def _needs_moveit_msgs(self):
+        pytest.importorskip("moveit_msgs.msg")
+
+    def test_box_object_from_a_position(self):
+        from moveit_msgs.msg import CollisionObject
+
+        from agents.utils.moveit import build_collision_object
+
+        obj = build_collision_object("crate", "base_link", (0.4, 0.0, 0.1), (0.2, 0.3, 0.2))
+
+        assert obj.id == "crate" and obj.header.frame_id == "base_link"
+        # zero stamp, so move_group does no TF lookup on an object already
+        # given in the planning frame
+        assert obj.header.stamp.sec == 0 and obj.header.stamp.nanosec == 0
+        assert obj.operation == CollisionObject.ADD
+        assert list(obj.primitives[0].dimensions) == [0.2, 0.3, 0.2]
+        pose = obj.primitive_poses[0]
+        assert pose.position.x == 0.4
+        # a bare Pose carries an all-zero quaternion, which is not a rotation
+        assert pose.orientation.w == 1.0
+
+    def test_box_object_from_a_pose_keeps_its_orientation(self):
+        from geometry_msgs.msg import Pose
+
+        from agents.utils.moveit import build_collision_object
+
+        center = Pose()
+        center.position.z = 0.5
+        center.orientation.z = center.orientation.w = 0.7071
+
+        pose = build_collision_object("o", "map", center, (0.1, 0.1, 0.1)).primitive_poses[0]
+        assert pose.orientation.z == pytest.approx(0.7071)
+        # the input pose is copied, not aliased
+        center.position.z = 9.9
+        assert pose.position.z == 0.5
+
+    def test_an_all_zero_quaternion_becomes_identity(self):
+        from geometry_msgs.msg import Pose
+
+        from agents.utils.moveit import build_collision_object
+
+        obj = build_collision_object("o", "map", Pose(), (0.1, 0.1, 0.1))
+        assert obj.primitive_poses[0].orientation.w == 1.0
+
+    def test_flat_boxes_get_a_minimum_thickness(self):
+        """A fronto-parallel surface lifts with no extent along the view
+        axis, and a zero-thickness box is invisible to collision checking."""
+        from agents.utils.moveit import build_collision_object
+
+        obj = build_collision_object("o", "map", (0, 0, 0), (0.04, 0.02, 0.0))
+        assert list(obj.primitives[0].dimensions) == [0.04, 0.02, 0.01]
+
+    def test_remove_object(self):
+        from moveit_msgs.msg import CollisionObject
+
+        from agents.utils.moveit import build_remove_object
+
+        obj = build_remove_object("crate")
+        assert obj.id == "crate" and obj.operation == CollisionObject.REMOVE
+
+    def test_scene_diff_never_replaces_the_scene(self):
+        from agents.utils.moveit import (
+            build_collision_object,
+            build_remove_object,
+            build_scene_diff,
+        )
+
+        scene = build_scene_diff(
+            [
+                build_collision_object("a", "map", (0, 0, 0), (0.1, 0.1, 0.1)),
+                build_remove_object("b"),
+            ]
+        )
+        assert scene.is_diff
+        # without this, applying the diff would overwrite the robot state
+        # move_group is monitoring
+        assert scene.robot_state.is_diff
+        assert [o.id for o in scene.world.collision_objects] == ["a", "b"]
+
+    def test_attach_and_detach(self):
+        from moveit_msgs.msg import CollisionObject
+
+        from agents.utils.moveit import build_attached_object, build_detach_object
+
+        attached = build_attached_object(
+            "det__orange_0", "gripper_link", ["gripper_link", "jaw_link"]
+        )
+        assert attached.link_name == "gripper_link"
+        assert attached.object.id == "det__orange_0"
+        assert attached.object.operation == CollisionObject.ADD
+        assert list(attached.touch_links) == ["gripper_link", "jaw_link"]
+
+        detached = build_detach_object("det__orange_0")
+        assert detached.object.operation == CollisionObject.REMOVE
+        assert detached.link_name == ""
+
+
+class TestDetectionObjects:
+    """Detections3D messages turned into collision objects."""
+
+    @pytest.fixture(autouse=True)
+    def _needs_messages(self):
+        pytest.importorskip("moveit_msgs.msg")
+        pytest.importorskip("automatika_embodied_agents.msg")
+
+    @staticmethod
+    def _detections(entries, frame="base_link"):
+        from automatika_embodied_agents.msg import Bbox3D, Detections3D
+
+        msg = Detections3D()
+        msg.header.frame_id = frame
+        for label, score, center, size in entries:
+            box = Bbox3D()
+            box.center.position.x, box.center.position.y, box.center.position.z = center
+            box.center.orientation.w = 1.0
+            box.size.x, box.size.y, box.size.z = size
+            msg.boxes.append(box)
+            msg.labels.append(label)
+            msg.scores.append(score)
+        return msg
+
+    def test_ids_rank_per_label_by_score(self):
+        """The strongest orange stays det__orange_0 between refreshes of a
+        static scene, without needing a tracker."""
+        from agents.utils.moveit import collision_objects_from_detections
+
+        objects = collision_objects_from_detections(
+            self._detections([
+                ("orange", 0.5, (0.1, 0.0, 0.0), (0.05, 0.05, 0.05)),
+                ("bowl", 0.7, (0.2, 0.0, 0.0), (0.2, 0.2, 0.1)),
+                ("orange", 0.9, (0.3, 0.0, 0.0), (0.06, 0.06, 0.06)),
+            ])
+        )
+        by_id = {o.id: o for o in objects}
+        assert set(by_id) == {"det__orange_0", "det__orange_1", "det__bowl_0"}
+        # the higher scoring orange takes rank 0
+        assert by_id["det__orange_0"].primitive_poses[0].position.x == pytest.approx(0.3)
+        assert by_id["det__orange_1"].primitive_poses[0].position.x == pytest.approx(0.1)
+
+    def test_objects_carry_the_message_frame_and_geometry(self):
+        from agents.utils.moveit import collision_objects_from_detections
+
+        (obj,) = collision_objects_from_detections(
+            self._detections(
+                [("cup", 0.8, (0.4, -0.1, 0.05), (0.06, 0.06, 0.12))], frame="world"
+            )
+        )
+        assert obj.header.frame_id == "world"
+        assert list(obj.primitives[0].dimensions) == pytest.approx([0.06, 0.06, 0.12])
+
+    def test_padding_inflates_every_side(self):
+        from agents.utils.moveit import collision_objects_from_detections
+
+        (obj,) = collision_objects_from_detections(
+            self._detections([("cup", 0.8, (0, 0, 0), (0.06, 0.06, 0.12))]),
+            padding=0.01,
+        )
+        assert list(obj.primitives[0].dimensions) == pytest.approx([0.08, 0.08, 0.14])
+
+    def test_labels_are_sanitized_and_defaulted(self):
+        from agents.utils.moveit import collision_objects_from_detections
+
+        objects = collision_objects_from_detections(
+            self._detections([
+                ("sports ball", 0.9, (0, 0, 0), (0.1, 0.1, 0.1)),
+                ("", 0.8, (1, 0, 0), (0.1, 0.1, 0.1)),
+            ])
+        )
+        assert {o.id for o in objects} == {"det__sports_ball_0", "det__object_0"}
+
+    def test_no_detections_no_objects(self):
+        from agents.utils.moveit import collision_objects_from_detections
+
+        assert collision_objects_from_detections(self._detections([])) == []
+
+
+class TestTouchLinks:
+    """Which links may stay in contact with a grasped object."""
+
+    SO101_JOINT_ONLY = """
+    <robot name="so101">
+      <group name="arm"><chain base_link="base_link" tip_link="gripper_frame_link"/></group>
+      <group name="gripper"><joint name="gripper"/></group>
+      <end_effector name="eef" parent_link="gripper_frame_link" group="gripper"/>
+      <disable_collisions link1="wrist_link" link2="gripper_link" reason="Adjacent"/>
+      <disable_collisions link1="gripper_link" link2="moving_jaw_so101_v1_link" reason="Adjacent"/>
+    </robot>
+    """
+
+    SO101_WITH_LINKS = SO101_JOINT_ONLY.replace(
+        '<group name="gripper"><joint name="gripper"/></group>',
+        '<group name="gripper"><joint name="gripper"/>'
+        '<link name="gripper_frame_link"/><link name="gripper_link"/>'
+        '<link name="moving_jaw_so101_v1_link"/></group>',
+    )
+
+    def test_explicit_config_wins(self):
+        from agents.utils.moveit import derive_touch_links
+
+        assert derive_touch_links(
+            self.SO101_WITH_LINKS, "eef", explicit=["a", "b", "a"]
+        ) == ["a", "b"]
+
+    def test_links_declared_in_the_gripper_group(self):
+        from agents.utils.moveit import derive_touch_links
+
+        assert derive_touch_links(
+            self.SO101_WITH_LINKS, "eef", gripper_group="gripper"
+        ) == ["gripper_frame_link", "gripper_link", "moving_jaw_so101_v1_link"]
+
+    def test_adjacent_partners_of_the_end_effector_parent(self):
+        """The heuristic path, for SRDFs that declare neither links nor an
+        explicit list. Only physically connected pairs describe the gripper;
+        'Never' pairs span the whole robot."""
+        from agents.utils.moveit import derive_touch_links
+
+        srdf = """
+        <robot>
+          <end_effector name="eef" parent_link="hand" group="g"/>
+          <disable_collisions link1="hand" link2="left_finger" reason="Adjacent"/>
+          <disable_collisions link1="right_finger" link2="hand" reason="Adjacent"/>
+          <disable_collisions link1="hand" link2="base" reason="Never"/>
+        </robot>
+        """
+        assert derive_touch_links(srdf, "hand", gripper_group="g") == [
+            "hand",
+            "left_finger",
+            "right_finger",
+        ]
+
+    def test_joint_only_group_without_adjacency_falls_back(self):
+        """The SO-101's own shape: the end effector parent appears in no
+        disable_collisions pair, so nothing can be derived and the configured
+        link is returned alone."""
+        from agents.utils.moveit import derive_touch_links
+
+        assert derive_touch_links(
+            self.SO101_JOINT_ONLY, "gripper_frame_link", gripper_group="gripper"
+        ) == ["gripper_frame_link"]
+
+    def test_no_srdf_falls_back(self):
+        from agents.utils.moveit import derive_touch_links
+
+        assert derive_touch_links(None, "tool0") == ["tool0"]

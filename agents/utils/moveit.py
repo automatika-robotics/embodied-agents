@@ -24,6 +24,10 @@ _MOVEIT_INSTALL_HINT = (
 # Parameter of the move_group node that carries the robot SRDF
 SRDF_PARAMETER = "robot_description_semantic"
 
+# =========================================================================
+# General Utils
+# =========================================================================
+
 
 class MoveMode(str, Enum):
     """Kinds of motion target accepted in a manipulation goal.
@@ -124,7 +128,8 @@ def pose_to_constraints(
         OrientationConstraint,
         PositionConstraint,
     )
-    from shape_msgs.msg import SolidPrimitive
+
+    from ..ros import SolidPrimitive
 
     constraints = Constraints()
 
@@ -353,3 +358,308 @@ def moveit_error_string(code: int) -> str:
         if name.isupper() and isinstance(value, int)
     }
     return names.get(code, f"UNKNOWN_ERROR({code})")
+
+
+# =========================================================================
+# Planning scene
+# =========================================================================
+
+# Prefix namespacing collision objects that came from detections, so clearing
+# them leaves manually added objects alone
+DETECTION_ID_PREFIX = "det__"
+
+
+def object_id_for(label: str, rank: int, prefix: str = DETECTION_ID_PREFIX) -> str:
+    """Scene id of a detected object, e.g. ``det__orange_0``.
+
+    :param label: Detection label
+    :param rank: Position among same-labelled objects, by descending score
+    :param prefix: Namespace marking the object as detection-sourced
+    """
+    clean = (label or "object").strip().replace(" ", "_")
+    return f"{prefix}{clean}_{rank}"
+
+
+def build_collision_object(
+    object_id: str,
+    frame_id: str,
+    center: Any,
+    size: Sequence[float],
+    min_thickness: float = 0.01,
+) -> Any:
+    """A box-shaped collision object MoveIt can plan around.
+
+    The object is expressed directly in ``frame_id`` with a zero timestamp,
+    which move_group takes as-is without a TF lookup, so objects should be built
+    objects in the planning frame. Re-adding an existing id moves the object.
+
+    :param object_id: Scene-wide identifier
+    :param frame_id: Frame the center is given in, normally the planning frame
+    :param center: geometry_msgs Pose, or an (x, y, z) position for an
+        axis-aligned box
+    :param size: Full extents of the box in meters
+    :param min_thickness: Floor for each extent. A fronto-parallel surface is
+        lifted with no measurable extent along the view axis, and a zero
+        thickness box is invisible to collision checking
+    :returns: moveit_msgs CollisionObject with operation ADD
+    """
+    ensure_moveit_msgs()
+    from moveit_msgs.msg import CollisionObject
+
+    from ..ros import ROSPose, SolidPrimitive
+
+    pose = ROSPose()
+    if hasattr(center, "position"):
+        pose.position.x = center.position.x
+        pose.position.y = center.position.y
+        pose.position.z = center.position.z
+        source = center.orientation
+        if any((source.x, source.y, source.z, source.w)):
+            pose.orientation.x = source.x
+            pose.orientation.y = source.y
+            pose.orientation.z = source.z
+            pose.orientation.w = source.w
+        else:
+            # All zeros is not a rotation and MoveIt rejects it
+            pose.orientation.w = 1.0
+    else:
+        pose.position.x, pose.position.y, pose.position.z = (
+            float(value) for value in center
+        )
+        # A bare Pose carries the same all-zero quaternion
+        pose.orientation.w = 1.0
+
+    obj = CollisionObject()
+    obj.id = object_id
+    obj.header.frame_id = frame_id  # stamp stays zero to avoid TF lookup in move_group
+    obj.primitives.append(
+        SolidPrimitive(
+            type=SolidPrimitive.BOX,
+            dimensions=[max(float(extent), min_thickness) for extent in size],
+        )
+    )
+    obj.primitive_poses.append(pose)
+    obj.operation = CollisionObject.ADD  # an octet field: use the constants
+    return obj
+
+
+def build_remove_object(object_id: str) -> Any:
+    """An instruction taking one object out of the planning scene.
+
+    :param object_id: Id the object was added under
+    :returns: moveit_msgs CollisionObject with operation REMOVE
+    """
+    ensure_moveit_msgs()
+    from moveit_msgs.msg import CollisionObject
+
+    obj = CollisionObject()
+    obj.id = object_id
+    obj.operation = CollisionObject.REMOVE
+    return obj
+
+
+def build_scene_diff(
+    collision_objects: Sequence[Any] = (),
+    attached_objects: Sequence[Any] = (),
+) -> Any:
+    """Wrap scene changes as one diff against move_group's current scene.
+
+    A diff only touches what it carries. The robot state is marked as a diff too.
+    Without that, applying the scene would overwrite the state move_group is monitoring.
+
+    :param collision_objects: World objects to add, move or remove
+    :param attached_objects: Objects to attach to or detach from the robot
+    :returns: moveit_msgs PlanningScene diff
+    """
+    ensure_moveit_msgs()
+    from moveit_msgs.msg import PlanningScene
+
+    scene = PlanningScene()
+    scene.is_diff = True
+    scene.robot_state.is_diff = True
+    scene.world.collision_objects.extend(collision_objects)
+    scene.robot_state.attached_collision_objects.extend(attached_objects)
+    return scene
+
+
+def collision_objects_from_detections(
+    detections: Any,
+    *,
+    min_thickness: float = 0.01,
+    padding: float = 0.0,
+    id_prefix: str = DETECTION_ID_PREFIX,
+) -> List[Any]:
+    """Turn a Detections3D message into collision objects.
+
+    Ranks in IDs counted per label by descending score, so on a static scene
+    the same object keeps the same id from one refresh to the next without needing
+    a tracker.
+
+    Boxes are used in the planning frame (already transformed).
+
+    :param detections: Detections3D message
+    :param min_thickness: Floor for each box extent in meters
+    :param padding: Margin added on every side of every box in meters, for
+        planning clearance around imperfectly measured objects
+    :returns: moveit_msgs CollisionObjects with operation ADD
+    """
+    frame = detections.header.frame_id
+    labels = list(detections.labels)
+    scores = list(detections.scores)
+    entries = []
+    for index, box in enumerate(detections.boxes):
+        entries.append((
+            labels[index] if index < len(labels) else "",
+            scores[index] if index < len(scores) else 0.0,
+            box,
+        ))
+
+    objects = []
+    ranks: Dict[str, int] = {}
+    for label, _, box in sorted(entries, key=lambda entry: -entry[1]):
+        rank = ranks.get(label, 0)
+        ranks[label] = rank + 1
+        objects.append(
+            build_collision_object(
+                object_id_for(label, rank, prefix=id_prefix),
+                frame,
+                box.center,
+                (
+                    box.size.x + 2 * padding,
+                    box.size.y + 2 * padding,
+                    box.size.z + 2 * padding,
+                ),
+                min_thickness=min_thickness,
+            )
+        )
+    return objects
+
+
+def build_attached_object(
+    object_id: str, link_name: str, touch_links: Sequence[str] = ()
+) -> Any:
+    """Attach a scene object to a robot link, as on a grasp.
+
+    NOTE: Attaching by id moves an object already in the scene: move_group removes
+    it from the world and carries it with the link, excluding contact with
+    the ``touch_links`` from collision checking. With the wrong touch links
+    the first motion after a grasp fails on a collision between gripper and
+    held object.
+
+    :param object_id: Id of an object already in the planning scene
+    :param link_name: Link the object is rigidly attached to
+    :param touch_links: Links allowed to stay in contact with the object
+    :returns: moveit_msgs AttachedCollisionObject
+    """
+    ensure_moveit_msgs()
+    from moveit_msgs.msg import AttachedCollisionObject, CollisionObject
+
+    attached = AttachedCollisionObject()
+    attached.link_name = link_name
+    attached.object.id = object_id
+    attached.object.operation = CollisionObject.ADD
+    attached.touch_links = list(touch_links)
+    return attached
+
+
+def build_detach_object(object_id: str, link_name: str = "") -> Any:
+    """Detach an attached object, returning it to the world.
+
+    :param object_id: Id the object was attached under
+    :param link_name: Link holding the object; empty searches every link
+    :returns: moveit_msgs AttachedCollisionObject with operation REMOVE
+    """
+    ensure_moveit_msgs()
+    from moveit_msgs.msg import AttachedCollisionObject, CollisionObject
+
+    attached = AttachedCollisionObject()
+    attached.link_name = link_name
+    attached.object.id = object_id
+    attached.object.operation = CollisionObject.REMOVE
+    return attached
+
+
+def derive_touch_links(
+    srdf: Optional[Union[str, ET.Element]],
+    end_effector_link: str,
+    gripper_group: str = "",
+    explicit: Optional[Sequence[str]] = None,
+    logger_name: str = "moveit",
+) -> List[str]:
+    """Resolve the links allowed to stay in contact with a grasped object.
+
+    CAUTION: Once an object is attached it is in permanent contact with the gripper, and
+    any gripper link missing from this list makes every subsequent motion start in
+    collision.
+
+    Resolution order:
+
+    1. An explicitly configured list is used as given.
+    2. ``<link>`` entries of the SRDF gripper group, the declarative source.
+    3. The SRDF end effector's parent link plus its ``Adjacent``
+       ``disable_collisions`` partners. This is a heuristic: it finds jaws
+       attached directly to the parent link but misses links one joint
+       further out, so a joint-only gripper group is better served by adding
+       its links to the SRDF or to the config.
+    4. The end effector link alone, with a warning.
+
+    :param srdf: SRDF document content, or an already parsed XML root
+    :param end_effector_link: Configured end-effector link, the last resort
+    :param gripper_group: SRDF group of the gripper, used to pick its links
+        and its end effector entry
+    :param explicit: Configured touch links, trusted as given
+    :param logger_name: Name of the logger to report the fallback on
+    :returns: Link names, deduplicated, order preserved
+    """
+    if explicit:
+        return list(dict.fromkeys(explicit))
+
+    root = None
+    if srdf is not None:
+        try:
+            root = ET.fromstring(srdf) if isinstance(srdf, str) else srdf
+        except ET.ParseError as e:
+            get_logger(logger_name).warning(f"Could not parse the robot SRDF: {e}")
+
+    if root is not None:
+        if gripper_group:
+            links = [
+                link.get("name")
+                for group in root.iter("group")
+                if group.get("name") == gripper_group
+                for link in group.iter("link")
+                if link.get("name")
+            ]
+            if links:
+                return list(dict.fromkeys(links))
+
+        parent = next(
+            (
+                eef.get("parent_link")
+                for eef in root.iter("end_effector")
+                if not gripper_group or eef.get("group") == gripper_group
+            ),
+            None,
+        )
+        if parent:
+            # NOTE:Only pairs disabled for being physically connected say anything
+            # about the gripper's shape; "Never" pairs span the whole robot
+            partners = []
+            for pair in root.iter("disable_collisions"):
+                if (pair.get("reason") or "").lower() != "adjacent":
+                    continue
+                link1, link2 = pair.get("link1"), pair.get("link2")
+                if parent == link1 and link2:
+                    partners.append(link2)
+                elif parent == link2 and link1:
+                    partners.append(link1)
+            if partners:
+                return list(dict.fromkeys([parent, *partners]))
+
+    get_logger(logger_name).warning(
+        "Could not resolve the gripper's links from the SRDF, so only "
+        f"'{end_effector_link}' may touch an attached object. If grasping "
+        "fails on a collision between gripper and object, list the gripper "
+        "links in the SRDF gripper group or in the component config."
+    )
+    return [end_effector_link]

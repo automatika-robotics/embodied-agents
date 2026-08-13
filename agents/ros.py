@@ -8,6 +8,8 @@ from importlib.util import find_spec
 from rclpy.logging import get_logger
 
 from sensor_msgs.msg import JointState as JointStateROS
+from geometry_msgs.msg import Pose as ROSPose
+from shape_msgs.msg import SolidPrimitive
 
 # FROM SUGARCOAT
 from ros_sugar.supported_types import (
@@ -144,6 +146,8 @@ __all__ = [
     "GetParameters",
     "run_external_processor",
     "read_camera_info",
+    "ROSPose",
+    "SolidPrimitive",
     "ServiceClientConfig",
     "ServiceClientHandler",
     "ActionClientConfig",
