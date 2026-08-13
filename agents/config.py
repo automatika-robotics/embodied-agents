@@ -759,6 +759,13 @@ class VisionConfig(ModelComponentConfig):
     min_depth_validity: float = field(
         default=0.1, validator=base_validators.in_range(min_value=0.0, max_value=1.0)
     )
+    # serialized topics
+    _depth_topic: Optional[Topic] = field(
+        default=None, converter=_get_optional_topic, alias="_depth_topic"
+    )
+    _camera_info_topic: Optional[Topic] = field(
+        default=None, converter=_get_optional_topic, alias="_camera_info_topic"
+    )
 
     @max_depth.validator
     def _check_depth_range(self, _, value):

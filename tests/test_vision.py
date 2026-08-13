@@ -731,6 +731,56 @@ class TestLiftingFromRGBD(_SyntheticCamera):
         assert center[2] == pytest.approx(self.PATCH_DEPTH_M, abs=0.02)
 
 
+class TestSerializedRelaunch:
+    """The launch executable reconstructs a component in a child process from
+    its serialized config, inputs and outputs — it knows nothing of Vision's
+    `depth` and `camera_info` parameters. They ride the config instead."""
+
+    def test_3d_vision_survives_the_executable_reconstruction(
+        self, rclpy_init, mock_model_client
+    ):
+        import json
+
+        from agents.ros import QoSConfig
+
+        type(mock_model_client).model_type = PropertyMock(return_value="VisionModel")
+        original = Vision(
+            inputs=[Topic(name="image", msg_type="Image")],
+            outputs=[Topic(name="d3", msg_type="Detections3D")],
+            depth=Topic(name="depth", msg_type="Image"),
+            camera_info=Topic(name="cam_info", msg_type="CameraInfo"),
+            model_client=mock_model_client,
+            config=VisionConfig(detections_frame="base_link"),
+            component_name="v",
+        )
+
+        # what scripts/executable does in the child process: config from its
+        # JSON, topics from theirs, and no depth/camera_info parameters
+        def _topics(serialized):
+            topics = []
+            for entry in json.loads(serialized):
+                data = json.loads(entry)
+                data["qos_profile"] = QoSConfig(**data.get("qos_profile", {}))
+                data["additional_types"] = []
+                topics.append(Topic(**data))
+            return topics
+
+        rebuilt = Vision(
+            inputs=_topics(original._inputs_json),
+            outputs=_topics(original._outputs_json),
+            model_client=mock_model_client,
+            trigger=1.0,
+            config=VisionConfig(**json.loads(original.config.to_json())),
+            component_name="v",
+        )
+
+        assert rebuilt._aux_inputs == original._aux_inputs
+        assert rebuilt._lift_camera == original._lift_camera == "image"
+        assert rebuilt._inference_set == original._inference_set
+        assert rebuilt.depth_topic.name == "depth"
+        assert rebuilt.camera_info_topic.name == "cam_info"
+
+
 class TestPublishRouting:
     """Inference returns one set of detections per image; each output topic
     gets the shape it can carry."""

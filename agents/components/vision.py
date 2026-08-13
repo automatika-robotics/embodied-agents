@@ -113,6 +113,10 @@ class Vision(ModelComponent):
         # Raw image captures
         self._images: List[Union[np.ndarray, ROSImage, ROSCompressedImage]] = []
 
+        depth = depth or self.config._depth_topic
+        camera_info = camera_info or self.config._camera_info_topic
+        self.config._depth_topic = depth
+        self.config._camera_info_topic = camera_info
         self.depth_topic, self.camera_info_topic = depth, camera_info
 
         # Reject camera info if present in inputs
