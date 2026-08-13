@@ -2117,3 +2117,125 @@ class TestPickSequence:
         component.main_action_callback(handle)
 
         handle.canceled.assert_called_once()
+
+
+class TestPlaceSequence:
+    """The place mode: approach, descend, release, detach, retreat."""
+
+    @pytest.fixture(autouse=True)
+    def _needs_moveit_msgs(self):
+        pytest.importorskip("moveit_msgs.msg")
+
+    @pytest.fixture
+    def component(self, rclpy_init):
+        from agents.components import MoveIt
+        from agents.config import MoveItConfig
+
+        comp = MoveIt(
+            config=MoveItConfig(
+                arm_group_name="arm",
+                gripper_group_name="gripper",
+                end_effector_link="hand",
+                pose_reference_frame="base",
+                approach_clearance=0.1,
+                touch_links=["hand", "jaw"],
+            ),
+            component_name="m_place",
+        )
+        comp.get_logger = MagicMock()
+        comp.health_status = MagicMock()
+        comp._named_targets = {
+            "gripper": {"open": {"jaw": 1.0}, "close": {"jaw": 0.0}}
+        }
+        comp._move_client = TestGoalExecution._client()
+        comp._exec_client = TestGoalExecution._client()
+        comp._gripper_client = TestGoalExecution._client()
+        comp._cartesian_client = MagicMock()
+        comp._cartesian_client.send_request.return_value = SimpleNamespace(
+            fraction=1.0, solution=MagicMock(), error_code=SimpleNamespace(val=1)
+        )
+        comp._apply_scene_client = MagicMock()
+        comp._apply_scene_client.send_request.return_value = SimpleNamespace(
+            success=True
+        )
+        comp._scene_objects["det__mug_0"] = {
+            "source": "detection",
+            "last_seen": 0.0,
+            "center": (0.4, 0.0, 0.05),
+            "size": (0.06, 0.06, 0.1),
+            "attached": "hand",
+        }
+        return comp
+
+    @staticmethod
+    def _place_goal(x=0.6, y=0.1, z=0.08):
+        from automatika_embodied_agents.action import MoveManipulator
+
+        goal = MoveManipulator.Goal()
+        goal.mode = "place"
+        position = goal.target_pose.pose.position
+        position.x, position.y, position.z = x, y, z
+        return goal
+
+    def test_place_runs_the_whole_sequence(self, component):
+        handle = TestGoalExecution._goal_handle(self._place_goal())
+
+        result = component.main_action_callback(handle)
+
+        assert result.success and "det__mug_0" in result.message
+        handle.succeed.assert_called_once()
+        assert TestPickSequence._states(handle) == [
+            "PRE_PLACE", "DESCEND", "RELEASE", "DETACH", "RETREAT",
+        ]
+        # approach and retreat above the release point: z 0.08 + half
+        # height 0.05 + clearance 0.1
+        heights = [
+            call[0][0].request.goal_constraints[0]
+            .position_constraints[0].constraint_region.primitive_poses[0].position.z
+            for call in component._move_client.send_request.call_args_list
+        ]
+        assert heights == [pytest.approx(0.23), pytest.approx(0.23)]
+        # the descent is contact permitted, down to the release center
+        request = component._cartesian_client.send_request.call_args[0][0]
+        assert request.avoid_collisions is False
+        assert request.waypoints[0].position.z == pytest.approx(0.08)
+        # released: no longer attached, and the scene records the new spot
+        entry = component._scene_objects["det__mug_0"]
+        assert "attached" not in entry
+        assert entry["center"] == (0.6, 0.1, 0.08)
+
+    def test_place_with_nothing_attached_aborts(self, component):
+        del component._scene_objects["det__mug_0"]["attached"]
+        handle = TestGoalExecution._goal_handle(self._place_goal())
+
+        result = component.main_action_callback(handle)
+
+        assert not result.success and "Nothing is attached" in result.message
+        handle.abort.assert_called_once()
+        component._move_client.send_request.assert_not_called()
+
+    def test_a_failed_approach_keeps_the_object_attached(self, component):
+        from moveit_msgs.msg import MoveItErrorCodes
+
+        component._move_client = TestGoalExecution._client(
+            error_code=MoveItErrorCodes.PLANNING_FAILED
+        )
+        handle = TestGoalExecution._goal_handle(self._place_goal())
+
+        result = component.main_action_callback(handle)
+
+        assert not result.success
+        assert result.message.startswith("Pre-place:")
+        entry = component._scene_objects["det__mug_0"]
+        assert entry["attached"] == "hand" and entry["center"] == (0.4, 0.0, 0.05)
+
+    def test_a_partial_descent_aborts_before_release(self, component):
+        component._cartesian_client.send_request.return_value = SimpleNamespace(
+            fraction=0.3, solution=MagicMock(), error_code=SimpleNamespace(val=1)
+        )
+        handle = TestGoalExecution._goal_handle(self._place_goal())
+
+        result = component.main_action_callback(handle)
+
+        assert not result.success and result.message.startswith("Descent:")
+        assert component._scene_objects["det__mug_0"]["attached"] == "hand"

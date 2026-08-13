@@ -36,12 +36,14 @@ class MoveIt(Component):
     """
     This component provides classical, collision aware manipulation by driving a running [MoveIt 2](https://moveit.ai) `move_group` node.
 
-    The component runs as a ROS2 Action Server exposing the `<component_name>/manipulate_with_moveit` action, which takes a motion target and plans and executes a path to it. Four kinds of targets are supported, selected with the goal's `mode` field (or inferred from the fields that are populated):
+    The component runs as a ROS2 Action Server exposing the `<component_name>/manipulate_with_moveit` action, which takes a motion target and plans and executes a path to it. Six kinds of targets are supported, selected with the goal's `mode` field (or inferred from the fields that are populated):
 
     - **pose**: an end-effector pose, planned with the configured planner and reached within the configured position/orientation tolerances.
     - **joints**: explicit joint positions.
     - **named**: a named target defined in the robot's SRDF (e.g. "home", "ready"), resolved to joint positions by reading the SRDF from the running `move_group` node.
     - **cartesian**: a straight-line end-effector path through a list of waypoints, computed with MoveIt's Cartesian path service and executed only if enough of the path is achievable (see `cartesian_fraction_threshold`).
+    - **pick**: a full grasp sequence on a planning scene object, named with `target_object` (a scene id or detection label) or located by `target_pose`: approach above it, open the gripper, descend, close, attach the object and lift it.
+    - **place**: the inverse sequence for the currently attached object: approach above `target_pose`, descend, open the gripper, detach (the object stays in the scene where released) and retreat.
 
     Gripper control is available as component actions (`open_gripper`, `close_gripper`, `set_gripper`), either through the gripper planning group or through a gripper controller, based on the `gripper_mode` config parameter. All component actions and the action server itself are discoverable as tools by the Cortex component, making the manipulator directly usable by LLM agents.
 
@@ -507,6 +509,10 @@ class MoveIt(Component):
 
             if mode is MoveMode.PICK:
                 outcome = self._execute_pick(goal, goal_handle, result, deadline)
+                return self._finish_sequence(outcome, goal_handle, result)
+
+            if mode is MoveMode.PLACE:
+                outcome = self._execute_place(goal, goal_handle, result, deadline)
                 return self._finish_sequence(outcome, goal_handle, result)
 
             if mode is MoveMode.CARTESIAN:
@@ -1319,6 +1325,98 @@ class MoveIt(Component):
             return outcome
 
         result.message = f"Picked '{object_id}'"
+        return "ok"
+
+    def _execute_place(
+        self, goal: Any, goal_handle, result: Any, deadline: float
+    ) -> str:
+        """Set the held object down at the goal pose and release it.
+
+        The inverse of pick: approach above the release pose (planned with
+        the held object still attached), descend straight down (contact
+        permitted), open, detach and retreat back up. The object stays in the
+        scene where it was released.
+
+        :returns: Outcome of the last step, for _finish_sequence
+        :raises ValueError: When nothing is attached
+        """
+        with self._scene_lock:
+            held = next(
+                (
+                    (object_id, entry["size"])
+                    for object_id, entry in self._scene_objects.items()
+                    if entry.get("attached")
+                ),
+                None,
+            )
+        if not held:
+            raise ValueError(
+                "Nothing is attached to the gripper: pick an object before placing"
+            )
+        object_id, size = held
+
+        # target_pose gives where the object's center ends up and the gripper
+        # holds the object at its center
+        position = goal.target_pose.pose.position
+        orientation = goal.target_pose.pose.orientation
+        approach_z = position.z + size[2] / 2 + self.config.approach_clearance
+        self.get_logger().info(
+            f"Placing '{object_id}' at "
+            f"({position.x:.3f}, {position.y:.3f}, {position.z:.3f})"
+        )
+
+        self._publish_state(goal_handle, "PRE_PLACE")
+        outcome, message = self._sequence_motion(
+            self._move_client,
+            self._pose_motion_goal(position.x, position.y, approach_z, orientation),
+            goal_handle,
+            deadline,
+        )
+        if outcome != "ok":
+            result.message = f"Pre-place: {message}"
+            return outcome
+
+        self._publish_state(goal_handle, "DESCEND")
+        outcome, message = self._sequence_descent(
+            position.x, position.y, position.z, orientation, goal_handle, deadline
+        )
+        if outcome != "ok":
+            result.message = f"Descent: {message}"
+            return outcome
+
+        self._publish_state(goal_handle, "RELEASE")
+        ok, message = self._command_gripper(
+            named_target=self.config.gripper_open_target,
+            position=self.config.gripper_open_position,
+            description="open",
+        )
+        if not ok:
+            result.message = message
+            return "aborted"
+
+        self._publish_state(goal_handle, "DETACH")
+        ok, message = self._do_detach(object_id)
+        if not ok:
+            result.message = message
+            return "aborted"
+        # The object now sits where it was released, not where it was picked
+        with self._scene_lock:
+            if entry := self._scene_objects.get(object_id):
+                entry["center"] = (position.x, position.y, position.z)
+                entry["last_seen"] = time.time()
+
+        self._publish_state(goal_handle, "RETREAT")
+        outcome, message = self._sequence_motion(
+            self._move_client,
+            self._pose_motion_goal(position.x, position.y, approach_z, orientation),
+            goal_handle,
+            deadline,
+        )
+        if outcome != "ok":
+            result.message = f"Retreat: {message}"
+            return outcome
+
+        result.message = f"Placed '{object_id}'"
         return "ok"
 
     # =========================================================================
