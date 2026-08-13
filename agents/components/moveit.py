@@ -151,6 +151,10 @@ class MoveIt(Component):
         self._scene_objects: Dict[str, Dict[str, Any]] = {}
         self._scene_lock = threading.Lock()
 
+        # Continuous mode refresh timer and message last applied
+        self._scene_timer = None
+        self._last_scene_message: Optional[Any] = None
+
     # =========================================================================
     # LIFECYCLE
     # =========================================================================
@@ -285,6 +289,29 @@ class MoveIt(Component):
         """Activate component and check the configured planner against move_group"""
         super().custom_on_activate()
         self._validate_planner_config()
+
+        if self.config.scene_update_mode != "manual" and not self._detections_topic:
+            self.get_logger().warning(
+                f"scene_update_mode is '{self.config.scene_update_mode}' but the "
+                "component has no Detections3D input topic to update the "
+                "planning scene from"
+            )
+        elif self.config.scene_update_mode == "continuous":
+            from ..ros import MutuallyExclusiveCallbackGroup
+
+            # Create a timer for updating the scene
+            self._scene_timer = self.create_timer(
+                1.0 / self.config.scene_update_rate,
+                self._scene_refresh_tick,
+                callback_group=MutuallyExclusiveCallbackGroup(),
+            )
+
+    def custom_on_deactivate(self):
+        """Stop the scene refresh before the clients it uses are destroyed"""
+        if self._scene_timer:
+            self.destroy_timer(self._scene_timer)
+            self._scene_timer = None
+        super().custom_on_deactivate()
 
     def _execution_step(self, *_, **__):
         """NOT USED. The component is triggered through its action server"""
@@ -472,6 +499,15 @@ class MoveIt(Component):
         try:
             mode = MoveMode.from_goal(goal)
             self.get_logger().info(f"Received a '{mode.value}' motion goal")
+
+            if self.config.scene_update_mode == "on_goal" and self._detections_topic:
+                feedback = MoveManipulator.Feedback()
+                feedback.state = "UPDATING_SCENE"
+                goal_handle.publish_feedback(feedback)
+                # NOTE: The scene is advisory. A failure here doesnt abort the mission.
+                # It degrades to planning against the previous scene.
+                scene_status = self._refresh_scene_from_detections()
+                self.get_logger().info(scene_status)
 
             if mode is MoveMode.CARTESIAN:
                 trajectory = self._plan_cartesian_path(goal, result)
@@ -1247,3 +1283,152 @@ class MoveIt(Component):
         with self._scene_lock:
             self._scene_objects.pop(object_id, None)
         return f"Detached '{object_id}' and removed it from the scene"
+
+    def _refresh_scene_from_detections(self, message: Optional[Any] = None) -> str:
+        """Push detections into the planning scene as one diff.
+
+        Objects the detector stopped reporting are kept for
+        `scene_object_ttl` seconds before a refresh removes them, so
+        detection dropouts do not flicker. Attached objects are never evicted
+        or re-added.
+
+        :param message: Detections to refresh from, when the caller has
+            already read them. Default reads the latest received message
+        :returns: What happened, for the caller and for tool use
+        """
+        from ..utils.moveit import (
+            build_remove_object,
+            collision_objects_from_detections,
+        )
+
+        if message is None:
+            if not self._detections_topic:
+                return (
+                    "No detections input is connected to this component, so "
+                    "there is nothing to update the planning scene from"
+                )
+            callback = self.callbacks.get(self._detections_topic.name)
+            # the callback's default output is a text summary for prompts, get
+            # the message itself for the boxes
+            message = callback.get_output(get_msg=True) if callback else None
+            if message is None:
+                return "No detections have been received yet"
+
+        now = time.time()
+        objects, stale = self._partition_scene_changes(
+            collision_objects_from_detections(
+                message,
+                min_thickness=self.config.min_object_thickness,
+                padding=self.config.object_padding,
+            ),
+            now,
+        )
+
+        changes = objects + [build_remove_object(object_id) for object_id in stale]
+        if not changes:
+            return "The planning scene is already up to date"
+        if not self._apply_scene(changes):
+            return "Could not update the planning scene"
+
+        added = []
+        with self._scene_lock:
+            for obj in objects:
+                # allocate only on first sighting, bump the rest in place
+                entry = self._scene_objects.setdefault(
+                    obj.id, {"source": "detection", "last_seen": now}
+                )
+                entry["last_seen"] = now
+                added.append(obj.id)
+            for object_id in stale:
+                self._scene_objects.pop(object_id, None)
+
+        summary = f"Planning scene updated with {len(added)} detected object(s)"
+        if added:
+            summary += f": {', '.join(added)}"
+        if stale:
+            summary += f"; removed {len(stale)} stale object(s)"
+        return summary
+
+    def _partition_scene_changes(
+        self, objects: List[Any], now: float
+    ) -> Tuple[List[Any], List[str]]:
+        """Split a refresh into objects to add and tracked ids gone stale.
+
+        Attached objects are exempt from both sides, the rest expire by
+        their last sighting.
+
+        :param objects: Collision objects built from the latest detections
+        :param now: Refresh time, for the TTL comparison
+        :returns: (objects to add, tracked ids to remove)
+        """
+        seen = {obj.id for obj in objects}
+        attached, stale = set(), []
+        with self._scene_lock:
+            for object_id, entry in self._scene_objects.items():
+                if entry.get("attached"):
+                    attached.add(object_id)
+                elif (
+                    entry["source"] == "detection"
+                    and object_id not in seen
+                    and now - entry["last_seen"] > self.config.scene_object_ttl
+                ):
+                    stale.append(object_id)
+        if attached:
+            objects = [obj for obj in objects if obj.id not in attached]
+        return objects, stale
+
+    def _scene_refresh_tick(self):
+        """Continuous mode refresh, skipping ticks that would change nothing.
+
+        A tick refreshes only when a detections message arrived since the
+        last applied one, or a tracked object has outlived its TTL and is due
+        for removal. With a source
+        slower than the timer (e.g. VLM), objects from the
+        last message are re-applied about once per TTL period, keeping the
+        snapshot alive rather than evicting a scene that was simply not
+        re-observed.
+        """
+        callback = self.callbacks.get(self._detections_topic.name)
+        # the callback's default output is a text summary for prompts, get
+        # the message itself for the boxes
+        message = callback.get_output(get_msg=True) if callback else None
+        if message is None:
+            return
+
+        now = time.time()
+        if message is self._last_scene_message and not self._has_stale_objects(now):
+            # Dont refresh
+            return
+
+        self._last_scene_message = message
+        result = self._refresh_scene_from_detections(message)
+        self.get_logger().debug(result)
+
+    def _has_stale_objects(self, now: float) -> bool:
+        """Whether any tracked detection has outlived the TTL"""
+        with self._scene_lock:
+            return any(
+                entry["source"] == "detection"
+                and not entry.get("attached")
+                and now - entry["last_seen"] > self.config.scene_object_ttl
+                for entry in self._scene_objects.values()
+            )
+
+    @component_action(
+        description={
+            "type": "function",
+            "function": {
+                "name": "update_planning_scene",
+                "description": "Update the motion planning scene from the latest camera detections, so that the next motions plan around the objects currently seen. Call before planning a motion in a scene that may have changed.",
+                "parameters": {"type": "object", "properties": {}, "required": []},
+            },
+        },
+        active=True,
+        phase=ActionPhase.EXECUTION,
+    )
+    def update_planning_scene(self) -> str:
+        """Update the planning scene from the latest received detections.
+
+        :returns: What happened, for the caller and for tool use
+        """
+        return self._refresh_scene_from_detections()

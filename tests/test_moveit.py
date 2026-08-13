@@ -1514,3 +1514,341 @@ class TestAttachDetach:
         ]
         message = component.detach_object.__wrapped__(component, "o", remove=True)
         assert "Detached" in message and "could not remove" in message
+
+
+class TestSceneRefresh:
+    """Detections pushed into the planning scene, with TTL bookkeeping."""
+
+    @pytest.fixture(autouse=True)
+    def _needs_messages(self):
+        pytest.importorskip("moveit_msgs.msg")
+        pytest.importorskip("automatika_embodied_agents.msg")
+
+    @pytest.fixture
+    def component(self, rclpy_init):
+        from agents.components import MoveIt
+        from agents.config import MoveItConfig
+        from agents.ros import Topic
+
+        comp = MoveIt(
+            config=MoveItConfig(arm_group_name="arm", scene_object_ttl=5.0),
+            component_name="m_refresh",
+            inputs=[Topic(name="d3", msg_type="Detections3D")],
+        )
+        comp.get_logger = MagicMock()
+        comp._apply_scene_client = MagicMock()
+        comp._apply_scene_client.send_request.return_value = SimpleNamespace(
+            success=True
+        )
+        return comp
+
+    @staticmethod
+    def _wire(component, message):
+        callback = MagicMock()
+        callback.get_output.return_value = message
+        component.callbacks = {"d3": callback}
+        return callback
+
+    @staticmethod
+    def _applied_scene(component):
+        request = component._apply_scene_client.send_request.call_args[0][0]
+        return request.scene
+
+    def _detections(self, entries):
+        return TestDetectionObjects._detections(entries)
+
+    def test_detections_become_tracked_scene_objects(self, component):
+        from moveit_msgs.msg import CollisionObject
+
+        callback = self._wire(
+            component,
+            self._detections([
+                ("orange", 0.9, (0.3, 0.0, 0.05), (0.06, 0.06, 0.06)),
+                ("bowl", 0.7, (0.5, 0.1, 0.05), (0.2, 0.2, 0.1)),
+            ]),
+        )
+        message = component.update_planning_scene.__wrapped__(component)
+
+        # the message is requested, not the callback's prompt-context default
+        assert callback.get_output.call_args.kwargs.get("get_msg") is True
+        scene = self._applied_scene(component)
+        by_id = {o.id: o for o in scene.world.collision_objects}
+        assert set(by_id) == {"det__orange_0", "det__bowl_0"}
+        assert all(
+            o.operation == CollisionObject.ADD for o in by_id.values()
+        )
+        assert component._scene_objects["det__orange_0"]["source"] == "detection"
+        assert "2 detected object(s)" in message
+
+    def test_without_a_detections_input_it_says_so(self, rclpy_init):
+        from agents.components import MoveIt
+        from agents.config import MoveItConfig
+
+        comp = MoveIt(
+            config=MoveItConfig(arm_group_name="arm"),
+            component_name="m_refresh_none",
+        )
+        assert "No detections input" in comp.update_planning_scene.__wrapped__(comp)
+
+    def test_before_any_message_it_says_so(self, component):
+        self._wire(component, None)
+        assert "No detections have been received" in (
+            component.update_planning_scene.__wrapped__(component)
+        )
+
+    def test_stale_objects_are_removed_in_the_same_diff(self, component):
+        from moveit_msgs.msg import CollisionObject
+
+        import time as time_module
+
+        component._scene_objects["det__cup_0"] = {
+            "source": "detection",
+            "last_seen": time_module.time() - 10.0,  # past the 5 s TTL
+        }
+        self._wire(
+            component,
+            self._detections([("orange", 0.9, (0.3, 0, 0), (0.06, 0.06, 0.06))]),
+        )
+        message = component.update_planning_scene.__wrapped__(component)
+
+        scene = self._applied_scene(component)
+        ops = {o.id: o.operation for o in scene.world.collision_objects}
+        assert ops["det__orange_0"] == CollisionObject.ADD
+        assert ops["det__cup_0"] == CollisionObject.REMOVE
+        assert "det__cup_0" not in component._scene_objects
+        assert "removed 1 stale" in message
+
+    def test_recently_seen_objects_survive_a_dropout(self, component):
+        component._scene_objects["det__cup_0"] = {
+            "source": "detection",
+            "last_seen": __import__("time").time() - 1.0,  # within the TTL
+        }
+        self._wire(
+            component,
+            self._detections([("orange", 0.9, (0.3, 0, 0), (0.06, 0.06, 0.06))]),
+        )
+        component.update_planning_scene.__wrapped__(component)
+
+        ids = {o.id for o in self._applied_scene(component).world.collision_objects}
+        assert "det__cup_0" not in ids  # no REMOVE sent
+        assert "det__cup_0" in component._scene_objects
+
+    def test_manual_objects_are_never_ttl_evicted(self, component):
+        component._scene_objects["table"] = {
+            "source": "manual",
+            "last_seen": __import__("time").time() - 100.0,
+        }
+        self._wire(
+            component,
+            self._detections([("orange", 0.9, (0.3, 0, 0), (0.06, 0.06, 0.06))]),
+        )
+        component.update_planning_scene.__wrapped__(component)
+
+        ids = {o.id for o in self._applied_scene(component).world.collision_objects}
+        assert "table" not in ids
+        assert "table" in component._scene_objects
+
+    def test_attached_objects_are_neither_evicted_nor_readded(self, component):
+        """A grasped object leaves the camera's view the moment the gripper
+        closes; evicting it or re-adding a world copy would both be wrong."""
+        component._scene_objects["det__orange_0"] = {
+            "source": "detection",
+            "last_seen": __import__("time").time() - 100.0,
+            "attached": "hand",
+        }
+        # the detector reports a new orange, which ranks 0 again
+        self._wire(
+            component,
+            self._detections([("orange", 0.9, (0.4, 0, 0), (0.06, 0.06, 0.06))]),
+        )
+        message = component.update_planning_scene.__wrapped__(component)
+
+        assert "already up to date" in message
+        component._apply_scene_client.send_request.assert_not_called()
+        assert component._scene_objects["det__orange_0"]["attached"] == "hand"
+
+    def test_nothing_seen_and_nothing_stale_is_a_no_op(self, component):
+        self._wire(component, self._detections([]))
+        message = component.update_planning_scene.__wrapped__(component)
+        component._apply_scene_client.send_request.assert_not_called()
+        assert "already up to date" in message
+
+    def test_apply_failure_leaves_bookkeeping_untouched(self, component):
+        component._apply_scene_client.send_request.return_value = SimpleNamespace(
+            success=False
+        )
+        self._wire(
+            component,
+            self._detections([("orange", 0.9, (0.3, 0, 0), (0.06, 0.06, 0.06))]),
+        )
+        message = component.update_planning_scene.__wrapped__(component)
+        assert "Could not" in message
+        assert component._scene_objects == {}
+
+
+class TestSceneUpdateModes:
+    """When detections reach the scene without being asked for explicitly."""
+
+    @pytest.fixture(autouse=True)
+    def _needs_moveit_msgs(self):
+        pytest.importorskip("moveit_msgs.msg")
+
+    @pytest.fixture
+    def component(self, rclpy_init):
+        from agents.components import MoveIt
+        from agents.config import MoveItConfig
+        from agents.ros import Topic
+
+        comp = MoveIt(
+            config=MoveItConfig(arm_group_name="panda_arm"),
+            component_name="m_modes",
+            inputs=[Topic(name="d3", msg_type="Detections3D")],
+        )
+        comp.get_logger = MagicMock()
+        comp.health_status = MagicMock()
+        return comp
+
+    def test_on_goal_refreshes_before_planning(self, component):
+        component.config.scene_update_mode = "on_goal"
+        component._refresh_scene_from_detections = MagicMock(
+            return_value="Planning scene updated with 1 detected object(s)"
+        )
+        component._move_client = TestGoalExecution._client()
+        handle = TestGoalExecution._goal_handle(TestGoalExecution._joint_goal())
+
+        result = component.main_action_callback(handle)
+
+        component._refresh_scene_from_detections.assert_called_once()
+        # the refresh is announced through the goal's feedback
+        feedback = handle.publish_feedback.call_args_list[0][0][0]
+        assert feedback.state == "UPDATING_SCENE"
+        assert result.success
+
+    def test_on_goal_scene_failure_never_aborts_the_motion(self, component):
+        component.config.scene_update_mode = "on_goal"
+        component._refresh_scene_from_detections = MagicMock(
+            return_value="Could not update the planning scene"
+        )
+        component._move_client = TestGoalExecution._client()
+        handle = TestGoalExecution._goal_handle(TestGoalExecution._joint_goal())
+
+        result = component.main_action_callback(handle)
+
+        assert result.success  # planned against the previous scene
+
+    def test_manual_mode_does_not_refresh_on_goals(self, component):
+        component._refresh_scene_from_detections = MagicMock()
+        component._move_client = TestGoalExecution._client()
+        handle = TestGoalExecution._goal_handle(TestGoalExecution._joint_goal())
+
+        component.main_action_callback(handle)
+
+        component._refresh_scene_from_detections.assert_not_called()
+
+    def test_continuous_mode_starts_a_timer_on_activation(
+        self, component, monkeypatch
+    ):
+        component.config.scene_update_mode = "continuous"
+        component.config.scene_update_rate = 2.0
+        component.create_timer = MagicMock()
+        monkeypatch.setattr(
+            "ros_sugar.core.component.BaseComponent.custom_on_activate",
+            lambda _: None,
+        )
+
+        component.custom_on_activate()
+
+        period = component.create_timer.call_args[0][0]
+        assert period == pytest.approx(0.5)
+        assert component._scene_timer is component.create_timer.return_value
+
+    def test_modes_without_a_detections_input_warn_instead(
+        self, rclpy_init, monkeypatch
+    ):
+        from agents.components import MoveIt
+        from agents.config import MoveItConfig
+
+        comp = MoveIt(
+            config=MoveItConfig(
+                arm_group_name="arm", scene_update_mode="continuous"
+            ),
+            component_name="m_modes_warn",
+        )
+        comp.get_logger = MagicMock()
+        comp.create_timer = MagicMock()
+        monkeypatch.setattr(
+            "ros_sugar.core.component.BaseComponent.custom_on_activate",
+            lambda _: None,
+        )
+
+        comp.custom_on_activate()
+
+        comp.create_timer.assert_not_called()
+        assert "no Detections3D input" in comp.get_logger().warning.call_args[0][0]
+
+    def test_deactivation_stops_the_timer(self, component, monkeypatch):
+        component._scene_timer = MagicMock()
+        component.destroy_timer = MagicMock()
+        monkeypatch.setattr(
+            "ros_sugar.core.component.BaseComponent.custom_on_deactivate",
+            lambda _: None,
+        )
+
+        component.custom_on_deactivate()
+
+        component.destroy_timer.assert_called_once()
+        assert component._scene_timer is None
+
+    # ------------------------------------------------------------------
+    # The continuous tick's skip guard
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _wire_message(component, message):
+        callback = MagicMock()
+        callback.get_output.return_value = message
+        component.callbacks = {"d3": callback}
+
+    def test_tick_refreshes_on_a_new_message(self, component):
+        component._refresh_scene_from_detections = MagicMock(return_value="ok")
+        self._wire_message(component, object())
+
+        component._scene_refresh_tick()
+
+        component._refresh_scene_from_detections.assert_called_once()
+
+    def test_tick_skips_an_already_applied_message(self, component):
+        component._refresh_scene_from_detections = MagicMock(return_value="ok")
+        message = object()
+        self._wire_message(component, message)
+
+        component._scene_refresh_tick()
+        component._scene_refresh_tick()
+
+        assert component._refresh_scene_from_detections.call_count == 1
+
+    def test_tick_refreshes_a_stale_scene_even_without_a_new_message(
+        self, component
+    ):
+        """Objects due for eviction get their removal without waiting for the
+        detector to publish again."""
+        component._refresh_scene_from_detections = MagicMock(return_value="ok")
+        message = object()
+        self._wire_message(component, message)
+        component._scene_refresh_tick()
+
+        component._scene_objects["det__cup_0"] = {
+            "source": "detection",
+            "last_seen": __import__("time").time() - 100.0,
+        }
+        component._scene_refresh_tick()
+
+        assert component._refresh_scene_from_detections.call_count == 2
+
+    def test_tick_without_any_message_does_nothing(self, component):
+        component._refresh_scene_from_detections = MagicMock()
+        self._wire_message(component, None)
+
+        component._scene_refresh_tick()
+
+        component._refresh_scene_from_detections.assert_not_called()
