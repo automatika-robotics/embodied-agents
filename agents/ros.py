@@ -64,6 +64,7 @@ from .launcher import Launcher
 # SUGATCOAT INTERFACES
 from automatika_ros_sugar.srv import ExecuteMethod
 from rcl_interfaces.srv import GetParameters
+from std_srvs.srv import Empty
 
 # AGENTS TYPES
 from automatika_embodied_agents.msg import (
@@ -146,6 +147,7 @@ __all__ = [
     "GetParameters",
     "run_external_processor",
     "read_camera_info",
+    "Empty",
     "ROSPose",
     "SolidPrimitive",
     "ServiceClientConfig",

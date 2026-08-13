@@ -1138,3 +1138,71 @@ class TestSceneInputs:
             config_file=None,
         )
         assert component._detections_topic.name == "detections_3d"
+
+
+class TestSceneServiceClients:
+    """The move_group planning scene services the component connects to."""
+
+    @pytest.fixture(autouse=True)
+    def _needs_moveit_msgs(self):
+        pytest.importorskip("moveit_msgs.msg")
+
+    def test_scene_clients_wire_to_the_move_group_services(
+        self, rclpy_init, monkeypatch
+    ):
+        from moveit_msgs.srv import ApplyPlanningScene, GetPlanningScene
+        from std_srvs.srv import Empty
+
+        import agents.components.moveit as moveit_module
+        from agents.components import MoveIt
+        from agents.config import MoveItConfig
+
+        component = MoveIt(
+            config=MoveItConfig(arm_group_name="arm", move_group_namespace="/bot"),
+            component_name="m_scene_clients",
+        )
+
+        created = []
+
+        def _fake_handler(_component, config):
+            created.append(config)
+            return MagicMock(config=config)
+
+        monkeypatch.setattr(moveit_module, "ServiceClientHandler", _fake_handler)
+        monkeypatch.setattr(
+            "agents.components.component_base.Component.create_all_service_clients",
+            lambda _: None,
+        )
+
+        component.create_all_service_clients()
+
+        by_name = {config.name: config.srv_type for config in created}
+        assert by_name["/bot/apply_planning_scene"] is ApplyPlanningScene
+        assert by_name["/bot/get_planning_scene"] is GetPlanningScene
+        assert by_name["/bot/clear_octomap"] is Empty
+        assert component._apply_scene_client is not None
+        assert component._get_scene_client is not None
+        assert component._clear_octomap_client is not None
+
+    def test_destroy_resets_the_scene_clients(self, rclpy_init, monkeypatch):
+        from agents.components import MoveIt
+        from agents.config import MoveItConfig
+
+        component = MoveIt(
+            config=MoveItConfig(arm_group_name="arm"),
+            component_name="m_scene_destroy",
+        )
+        for name in ("_apply_scene_client", "_get_scene_client", "_clear_octomap_client"):
+            setattr(component, name, MagicMock())
+        component.destroy_client = MagicMock()
+        monkeypatch.setattr(
+            "agents.components.component_base.Component.destroy_all_service_clients",
+            lambda _: None,
+        )
+
+        component.destroy_all_service_clients()
+
+        assert component.destroy_client.call_count == 3
+        assert component._apply_scene_client is None
+        assert component._get_scene_client is None
+        assert component._clear_octomap_client is None

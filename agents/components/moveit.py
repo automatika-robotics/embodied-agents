@@ -8,6 +8,7 @@ from ..ros import (
     ActionPhase,
     ComponentRunType,
     Detections3D,
+    Empty,
     GetParameters,
     MoveManipulator,
     ServiceClientConfig,
@@ -134,6 +135,10 @@ class MoveIt(Component):
         self._cartesian_client: Optional[ServiceClientHandler] = None
         self._param_client: Optional[ServiceClientHandler] = None
         self._planner_client: Optional[ServiceClientHandler] = None
+        # Planning scene clients
+        self._apply_scene_client: Optional[ServiceClientHandler] = None
+        self._get_scene_client: Optional[ServiceClientHandler] = None
+        self._clear_octomap_client: Optional[ServiceClientHandler] = None
 
         # Named targets read from the SRDF, resolved lazily and cached
         self._named_targets: Optional[Dict[str, Dict[str, Dict[str, float]]]] = None
@@ -221,6 +226,35 @@ class MoveIt(Component):
             ),
         )
 
+        # Planning scene services, only used from the action and component-action
+        # threads
+        from moveit_msgs.srv import ApplyPlanningScene, GetPlanningScene
+
+        self._apply_scene_client = ServiceClientHandler(
+            self,
+            config=ServiceClientConfig(
+                srv_type=ApplyPlanningScene,
+                name=self._resolve_name("apply_planning_scene"),
+                timeout_secs=self.config.server_timeout,
+            ),
+        )
+        self._get_scene_client = ServiceClientHandler(
+            self,
+            config=ServiceClientConfig(
+                srv_type=GetPlanningScene,
+                name=self._resolve_name("get_planning_scene"),
+                timeout_secs=self.config.server_timeout,
+            ),
+        )
+        self._clear_octomap_client = ServiceClientHandler(
+            self,
+            config=ServiceClientConfig(
+                srv_type=Empty,
+                name=self._resolve_name("clear_octomap"),
+                timeout_secs=self.config.server_timeout,
+            ),
+        )
+
     def destroy_all_service_clients(self):
         """Destroy service clients to the move_group node"""
         super().destroy_all_service_clients()
@@ -229,10 +263,15 @@ class MoveIt(Component):
             self._cartesian_client,
             self._planner_client,
             self._param_client,
+            self._apply_scene_client,
+            self._get_scene_client,
+            self._clear_octomap_client,
         ):
             if handler:
                 self.destroy_client(handler.client)
         self._cartesian_client = self._planner_client = self._param_client = None
+        self._apply_scene_client = self._get_scene_client = None
+        self._clear_octomap_client = None
 
     def custom_on_activate(self):
         """Activate component and check the configured planner against move_group"""
