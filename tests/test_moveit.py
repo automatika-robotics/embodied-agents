@@ -235,6 +235,7 @@ class TestMoveMode:
         goal = SimpleNamespace(
             mode="",
             named_target="",
+            target_object="",
             cartesian_waypoints=[],
             joint_names=[],
             joint_positions=[],
@@ -248,7 +249,27 @@ class TestMoveMode:
         return goal
 
     def test_values(self):
-        assert MoveMode.values() == ["pose", "joints", "named", "cartesian"]
+        assert MoveMode.values() == [
+            "pose", "joints", "named", "cartesian", "pick", "place",
+        ]
+
+    def test_inferred_pick_from_target_object(self):
+        assert MoveMode.from_goal(self._goal(target_object="mug")) is MoveMode.PICK
+
+    def test_pick_wins_over_a_pose_that_locates_it(self):
+        """A pick may carry a pose as the object's location; naming an object
+        makes the intent unambiguous."""
+        goal = self._goal(target_object="mug")
+        goal.target_pose.pose.position.x = 0.4
+        assert MoveMode.from_goal(goal) is MoveMode.PICK
+
+    def test_place_is_never_inferred(self):
+        """A place goal's bare pose is indistinguishable from a POSE goal, so
+        'place' must be explicit."""
+        goal = self._goal()
+        goal.target_pose.pose.position.x = 0.4
+        assert MoveMode.from_goal(goal) is MoveMode.POSE
+        assert MoveMode.from_goal(self._goal(mode="place")) is MoveMode.PLACE
 
     def test_is_a_string_enum(self):
         assert MoveMode.POSE == "pose"

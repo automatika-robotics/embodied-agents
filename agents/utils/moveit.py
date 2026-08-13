@@ -36,12 +36,17 @@ class MoveMode(str, Enum):
     - ``JOINTS``: explicit joint positions.
     - ``NAMED``: a named target defined in the robot's SRDF (e.g. "home").
     - ``CARTESIAN``: a straight-line end-effector path through waypoints.
+    - ``PICK``: grasp a planning scene object, named by ``target_object`` or
+      located by ``target_pose``, and lift it.
+    - ``PLACE``: set the held object down at ``target_pose`` and release it.
     """
 
     POSE = "pose"
     JOINTS = "joints"
     NAMED = "named"
     CARTESIAN = "cartesian"
+    PICK = "pick"
+    PLACE = "place"
 
     @classmethod
     def values(cls) -> List[str]:
@@ -72,6 +77,9 @@ class MoveMode(str, Enum):
             return cls.CARTESIAN
         if len(goal.joint_names):
             return cls.JOINTS
+        # Pick can name a scene object. Place cannot be inferred from bare pose.
+        if goal.target_object:
+            return cls.PICK
         if goal.target_pose.header.frame_id or any([
             goal.target_pose.pose.position.x,
             goal.target_pose.pose.position.y,
