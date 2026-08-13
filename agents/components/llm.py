@@ -470,8 +470,7 @@ class LLM(ModelComponent):
             msg_type = i.input_topic.msg_type
             # set trigger equal to a topic with type String if trigger not found
             if msg_type == String:
-                if not query:
-                    query = item
+                query = query or item
                 context[i.input_topic.name] = item
             elif msg_type in [DetectionsMultiSource, Detections]:
                 context[i.input_topic.name] = item
