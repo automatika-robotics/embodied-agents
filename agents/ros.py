@@ -9,6 +9,7 @@ from rclpy.logging import get_logger
 
 from sensor_msgs.msg import JointState as JointStateROS
 from geometry_msgs.msg import Pose as ROSPose
+from geometry_msgs.msg import PoseStamped as ROSPoseStamped
 from shape_msgs.msg import SolidPrimitive
 
 # FROM SUGARCOAT
@@ -149,6 +150,7 @@ __all__ = [
     "read_camera_info",
     "Empty",
     "ROSPose",
+    "ROSPoseStamped",
     "SolidPrimitive",
     "ServiceClientConfig",
     "ServiceClientHandler",

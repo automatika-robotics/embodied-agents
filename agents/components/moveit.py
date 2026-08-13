@@ -27,7 +27,7 @@ from ..utils.moveit import (
     moveit_error_string,
     parse_planner_interfaces,
     pose_to_constraints,
-    SRDF_PARAMETER
+    SRDF_PARAMETER,
 )
 from .component_base import Component
 
@@ -437,6 +437,12 @@ class MoveIt(Component):
         acceleration = goal.acceleration_scaling or self.config.max_acceleration_scaling
         return float(velocity), float(acceleration)
 
+    def _publish_state(self, goal_handle, state: str) -> None:
+        """Report the current step of a sequence through the goal feedback"""
+        feedback = MoveManipulator.Feedback()
+        feedback.state = state
+        goal_handle.publish_feedback(feedback)
+
     def _feedback_forwarder(self, handler: ActionClientHandler, goal_handle):
         """Create a listener that republishes move_group feedback on our goal"""
 
@@ -445,11 +451,8 @@ class MoveIt(Component):
             if feedback is None:
                 return
             state = getattr(getattr(feedback, "feedback", feedback), "state", "")
-            if not state:
-                return
-            message = MoveManipulator.Feedback()
-            message.state = str(state)
-            goal_handle.publish_feedback(message)
+            if state:
+                self._publish_state(goal_handle, str(state))
 
         return _forward
 
@@ -500,14 +503,11 @@ class MoveIt(Component):
             mode = MoveMode.from_goal(goal)
             self.get_logger().info(f"Received a '{mode.value}' motion goal")
 
-            if self.config.scene_update_mode == "on_goal" and self._detections_topic:
-                feedback = MoveManipulator.Feedback()
-                feedback.state = "UPDATING_SCENE"
-                goal_handle.publish_feedback(feedback)
-                # NOTE: The scene is advisory. A failure here doesnt abort the mission.
-                # It degrades to planning against the previous scene.
-                scene_status = self._refresh_scene_from_detections()
-                self.get_logger().info(scene_status)
+            self._refresh_before_goal(goal_handle)
+
+            if mode is MoveMode.PICK:
+                outcome = self._execute_pick(goal, goal_handle, result, deadline)
+                return self._finish_sequence(outcome, goal_handle, result)
 
             if mode is MoveMode.CARTESIAN:
                 trajectory = self._plan_cartesian_path(goal, result)
@@ -545,23 +545,10 @@ class MoveIt(Component):
                     return self._terminate(goal_handle, result, abort=True)
 
             outcome = self._await_result(handler, goal_handle, deadline)
-
-            if outcome == "preempted":
-                return self._terminate(
-                    goal_handle, result, listener=listener, handler=handler
-                )
-            if outcome == "canceled":
-                result.message = "Motion canceled"
-                return self._terminate(
-                    goal_handle, result, cancel=True, listener=listener, handler=handler
-                )
-            if outcome == "timeout":
-                result.message = (
-                    f"Motion did not complete within {self.config.execution_timeout}s"
-                )
-                return self._terminate(
-                    goal_handle, result, abort=True, listener=listener, handler=handler
-                )
+            if terminated := self._terminate_by_wait(
+                outcome, goal_handle, result, listener, handler
+            ):
+                return terminated
 
             error_code = getattr(handler.action_result, "error_code", None)
             code = getattr(error_code, "val", 0)
@@ -696,6 +683,38 @@ class MoveIt(Component):
                 self.health_status.set_healthy()
         return result
 
+    def _terminate_by_wait(
+        self,
+        waited: str,
+        goal_handle,
+        result: Any,
+        listener=None,
+        handler: Optional[ActionClientHandler] = None,
+    ) -> Optional[Any]:
+        """Terminate a goal whose wait ended without a result, if it did.
+
+        :param waited: What _await_result reported
+        :returns: The terminated result, or None when the motion returned
+            normally and the caller should read its outcome
+        """
+        if waited == "preempted":
+            return self._terminate(
+                goal_handle, result, listener=listener, handler=handler
+            )
+        if waited == "canceled":
+            result.message = "Motion canceled"
+            return self._terminate(
+                goal_handle, result, cancel=True, listener=listener, handler=handler
+            )
+        if waited == "timeout":
+            result.message = (
+                f"Motion did not complete within {self.config.execution_timeout}s"
+            )
+            return self._terminate(
+                goal_handle, result, abort=True, listener=listener, handler=handler
+            )
+        return None
+
     def _command_gripper(
         self, named_target: Optional[str], position: float, description: str
     ) -> Tuple[bool, str]:
@@ -760,9 +779,7 @@ class MoveIt(Component):
     # PLANNING SCENE
     # =========================================================================
 
-    def _apply_scene(
-        self, collision_objects=(), attached_objects=()
-    ) -> bool:
+    def _apply_scene(self, collision_objects=(), attached_objects=()) -> bool:
         """Apply scene changes as one diff through move_group.
 
         :param collision_objects: World objects to add, move or remove
@@ -849,9 +866,7 @@ class MoveIt(Component):
         """
         from ..utils.moveit import build_detach_object, build_remove_object
 
-        if not self._apply_scene(
-            attached_objects=[build_detach_object(object_id)]
-        ):
+        if not self._apply_scene(attached_objects=[build_detach_object(object_id)]):
             return False, f"Could not detach '{object_id}'"
 
         with self._scene_lock:
@@ -970,7 +985,7 @@ class MoveIt(Component):
         return objects, stale
 
     def _scene_refresh_tick(self):
-        """Continuous mode refresh, skipping ticks that would change nothing.
+        """The `continuous` mode scene refresh. Skips ticks that would change nothing.
 
         A tick refreshes only when a detections message arrived since the
         last applied one, or a tracked object has outlived its TTL and is due
@@ -1001,6 +1016,310 @@ class MoveIt(Component):
                 and now - entry["last_seen"] > self.config.scene_object_ttl
                 for entry in self._scene_objects.values()
             )
+
+    def _refresh_before_goal(self, goal_handle) -> None:
+        """The on_goal mode scene refresh, before any planning starts.
+
+        NOTE: The scene is advisory. A failure here doesnt abort the mission.
+        It degrades to planning against the previous scene.
+        """
+        if self.config.scene_update_mode != "on_goal" or not self._detections_topic:
+            return
+        self._publish_state(goal_handle, "UPDATING_SCENE")
+        scene_status = self._refresh_scene_from_detections()
+        self.get_logger().info(scene_status)
+
+    # =========================================================================
+    # PICK AND PLACE
+    # =========================================================================
+    # TODO: The step-sequencing machinery here (_finish_sequence,
+    # _sequence_motion, per-step feedback) is a custom routine engine.
+    # Rebase it on the Routine/MonitoredAction primitives once
+    # https://github.com/automatika-robotics/sugarcoat/issues/55 lands with
+    # result conditions, goal parameterization and inter-step data flow.
+
+    def _finish_sequence(self, outcome: str, goal_handle, result: Any) -> Any:
+        """Transition a sequence goal by the outcome of its last step"""
+        if outcome == "canceled":
+            result.message = result.message or "Motion canceled"
+            return self._terminate(goal_handle, result, cancel=True)
+        if outcome == "preempted":
+            return self._terminate(goal_handle, result)
+        result.success = outcome == "ok"
+        return self._terminate(goal_handle, result, abort=not result.success)
+
+    def _sequence_motion(
+        self,
+        handler: ActionClientHandler,
+        motion_goal: Any,
+        goal_handle,
+        deadline: float,
+    ) -> Tuple[str, str]:
+        """Run one motion of a sequence to completion.
+
+        :param handler: Action client carrying the motion (move or execute)
+        :param motion_goal: Goal for that client
+        :returns: (outcome, message) with outcome "ok", "aborted",
+            "canceled" or "preempted"
+        """
+        handler.reset()
+        if not handler.send_request(motion_goal):
+            return "aborted", "move_group did not accept the motion goal"
+
+        waited = self._await_result(handler, goal_handle, deadline)
+        if waited == "preempted":
+            return "preempted", "Goal preempted by a new goal"
+        if waited == "canceled":
+            return "canceled", "Motion canceled"
+        if waited == "timeout":
+            return "aborted", (
+                f"Motion did not complete within {self.config.execution_timeout}s"
+            )
+
+        code = getattr(getattr(handler.action_result, "error_code", None), "val", 0)
+        status = moveit_error_string(code)
+        if status != "SUCCESS":
+            return "aborted", f"Motion failed: {status}"
+        return "ok", status
+
+    def _pose_motion_goal(self, x: float, y: float, z: float, orientation=None) -> Any:
+        """A collision-aware motion goal to an end-effector position.
+
+        :param orientation: Optional end-effector orientation. All-zero or
+            None means no preference: identity, with the configured
+            orientation tolerance giving the planner its freedom
+        """
+        from ..ros import ROSPoseStamped
+
+        target = ROSPoseStamped()
+        target.header.frame_id = self.config.pose_reference_frame
+        position = target.pose.position
+        position.x, position.y, position.z = float(x), float(y), float(z)
+        if orientation is not None and any((
+            orientation.x,
+            orientation.y,
+            orientation.z,
+            orientation.w,
+        )):
+            target.pose.orientation = orientation
+        else:
+            target.pose.orientation.w = 1.0
+
+        constraints = pose_to_constraints(
+            target,
+            link_name=self.config.end_effector_link,
+            position_tolerance=self.config.goal_position_tolerance,
+            orientation_tolerance=self.config.goal_orientation_tolerance,
+        )
+        return build_move_group_goal(
+            constraints,
+            self.config.arm_group_name,
+            pipeline_id=self.config.planning_pipeline,
+            planner_id=self.config.planner_id,
+            num_attempts=self.config.num_planning_attempts,
+            allowed_time=self.config.allowed_planning_time,
+            velocity_scaling=self.config.max_velocity_scaling,
+            acceleration_scaling=self.config.max_acceleration_scaling,
+        )
+
+    def _sequence_descent(
+        self, x: float, y: float, z: float, orientation, goal_handle, deadline: float
+    ) -> Tuple[str, str]:
+        """Straight-line end-effector motion with contact permitted.
+
+        Collision checking is off for this one motion, so the gripper may reach
+        into the target's collision box. Everything before and after remains
+        collision-aware.
+
+        :returns: (outcome, message), as in _sequence_motion
+        """
+        from moveit_msgs.action import ExecuteTrajectory
+
+        from ..ros import ROSPose
+
+        waypoint = ROSPose()
+        waypoint.position.x, waypoint.position.y, waypoint.position.z = (
+            float(x),
+            float(y),
+            float(z),
+        )
+        if orientation is not None and any((
+            orientation.x,
+            orientation.y,
+            orientation.z,
+            orientation.w,
+        )):
+            waypoint.orientation = orientation
+        else:
+            waypoint.orientation.w = 1.0
+
+        request = build_cartesian_request(
+            [waypoint],
+            frame_id=self.config.pose_reference_frame,
+            group_name=self.config.arm_group_name,
+            link_name=self.config.end_effector_link,
+            max_step=self.config.cartesian_max_step,
+            jump_threshold=self.config.cartesian_jump_threshold,
+            avoid_collisions=False,
+            velocity_scaling=self.config.max_velocity_scaling,
+            acceleration_scaling=self.config.max_acceleration_scaling,
+        )
+        response = self._cartesian_client.send_request(request)
+        if not response:
+            return "aborted", "No response from the Cartesian path service"
+        if response.fraction < self.config.cartesian_fraction_threshold:
+            return "aborted", (
+                f"Only {response.fraction:.0%} of the straight-line segment is "
+                "achievable"
+            )
+
+        execute_goal = ExecuteTrajectory.Goal()
+        execute_goal.trajectory = response.solution
+        return self._sequence_motion(
+            self._exec_client, execute_goal, goal_handle, deadline
+        )
+
+    def _resolve_pick_target(
+        self, goal: Any
+    ) -> Tuple[str, Tuple[float, float, float], Tuple[float, float, float]]:
+        """Find the scene object a pick goal refers to.
+
+        Attached objects are never candidates (already held).
+
+        :returns: (object id, center, size) from the scene bookkeeping
+        :raises ValueError: When nothing in the scene matches
+        """
+        from ..utils.moveit import DETECTION_ID_PREFIX
+
+        # Candidates: everything with known geometry, minus attached objects
+        with self._scene_lock:
+            candidates = {
+                object_id: (entry["center"], entry["size"])
+                for object_id, entry in self._scene_objects.items()
+                if "center" in entry and not entry.get("attached")
+            }
+
+        name = (goal.target_object or "").strip()
+        if name:
+            # 1. target_object as an exact scene id
+            if name in candidates:
+                return name, *candidates[name]
+            # 2. target_object as a detection label, best rank wins
+            matches = [
+                object_id
+                for object_id in candidates
+                if object_id.startswith(f"{DETECTION_ID_PREFIX}{name}_")
+            ]
+            if matches:
+                # ranks order by score. 0 is the strongest detection
+                best = min(matches, key=lambda object_id: (len(object_id), object_id))
+                return best, *candidates[best]
+            raise ValueError(
+                f"No scene object matches '{name}'. Objects in the scene: "
+                f"{sorted(candidates) or 'none'}"
+            )
+
+        # 3. If no name is given, take nearest object to target_pose, within the radius
+        position = goal.target_pose.pose.position
+        nearest = min(
+            candidates.items(),
+            key=lambda item: (
+                (item[1][0][0] - position.x) ** 2
+                + (item[1][0][1] - position.y) ** 2
+                + (item[1][0][2] - position.z) ** 2
+            ),
+            default=None,
+        )
+        if nearest:
+            object_id, (center, size) = nearest
+            distance = (
+                sum(
+                    (a - b) ** 2
+                    for a, b in zip(center, (position.x, position.y, position.z))
+                )
+                ** 0.5
+            )
+            if distance <= self.config.target_match_radius:
+                return object_id, center, size
+        raise ValueError(
+            "No scene object within "
+            f"{self.config.target_match_radius} m of the given pose. Add the "
+            "object to the planning scene first, or name it with target_object."
+        )
+
+    def _execute_pick(
+        self, goal: Any, goal_handle, result: Any, deadline: float
+    ) -> str:
+        """Grasp a scene object and lift it.
+
+        Approach above the object (collision-aware), open, descend straight
+        onto it (contact permitted), close, attach, lift.
+
+        :returns: Outcome of the last step, for _finish_sequence
+        """
+        object_id, center, size = self._resolve_pick_target(goal)
+        self.get_logger().info(f"Picking '{object_id}' at {center}")
+        approach_z = center[2] + size[2] / 2 + self.config.approach_clearance
+        orientation = goal.target_pose.pose.orientation
+
+        self._publish_state(goal_handle, "PRE_GRASP")
+        outcome, message = self._sequence_motion(
+            self._move_client,
+            self._pose_motion_goal(center[0], center[1], approach_z, orientation),
+            goal_handle,
+            deadline,
+        )
+        if outcome != "ok":
+            result.message = f"Pre-grasp: {message}"
+            return outcome
+
+        self._publish_state(goal_handle, "OPEN_GRIPPER")
+        ok, message = self._command_gripper(
+            named_target=self.config.gripper_open_target,
+            position=self.config.gripper_open_position,
+            description="open",
+        )
+        if not ok:
+            result.message = message
+            return "aborted"
+
+        self._publish_state(goal_handle, "DESCEND")
+        outcome, message = self._sequence_descent(
+            center[0], center[1], center[2], orientation, goal_handle, deadline
+        )
+        if outcome != "ok":
+            result.message = f"Descent: {message}"
+            return outcome
+
+        self._publish_state(goal_handle, "GRASP")
+        ok, message = self._command_gripper(
+            named_target=self.config.gripper_close_target,
+            position=self.config.gripper_close_position,
+            description="close",
+        )
+        if not ok:
+            result.message = message
+            return "aborted"
+
+        self._publish_state(goal_handle, "ATTACH")
+        ok, message = self._do_attach(object_id)
+        if not ok:
+            result.message = message
+            return "aborted"
+
+        self._publish_state(goal_handle, "LIFT")
+        outcome, message = self._sequence_motion(
+            self._move_client,
+            self._pose_motion_goal(center[0], center[1], approach_z, orientation),
+            goal_handle,
+            deadline,
+        )
+        if outcome != "ok":
+            result.message = f"Lift: {message}"
+            return outcome
+
+        result.message = f"Picked '{object_id}'"
+        return "ok"
 
     # =========================================================================
     # COMPONENT ACTIONS

@@ -1940,3 +1940,180 @@ class TestSceneGeometryCache:
         entry = comp._scene_objects["det__mug_0"]
         assert entry["center"] == (0.5, 0.1, 0.05)
         assert entry["size"] == (0.06, 0.06, 0.1)
+
+
+class TestPickSequence:
+    """The pick mode: approach, open, descend, grasp, attach, lift."""
+
+    @pytest.fixture(autouse=True)
+    def _needs_moveit_msgs(self):
+        pytest.importorskip("moveit_msgs.msg")
+
+    @pytest.fixture
+    def component(self, rclpy_init):
+        from agents.components import MoveIt
+        from agents.config import MoveItConfig
+
+        comp = MoveIt(
+            config=MoveItConfig(
+                arm_group_name="arm",
+                gripper_group_name="gripper",
+                end_effector_link="hand",
+                pose_reference_frame="base",
+                approach_clearance=0.1,
+                touch_links=["hand", "jaw"],
+            ),
+            component_name="m_pick",
+        )
+        comp.get_logger = MagicMock()
+        comp.health_status = MagicMock()
+        comp._named_targets = {
+            "gripper": {"open": {"jaw": 1.0}, "close": {"jaw": 0.0}}
+        }
+        comp._move_client = TestGoalExecution._client()
+        comp._exec_client = TestGoalExecution._client()
+        comp._gripper_client = TestGoalExecution._client()
+        comp._cartesian_client = MagicMock()
+        comp._cartesian_client.send_request.return_value = SimpleNamespace(
+            fraction=1.0, solution=MagicMock(), error_code=SimpleNamespace(val=1)
+        )
+        comp._apply_scene_client = MagicMock()
+        comp._apply_scene_client.send_request.return_value = SimpleNamespace(
+            success=True
+        )
+        comp._scene_objects["det__mug_0"] = {
+            "source": "detection",
+            "last_seen": 0.0,
+            "center": (0.4, 0.0, 0.05),
+            "size": (0.06, 0.06, 0.1),
+        }
+        return comp
+
+    @staticmethod
+    def _pick_goal(**fields):
+        from automatika_embodied_agents.action import MoveManipulator
+
+        goal = MoveManipulator.Goal()
+        goal.mode = "pick"
+        for key, value in fields.items():
+            setattr(goal, key, value)
+        return goal
+
+    @staticmethod
+    def _states(handle):
+        return [call[0][0].state for call in handle.publish_feedback.call_args_list]
+
+    def test_pick_runs_the_whole_sequence(self, component):
+        handle = TestGoalExecution._goal_handle(self._pick_goal(target_object="mug"))
+
+        result = component.main_action_callback(handle)
+
+        assert result.success and "det__mug_0" in result.message
+        handle.succeed.assert_called_once()
+        assert self._states(handle) == [
+            "PRE_GRASP", "OPEN_GRIPPER", "DESCEND", "GRASP", "ATTACH", "LIFT",
+        ]
+        # approach and lift both go to the clearance height above the box top:
+        # center z 0.05 + half height 0.05 + clearance 0.1
+        move_goals = [
+            call[0][0]
+            for call in component._move_client.send_request.call_args_list
+        ]
+        heights = [
+            g.request.goal_constraints[0]
+            .position_constraints[0].constraint_region.primitive_poses[0].position.z
+            for g in move_goals
+        ]
+        assert heights == [pytest.approx(0.2), pytest.approx(0.2)]
+        # the descent is the one contact-permitted segment, down to the center
+        request = component._cartesian_client.send_request.call_args[0][0]
+        assert request.avoid_collisions is False
+        assert request.waypoints[0].position.z == pytest.approx(0.05)
+        # the object now travels with the arm
+        assert component._scene_objects["det__mug_0"]["attached"] == "hand"
+
+    def test_pick_resolves_labels_to_the_best_rank(self, component):
+        component._scene_objects["det__mug_1"] = {
+            "source": "detection", "last_seen": 0.0,
+            "center": (0.9, 0.0, 0.05), "size": (0.06, 0.06, 0.1),
+        }
+        object_id, center, _ = component._resolve_pick_target(
+            self._pick_goal(target_object="mug")
+        )
+        assert object_id == "det__mug_0" and center == (0.4, 0.0, 0.05)
+
+    def test_pick_resolves_by_nearest_pose(self, component):
+        goal = self._pick_goal()
+        goal.target_pose.header.frame_id = "base"
+        goal.target_pose.pose.position.x = 0.45
+        object_id, _, _ = component._resolve_pick_target(goal)
+        assert object_id == "det__mug_0"
+
+    def test_a_far_pose_matches_nothing(self, component):
+        goal = self._pick_goal()
+        goal.target_pose.pose.position.x = 2.0
+        with pytest.raises(ValueError, match="No scene object within"):
+            component._resolve_pick_target(goal)
+
+    def test_a_failed_resolution_aborts_the_goal_without_crashing(self, component):
+        handle = TestGoalExecution._goal_handle(
+            self._pick_goal(target_object="bottle")
+        )
+
+        result = component.main_action_callback(handle)
+
+        assert not result.success and "det__mug_0" in result.message
+        handle.abort.assert_called_once()
+        component._move_client.send_request.assert_not_called()
+
+    def test_the_match_radius_comes_from_config(self, component):
+        component.config.target_match_radius = 0.01
+        goal = self._pick_goal()
+        goal.target_pose.pose.position.x = 0.45
+        with pytest.raises(ValueError, match="within 0.01 m"):
+            component._resolve_pick_target(goal)
+
+    def test_an_attached_object_is_not_a_candidate(self, component):
+        component._scene_objects["det__mug_0"]["attached"] = "hand"
+        with pytest.raises(ValueError, match="No scene object matches"):
+            component._resolve_pick_target(self._pick_goal(target_object="mug"))
+
+    def test_an_unknown_object_lists_the_scene(self, component):
+        with pytest.raises(ValueError, match="det__mug_0"):
+            component._resolve_pick_target(self._pick_goal(target_object="bottle"))
+
+    def test_a_failed_approach_aborts_with_the_step_named(self, component):
+        from moveit_msgs.msg import MoveItErrorCodes
+
+        component._move_client = TestGoalExecution._client(
+            error_code=MoveItErrorCodes.PLANNING_FAILED
+        )
+        handle = TestGoalExecution._goal_handle(self._pick_goal(target_object="mug"))
+
+        result = component.main_action_callback(handle)
+
+        assert not result.success
+        assert result.message.startswith("Pre-grasp:")
+        handle.abort.assert_called_once()
+        # the sequence stopped before touching anything
+        assert "attached" not in component._scene_objects["det__mug_0"]
+
+    def test_a_partial_descent_aborts(self, component):
+        component._cartesian_client.send_request.return_value = SimpleNamespace(
+            fraction=0.4, solution=MagicMock(), error_code=SimpleNamespace(val=1)
+        )
+        handle = TestGoalExecution._goal_handle(self._pick_goal(target_object="mug"))
+
+        result = component.main_action_callback(handle)
+
+        assert not result.success and result.message.startswith("Descent:")
+
+    def test_cancellation_cancels_the_goal(self, component):
+        handle = TestGoalExecution._goal_handle(
+            self._pick_goal(target_object="mug"), cancel_requested=True
+        )
+        component._move_client.action_returned = False
+
+        component.main_action_callback(handle)
+
+        handle.canceled.assert_called_once()
