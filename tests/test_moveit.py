@@ -1361,3 +1361,156 @@ class TestSceneActions:
             component, "crate", [0, 0, 0], [0.1, 0.1, 0.1]
         )
         assert "Could not" in message
+
+
+class TestAttachDetach:
+    """Attaching a grasped object to the robot and letting go of it again."""
+
+    GRIPPER_SRDF = """
+    <robot name="bot">
+      <group name="gripper">
+        <joint name="jaw"/>
+        <link name="hand"/><link name="left_finger"/><link name="right_finger"/>
+      </group>
+      <end_effector name="eef" parent_link="hand" group="gripper"/>
+    </robot>
+    """
+
+    @pytest.fixture(autouse=True)
+    def _needs_moveit_msgs(self):
+        pytest.importorskip("moveit_msgs.msg")
+
+    @pytest.fixture
+    def component(self, rclpy_init):
+        from agents.components import MoveIt
+        from agents.config import MoveItConfig
+
+        comp = MoveIt(
+            config=MoveItConfig(
+                arm_group_name="arm",
+                gripper_group_name="gripper",
+                end_effector_link="hand",
+            ),
+            component_name="m_attach",
+        )
+        comp.get_logger = MagicMock()
+        comp._apply_scene_client = MagicMock()
+        comp._apply_scene_client.send_request.return_value = SimpleNamespace(
+            success=True
+        )
+        comp._srdf = self.GRIPPER_SRDF
+        return comp
+
+    @staticmethod
+    def _applied_scenes(component):
+        return [
+            call[0][0].scene
+            for call in component._apply_scene_client.send_request.call_args_list
+        ]
+
+    def test_attach_defaults_to_the_end_effector_and_srdf_touch_links(
+        self, component
+    ):
+        from moveit_msgs.msg import CollisionObject
+
+        component._scene_objects["det__orange_0"] = {
+            "source": "detection",
+            "last_seen": 0.0,
+        }
+        message = component.attach_object.__wrapped__(component, "det__orange_0")
+
+        (scene,) = self._applied_scenes(component)
+        (attached,) = scene.robot_state.attached_collision_objects
+        assert attached.link_name == "hand"
+        assert attached.object.id == "det__orange_0"
+        assert attached.object.operation == CollisionObject.ADD
+        assert list(attached.touch_links) == ["hand", "left_finger", "right_finger"]
+        assert component._scene_objects["det__orange_0"]["attached"] == "hand"
+        assert "Attached" in message
+
+    def test_explicit_touch_links_win_over_config_and_srdf(self, component):
+        component.config.touch_links = ["from_config"]
+        component.attach_object.__wrapped__(
+            component, "o", touch_links=["only_this"]
+        )
+        (scene,) = self._applied_scenes(component)
+        assert list(
+            scene.robot_state.attached_collision_objects[0].touch_links
+        ) == ["only_this"]
+
+    def test_configured_touch_links_win_over_the_srdf(self, component):
+        component.config.touch_links = ["from_config"]
+        component.attach_object.__wrapped__(component, "o")
+        (scene,) = self._applied_scenes(component)
+        assert list(
+            scene.robot_state.attached_collision_objects[0].touch_links
+        ) == ["from_config"]
+
+    def test_the_srdf_is_fetched_lazily_when_not_cached(self, component):
+        """Attaching before any named-target use still finds the gripper."""
+        component._srdf = None
+        component._param_client = MagicMock()
+        component._param_client.send_request_from_dict.return_value = SimpleNamespace(
+            values=[SimpleNamespace(string_value=self.GRIPPER_SRDF)]
+        )
+        component.attach_object.__wrapped__(component, "o")
+        (scene,) = self._applied_scenes(component)
+        assert list(
+            scene.robot_state.attached_collision_objects[0].touch_links
+        ) == ["hand", "left_finger", "right_finger"]
+
+    def test_attach_without_any_link_reports_it(self, component):
+        component.config.end_effector_link = ""
+        message = component.attach_object.__wrapped__(component, "o")
+        assert "No link" in message
+        component._apply_scene_client.send_request.assert_not_called()
+
+    def test_attach_failure_marks_nothing(self, component):
+        component._apply_scene_client.send_request.return_value = SimpleNamespace(
+            success=False
+        )
+        component._scene_objects["o"] = {"source": "manual", "last_seen": 0.0}
+        message = component.attach_object.__wrapped__(component, "o")
+        assert "Could not" in message
+        assert "attached" not in component._scene_objects["o"]
+
+    def test_detach_returns_the_object_to_the_scene(self, component):
+        from moveit_msgs.msg import CollisionObject
+
+        component._scene_objects["o"] = {
+            "source": "manual",
+            "last_seen": 0.0,
+            "attached": "hand",
+        }
+        message = component.detach_object.__wrapped__(component, "o")
+
+        (scene,) = self._applied_scenes(component)
+        (attached,) = scene.robot_state.attached_collision_objects
+        assert attached.object.operation == CollisionObject.REMOVE
+        # empty link searches every link for the object
+        assert attached.link_name == ""
+        assert "attached" not in component._scene_objects["o"]
+        assert "remains in the scene" in message
+
+    def test_detach_with_remove_deletes_in_a_second_change(self, component):
+        component._scene_objects["o"] = {
+            "source": "manual",
+            "last_seen": 0.0,
+            "attached": "hand",
+        }
+        message = component.detach_object.__wrapped__(component, "o", remove=True)
+
+        detach_scene, remove_scene = self._applied_scenes(component)
+        assert detach_scene.robot_state.attached_collision_objects
+        (removed,) = remove_scene.world.collision_objects
+        assert removed.id == "o"
+        assert "o" not in component._scene_objects
+        assert "removed" in message
+
+    def test_detach_remove_reports_a_partial_failure(self, component):
+        component._apply_scene_client.send_request.side_effect = [
+            SimpleNamespace(success=True),
+            SimpleNamespace(success=False),
+        ]
+        message = component.detach_object.__wrapped__(component, "o", remove=True)
+        assert "Detached" in message and "could not remove" in message

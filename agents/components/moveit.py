@@ -141,8 +141,10 @@ class MoveIt(Component):
         self._get_scene_client: Optional[ServiceClientHandler] = None
         self._clear_octomap_client: Optional[ServiceClientHandler] = None
 
-        # Named targets read from the SRDF, resolved lazily and cached
+        # Named targets read from the SRDF, resolved lazily and cached, and
+        # the raw SRDF they were read from
         self._named_targets: Optional[Dict[str, Dict[str, Dict[str, float]]]] = None
+        self._srdf: Optional[str] = None
 
         # Objects this component has placed in the planning scene, as
         # id -> {"source": "manual" | "detection", "last_seen": time}
@@ -362,6 +364,8 @@ class MoveIt(Component):
                 })
                 if response and response.values and response.values[0].string_value:
                     srdf = response.values[0].string_value
+                    # Keep raw for consumers that read more than named targets
+                    self._srdf = srdf
                 else:
                     self.get_logger().warning(
                         f"Could not read '{SRDF_PARAMETER}' from "
@@ -1103,3 +1107,143 @@ class MoveIt(Component):
         if response is None:
             return "move_group did not answer the octomap clear request"
         return "Cleared the planning scene octomap"
+
+    def _resolve_touch_links(self, explicit: Optional[List[str]]) -> List[str]:
+        """Links allowed to stay in contact with an attached object.
+
+        Priority: the `touch_links` passed to the `attach_object` call, then
+        the configured `touch_links`, then the robot SRDF (gripper group
+        links or the end effector's neighborhood), then the end effector
+        link alone with a warning.
+        """
+        from ..utils.moveit import derive_touch_links
+
+        if not explicit and not self.config.touch_links and self._srdf is None:
+            # Fetch SRDF and cache along with the named targets
+            self._named_target_states()
+        return derive_touch_links(
+            self._srdf,
+            self.config.end_effector_link,
+            gripper_group=self.config.gripper_group_name or "",
+            explicit=explicit or self.config.touch_links,
+            logger_name=self.node_name,
+        )
+
+    @component_action(
+        description={
+            "type": "function",
+            "function": {
+                "name": "attach_object",
+                "description": "Attach a planning scene object to the robot's gripper, so it moves with the arm and contact with the gripper stops counting as a collision. Call right after closing the gripper on an object; without it, the first motion while holding the object fails on a collision between gripper and object.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "object_id": {
+                            "type": "string",
+                            "description": "Name of the object in the planning scene, as listed by list_collision_objects.",
+                        },
+                        "link_name": {
+                            "type": "string",
+                            "description": "Robot link to attach the object to. Default is the configured end effector link.",
+                        },
+                    },
+                    "required": ["object_id"],
+                },
+            },
+        },
+        active=True,
+        phase=ActionPhase.EXECUTION,
+    )
+    def attach_object(
+        self,
+        object_id: str,
+        link_name: str = "",
+        touch_links: Optional[List[str]] = None,
+    ) -> str:
+        """Attach a scene object to a robot link, as on a grasp.
+
+        move_group removes the object from the world and carries it with the
+        link; contact with the touch links stops counting as collision.
+
+        :param object_id: Name of an object already in the planning scene
+        :param link_name: Link the object is rigidly attached to. Empty uses
+            the configured end effector link
+        :param touch_links: Links allowed to stay in contact with the object.
+            Default resolves them from the config or the robot SRDF
+        :returns: What happened, for the caller and for tool use
+        """
+        from ..utils.moveit import build_attached_object
+
+        link = link_name or self.config.end_effector_link
+        if not link:
+            return (
+                "No link to attach to: pass link_name or set "
+                "'end_effector_link' in the component config"
+            )
+
+        links = self._resolve_touch_links(touch_links)
+        if not self._apply_scene(
+            attached_objects=[build_attached_object(object_id, link, links)]
+        ):
+            return f"Could not attach '{object_id}' to '{link}'"
+
+        with self._scene_lock:
+            if entry := self._scene_objects.get(object_id):
+                entry["attached"] = link
+        return f"Attached '{object_id}' to '{link}' (touch links: {', '.join(links)})"
+
+    @component_action(
+        description={
+            "type": "function",
+            "function": {
+                "name": "detach_object",
+                "description": "Detach a held object from the robot's gripper in the planning scene. Call after releasing an object. By default the object stays in the scene where it was released.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "object_id": {
+                            "type": "string",
+                            "description": "Name of the attached object.",
+                        },
+                        "remove": {
+                            "type": "boolean",
+                            "description": "Also delete the object from the scene entirely, e.g. after handing it away. Default is false.",
+                        },
+                    },
+                    "required": ["object_id"],
+                },
+            },
+        },
+        active=True,
+        phase=ActionPhase.EXECUTION,
+    )
+    def detach_object(self, object_id: str, remove: bool = False) -> str:
+        """Detach an attached object, returning it to the world.
+
+        :param object_id: Name the object was attached under
+        :param remove: Also remove the object from the scene entirely. The
+            default keeps it where it was released, which matches what
+            physically happened
+        :returns: What happened, for the caller and for tool use
+        """
+        from ..utils.moveit import build_detach_object, build_remove_object
+
+        if not self._apply_scene(
+            attached_objects=[build_detach_object(object_id)]
+        ):
+            return f"Could not detach '{object_id}'"
+
+        with self._scene_lock:
+            if entry := self._scene_objects.get(object_id):
+                entry.pop("attached", None)
+
+        if not remove:
+            return f"Detached '{object_id}', it remains in the scene"
+
+        # Detaching returns the object to the world, so removing it is a
+        # separate scene change
+        if not self._apply_scene([build_remove_object(object_id)]):
+            return f"Detached '{object_id}' but could not remove it from the scene"
+        with self._scene_lock:
+            self._scene_objects.pop(object_id, None)
+        return f"Detached '{object_id}' and removed it from the scene"
