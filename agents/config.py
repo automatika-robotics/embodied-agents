@@ -624,7 +624,7 @@ class MoveItConfig(BaseComponentConfig):
     :type server_timeout: float
     :param execution_timeout: Maximum wall time in seconds for a single plan+execute goal. Default is 120.0.
     :type execution_timeout: float
-    :param scene_update_mode: WHEN detected objects are pushed into the planning scene: "manual" (default) only on the `update_planning_scene` component action, "on_goal" additionally refreshes the scene right before each motion goal is planned, "continuous" keeps refreshing at `scene_update_rate` while detections arrive. Only effective when the component is given a Detections3D input topic.
+    :param scene_update_mode: WHEN detected objects are pushed into the planning scene: "manual" (default) only on the `update_planning_scene` component action, "on_goal" additionally refreshes the scene right before each motion goal is planned, "continuous" keeps refreshing at `scene_update_rate` while detections arrive. Only effective when the component is given a Detections3D input topic. In every mode the scene freezes while an object is held. The first refresh after release reconciles the scene.
     :type scene_update_mode: Literal["manual", "on_goal", "continuous"]
     :param scene_update_rate: Scene refreshes per second in "continuous" mode. Default is 1.0.
     :type scene_update_rate: float

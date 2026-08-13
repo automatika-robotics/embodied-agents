@@ -898,7 +898,8 @@ class MoveIt(Component):
         Objects the detector stopped reporting are kept for
         `scene_object_ttl` seconds before a refresh removes them, so
         detection dropouts do not flicker. Attached objects are never evicted
-        or re-added.
+        or re-added. While an object is held the scene is frozen entirely. The
+        first refresh after release reconciles it.
 
         :param message: Detections to refresh from, when the caller has
             already read them. Default reads the latest received message
@@ -908,6 +909,16 @@ class MoveIt(Component):
             build_remove_object,
             collision_objects_from_detections,
         )
+
+        with self._scene_lock:
+            held = any(
+                entry.get("attached") for entry in self._scene_objects.values()
+            )
+        if held:
+            return (
+                "Scene refresh skipped while an object is held: the scene "
+                "stays as captured before the grasp, until release"
+            )
 
         if message is None:
             if not self._detections_topic:
@@ -968,7 +979,10 @@ class MoveIt(Component):
         """Split a refresh into objects to add and tracked ids gone stale.
 
         Attached objects are exempt from both sides, the rest expire by
-        their last sighting.
+        their last sighting. Refreshes are frozen while holding, so attached
+        entries normally never reach this; the exemption remains as the
+        guard for an attach landing between the freeze check and this
+        partition.
 
         :param objects: Collision objects built from the latest detections
         :param now: Refresh time, for the TTL comparison
@@ -1873,7 +1887,7 @@ class MoveIt(Component):
             "type": "function",
             "function": {
                 "name": "update_planning_scene",
-                "description": "Update the motion planning scene from the latest camera detections, so that the next motions plan around the objects currently seen. Call before planning a motion in a scene that may have changed.",
+                "description": "Update the motion planning scene from the latest camera detections, so that the next motions plan around the objects currently seen. Call before planning a motion in a scene that may have changed. While an object is held in the gripper the scene is frozen and this does nothing; it resumes after release.",
                 "parameters": {"type": "object", "properties": {}, "required": []},
             },
         },

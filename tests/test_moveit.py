@@ -1669,24 +1669,74 @@ class TestSceneRefresh:
         assert "table" not in ids
         assert "table" in component._scene_objects
 
-    def test_attached_objects_are_neither_evicted_nor_readded(self, component):
-        """A grasped object leaves the camera's view the moment the gripper
-        closes; evicting it or re-adding a world copy would both be wrong."""
+    def test_the_scene_freezes_while_an_object_is_held(self, component):
+        """Detection ids are score ranks, not identities: refreshing while
+        holding could hide a real obstacle behind the held object's id, or
+        re-add the held object as a world box at the gripper. Freeze, and
+        reconcile after release."""
         component._scene_objects["det__orange_0"] = {
             "source": "detection",
             "last_seen": __import__("time").time() - 100.0,
             "attached": "hand",
         }
-        # the detector reports a new orange, which ranks 0 again
+        # three oranges: the held one, seen at the gripper, and two on the
+        # table, the stronger of which ranks 0 and wears the held one's id
         self._wire(
             component,
-            self._detections([("orange", 0.9, (0.4, 0, 0), (0.06, 0.06, 0.06))]),
+            self._detections([
+                ("orange", 0.9, (0.4, 0.0, 0.05), (0.06, 0.06, 0.06)),
+                ("orange", 0.8, (0.5, 0.1, 0.05), (0.06, 0.06, 0.06)),
+                ("orange", 0.7, (0.2, 0.3, 0.2), (0.06, 0.06, 0.06)),
+            ]),
         )
         message = component.update_planning_scene.__wrapped__(component)
 
-        assert "already up to date" in message
+        assert "held" in message
         component._apply_scene_client.send_request.assert_not_called()
         assert component._scene_objects["det__orange_0"]["attached"] == "hand"
+
+    def test_the_first_refresh_after_release_reconciles(self, component):
+        entry = {
+            "source": "detection",
+            "last_seen": __import__("time").time() - 100.0,
+            "attached": "hand",
+        }
+        component._scene_objects["det__orange_0"] = entry
+        self._wire(
+            component,
+            self._detections([
+                ("orange", 0.9, (0.4, 0.0, 0.05), (0.06, 0.06, 0.06)),
+                ("orange", 0.8, (0.5, 0.1, 0.05), (0.06, 0.06, 0.06)),
+            ]),
+        )
+        component.update_planning_scene.__wrapped__(component)
+        component._apply_scene_client.send_request.assert_not_called()
+        entry.pop("attached")
+
+        component.update_planning_scene.__wrapped__(component)
+
+        scene = self._applied_scene(component)
+        ids = {o.id for o in scene.world.collision_objects}
+        assert ids == {"det__orange_0", "det__orange_1"}
+
+    def test_partition_still_exempts_attached_as_a_race_guard(self, component):
+        """The freeze normally keeps attached entries out of a refresh; the
+        partition exemption remains for an attach landing mid-refresh."""
+        from agents.utils.moveit import collision_objects_from_detections
+
+        component._scene_objects["det__orange_0"] = {
+            "source": "detection",
+            "last_seen": __import__("time").time() - 100.0,
+            "attached": "hand",
+        }
+        objects = collision_objects_from_detections(
+            self._detections([("orange", 0.9, (0.4, 0, 0), (0.06, 0.06, 0.06))])
+        )
+        added, stale = component._partition_scene_changes(
+            objects, __import__("time").time()
+        )
+        assert "det__orange_0" not in {o.id for o in added}
+        assert "det__orange_0" not in stale
 
     def test_nothing_seen_and_nothing_stale_is_a_no_op(self, component):
         self._wire(component, self._detections([]))
