@@ -785,6 +785,7 @@ class Vision(DepthLiftMixin, ModelComponent):
         self._images = []
         # Where the lifted camera's picture sits in this tick's results
         self._lift_index: Optional[int] = None
+        # The 3D latched msg and depth
         self._lift_msg = None
         self._lift_depth = None
 

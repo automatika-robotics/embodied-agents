@@ -26,10 +26,11 @@ from ..ros import (
 )
 from ..utils import validate_func_args
 from ..utils.perception3d import resolve_lift_camera
+from .depth_lift import DepthLiftMixin
 from .llm import LLM
 
 
-class MLLM(LLM):
+class MLLM(DepthLiftMixin, LLM):
     """
     This component utilizes multi-modal large language models (e.g. Llava) that can be used to process text and image data.
 
@@ -179,6 +180,11 @@ class MLLM(LLM):
         ]
         self._images: List[Union[np.ndarray, ROSImage, ROSCompressedImage]] = []
 
+        # Initialize detector for 3D lift and its parse calibration
+        self._init_lift_state()
+        # For capturing grounding query to name 3D boxes
+        self._lift_label: str = ""
+
     def custom_on_configure(self):
         # deploy local VLM if enabled
         if not self.model_client and self.config.enable_local_model:
@@ -194,6 +200,7 @@ class MLLM(LLM):
             self._string_publishers: List = []
             self._poi_publishers: List = []
             self._detections_publishers: List = []
+            self._detections3d_publishers: List = []
 
             # Loop through the list of topics and categorize them
             for topic in self.out_topics:
@@ -203,6 +210,8 @@ class MLLM(LLM):
                     self._poi_publishers.append(topic.name)
                 elif topic.msg_type in [Detections, DetectionsMultiSource]:
                     self._detections_publishers.append(topic.name)
+                elif topic.msg_type is Detections3D:
+                    self._detections3d_publishers.append(topic.name)
                 else:
                     pass
 
@@ -227,6 +236,9 @@ class MLLM(LLM):
         """
         self._images = []  # image msgs for publishing
         images = []  # image msg outputs as np arrays
+        # The 3D latched msg and depth
+        self._lift_msg = None
+        self._lift_depth = None
 
         # context dict to gather all String inputs for use in system prompt
         context = {}
@@ -257,9 +269,15 @@ class MLLM(LLM):
                 images.append(item)
                 if msg is not None:
                     self._images.append(msg)  # Collect all images for publishing
+                    if i.input_topic.name == self._lift_camera:
+                        self._lift_msg = msg
+                        self._lift_depth = self._depth_snapshot()
 
         if not query or not images:
             return None
+
+        # the query as given, before templates and RAG dress it up
+        self._lift_label = query
 
         # get RAG results if enabled in config and if docs retrieved
         rag_result = self._handle_rag_query(query) if self.config.enable_rag else None
@@ -472,6 +490,7 @@ class MLLM(LLM):
                     images=self._images if multi else next(iter(self._images), None),
                     time_stamp=self.get_ros_time(),
                 )
+            self._publish_grounded_3d(result["output"])
         elif self._task == "trajectory":
             for pub_name in self._poi_publishers:
                 self.publishers_dict[pub_name].publish(
@@ -479,6 +498,59 @@ class MLLM(LLM):
                     image=self._images[0],  # POI msg takes only one image
                     time_stamp=self.get_ros_time(),
                 )
+
+    def _publish_grounded_3d(self, pixels: List) -> None:
+        """Lift the grounded boxes into metric space and publish Detections3D."""
+
+        if not self._detections3d_publishers:
+            return
+        from ..utils.perception3d import (
+            boxes_from_detections,
+            detections_to_message_fields,
+        )
+
+        if self._lift_msg is None:
+            self._warn_once(
+                "no_lift_frame",
+                f"No picture was captured on '{self._lift_camera}', so the "
+                "grounded boxes cannot be placed in space.",
+            )
+            return
+
+        if not pixels:
+            fields = detections_to_message_fields([])
+        else:
+            detector, depth_mm = self._depth_detector()
+            if detector is None:
+                return
+            # the color image, which an RGBD frame carries nested
+            color = getattr(self._lift_msg, "rgb", self._lift_msg)
+            lifted = [
+                box
+                for box in boxes_from_detections(
+                    detector,
+                    depth_mm,
+                    pixels,
+                    image_size=(color.width, color.height),
+                    depth_range=(self.config.min_depth, self.config.max_depth),
+                )
+                # A box built from a handful of depth pixels is not trustworthy
+                if box.validity >= self.config.min_depth_validity
+            ]
+            # Every grounded box answers the same query, thus the same name
+            fields = detections_to_message_fields(
+                lifted,
+                labels=[self._lift_label] * len(pixels),
+                boxes_2d=pixels,
+            )
+
+        for pub_name in self._detections3d_publishers:
+            self.publishers_dict[pub_name].publish(
+                fields["output"],
+                **{k: v for k, v in fields.items() if k != "output"},
+                frame_id=self.config.detections_frame,
+                time_stamp=self.get_ros_time(),
+            )
 
     def _execution_step(self, *args, **kwargs):
         """_execution_step.

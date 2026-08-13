@@ -8,6 +8,7 @@ from agents.config import MLLMConfig
 from agents.ros import Topic, Image
 from agents.components.mllm import MLLM
 from tests.conftest import mock_component_internals
+from tests.test_vision import _SyntheticCamera, _callback, _image, _warnings
 
 
 @pytest.fixture
@@ -276,3 +277,122 @@ class TestMLLMSetTask:
         mllm._task = None
         with pytest.raises((ValueError, TypeError)):
             mllm.set_task("invalid_task")
+
+
+class TestGroundedLift(_SyntheticCamera):
+    """Grounded 2D boxes are lifted onto the depth latched with the picture
+    the model saw, and published as Detections3D named by the query."""
+
+    @pytest.fixture
+    def grounder(self, rclpy_init, mock_model_client):
+        comp = MLLM(
+            inputs=[
+                Topic(name="text_in", msg_type="String"),
+                Topic(name="img_in", msg_type="Image"),
+            ],
+            outputs=[
+                Topic(name="d2", msg_type="Detections"),
+                Topic(name="d3", msg_type="Detections3D"),
+            ],
+            depth=Topic(name="depth", msg_type="Image"),
+            camera_info=Topic(name="cam_info", msg_type="CameraInfo"),
+            model_client=mock_model_client,
+            config=MLLMConfig(task="grounding", detections_frame="cam"),
+            component_name="test_grounder",
+        )
+        mock_component_internals(comp)
+        # one mock publisher per output topic, keyed by name
+        comp.publishers_dict = {
+            topic.name: MagicMock(output_topic=topic) for topic in comp.out_topics
+        }
+        # what custom_on_configure derives from config and outputs
+        comp._task = "grounding"
+        comp._string_publishers = []
+        comp._poi_publishers = []
+        comp._detections_publishers = ["d2"]
+        comp._detections3d_publishers = ["d3"]
+        return comp
+
+    def _wire(self, comp, stamp=0.0, depth_stamp=0.0):
+        trig = MagicMock()
+        trig.get_output.return_value = "the orange"
+        comp.trig_callbacks = {"text_in": trig}
+        comp.callbacks = {
+            "img_in": _callback(
+                _image("cam", width=self.WIDTH, height=self.HEIGHT, stamp=stamp),
+                output=np.zeros((self.HEIGHT, self.WIDTH, 3)),
+                name="img_in",
+            ),
+            "depth": _callback(self._depth_scene("cam", depth_stamp), name="depth"),
+            "cam_info": _callback(
+                msg_type="CameraInfo", output=self._intrinsics(), name="cam_info"
+            ),
+        }
+
+    @staticmethod
+    def _published(comp, topic="d3"):
+        args, kwargs = comp.publishers_dict[topic].publish.call_args
+        return args[0], kwargs
+
+    def _trigger(self, comp):
+        comp._execution_step(topic=Topic(name="text_in", msg_type="String"))
+
+    def test_grounded_boxes_are_published_in_metric_space(
+        self, grounder, mock_model_client
+    ):
+        mock_model_client.inference.return_value = {"output": [list(self.PATCH)]}
+        self._wire(grounder)
+
+        self._trigger(grounder)
+
+        boxes, published = self._published(grounder)
+        # the query names the objects: it is all the scene consumer gets
+        assert published["labels"] == ["the orange"]
+        assert published["frame_id"] == "cam"
+        assert published["boxes_2d"] == [list(self.PATCH)]
+        (center, _), = boxes
+        assert center[2] == pytest.approx(self.PATCH_DEPTH_M, abs=0.02)
+        # the 2D output still goes out alongside
+        pixels, _ = self._published(grounder, "d2")
+        assert pixels["bboxes"] == [list(self.PATCH)]
+
+    def test_nothing_grounded_is_an_empty_message(
+        self, grounder, mock_model_client
+    ):
+        """The model looked and found nothing: an observation, published so
+        consumers let go of objects that are no longer there."""
+        mock_model_client.inference.return_value = {"output": []}
+        self._wire(grounder)
+
+        self._trigger(grounder)
+
+        boxes, _ = self._published(grounder)
+        assert boxes == []
+
+    def test_depth_is_the_instant_of_capture_not_of_publishing(
+        self, grounder, mock_model_client
+    ):
+        """The VLM takes seconds; the boxes must measure the scene it saw."""
+        self._wire(grounder)
+
+        def _slow_inference(*_, **__):
+            # a much later depth frame lands while the model is busy
+            grounder.callbacks["depth"].msg = self._depth_scene("cam", stamp=99.0)
+            return {"output": [list(self.PATCH)]}
+
+        mock_model_client.inference.side_effect = _slow_inference
+
+        self._trigger(grounder)
+
+        # had the late frame been read, max_depth_age would have refused it
+        boxes, _ = self._published(grounder)
+        assert boxes[0][0][2] == pytest.approx(self.PATCH_DEPTH_M, abs=0.02)
+
+    def test_stale_depth_publishes_nothing(self, grounder, mock_model_client):
+        mock_model_client.inference.return_value = {"output": [list(self.PATCH)]}
+        self._wire(grounder, stamp=10.0, depth_stamp=9.0)
+
+        self._trigger(grounder)
+
+        assert grounder.publishers_dict["d3"].publish.call_count == 0
+        assert "max_depth_age" in _warnings(grounder)
