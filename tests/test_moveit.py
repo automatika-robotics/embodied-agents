@@ -12,6 +12,14 @@ from agents.utils.moveit import (
     parse_srdf_group_states,
 )
 
+
+def _trajectory():
+    """A real RobotTrajectory for mocked cartesian responses: the component
+    assigns it to a message field, whose setter checks the type."""
+    from moveit_msgs.msg import RobotTrajectory
+
+    return RobotTrajectory()
+
 SAMPLE_SRDF = """
 <robot name="panda">
   <group name="panda_arm">
@@ -964,12 +972,15 @@ class TestDetectionObjects:
         msg.header.frame_id = frame
         for label, score, center, size in entries:
             box = Bbox3D()
-            box.center.position.x, box.center.position.y, box.center.position.z = center
+            # coerced: humble's generated messages reject ints on float fields
+            box.center.position.x, box.center.position.y, box.center.position.z = (
+                float(v) for v in center
+            )
             box.center.orientation.w = 1.0
-            box.size.x, box.size.y, box.size.z = size
+            box.size.x, box.size.y, box.size.z = (float(v) for v in size)
             msg.boxes.append(box)
             msg.labels.append(label)
-            msg.scores.append(score)
+            msg.scores.append(float(score))
         return msg
 
     def test_ids_rank_per_label_by_score(self):
@@ -2025,7 +2036,7 @@ class TestPickSequence:
         comp._gripper_client = TestGoalExecution._client()
         comp._cartesian_client = MagicMock()
         comp._cartesian_client.send_request.return_value = SimpleNamespace(
-            fraction=1.0, solution=MagicMock(), error_code=SimpleNamespace(val=1)
+            fraction=1.0, solution=_trajectory(), error_code=SimpleNamespace(val=1)
         )
         comp._apply_scene_client = MagicMock()
         comp._apply_scene_client.send_request.return_value = SimpleNamespace(
@@ -2150,7 +2161,7 @@ class TestPickSequence:
 
     def test_a_partial_descent_aborts(self, component):
         component._cartesian_client.send_request.return_value = SimpleNamespace(
-            fraction=0.4, solution=MagicMock(), error_code=SimpleNamespace(val=1)
+            fraction=0.4, solution=_trajectory(), error_code=SimpleNamespace(val=1)
         )
         handle = TestGoalExecution._goal_handle(self._pick_goal(target_object="mug"))
 
@@ -2202,7 +2213,7 @@ class TestPlaceSequence:
         comp._gripper_client = TestGoalExecution._client()
         comp._cartesian_client = MagicMock()
         comp._cartesian_client.send_request.return_value = SimpleNamespace(
-            fraction=1.0, solution=MagicMock(), error_code=SimpleNamespace(val=1)
+            fraction=1.0, solution=_trajectory(), error_code=SimpleNamespace(val=1)
         )
         comp._apply_scene_client = MagicMock()
         comp._apply_scene_client.send_request.return_value = SimpleNamespace(
@@ -2281,7 +2292,7 @@ class TestPlaceSequence:
 
     def test_a_partial_descent_aborts_before_release(self, component):
         component._cartesian_client.send_request.return_value = SimpleNamespace(
-            fraction=0.3, solution=MagicMock(), error_code=SimpleNamespace(val=1)
+            fraction=0.3, solution=_trajectory(), error_code=SimpleNamespace(val=1)
         )
         handle = TestGoalExecution._goal_handle(self._place_goal())
 
