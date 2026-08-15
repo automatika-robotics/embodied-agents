@@ -954,6 +954,10 @@ class Vision(DepthLiftMixin, ModelComponent):
             result["images"] = inference_input["images"]
             self.queue.put_nowait(result)
 
+    def _handle_websocket_streaming(self):
+        """Not used -- Vision publishes detections per frame."""
+        pass
+
     def _warmup(self):
         """Warm up and stat check"""
         import time
