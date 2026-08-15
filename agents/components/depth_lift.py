@@ -82,12 +82,18 @@ class DepthLiftMixin:
         info = getattr(self._lift_msg, "depth_camera_info", None)
         if info is None:
             return None
+        # width, height, K and P are full-frame calibration values that do not
+        # change when the driver applies binning or a region of interest
+        roi = getattr(info, "roi", None)
         key = (
             info.header.frame_id,
             info.width,
             info.height,
             tuple(info.k),
             tuple(info.p),
+            getattr(info, "binning_x", 0),
+            getattr(info, "binning_y", 0),
+            (roi.x_offset, roi.y_offset, roi.width, roi.height) if roi else None,
         )
         # Update key if it changed
         if key != self._intrinsics_key:
