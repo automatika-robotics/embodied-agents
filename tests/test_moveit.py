@@ -831,6 +831,156 @@ class TestCartesianGroupAndOrientation:
         sent = component_with_group._cartesian_client.send_request.call_args[0][0]
         assert sent.group_name == "panda_arm_cartesian"
 
+    @staticmethod
+    def _fk_client(x=0.1, y=0.2, z=0.3, w=0.927):
+        """FK service handler reporting a current end-effector orientation"""
+        from geometry_msgs.msg import PoseStamped
+
+        pose = PoseStamped()
+        orientation = pose.pose.orientation
+        orientation.x, orientation.y, orientation.z, orientation.w = x, y, z, w
+        client = MagicMock()
+        client.send_request.return_value = SimpleNamespace(
+            error_code=SimpleNamespace(val=1), pose_stamped=[pose]
+        )
+        return client
+
+    @staticmethod
+    def _unoriented_goal():
+        from automatika_embodied_agents.action import MoveManipulator
+        from geometry_msgs.msg import Pose
+
+        goal = MoveManipulator.Goal()
+        goal.mode = "cartesian"
+        waypoint = Pose()
+        waypoint.position.z = 0.5
+        goal.cartesian_waypoints = [waypoint]
+        return goal
+
+    def test_unset_waypoint_orientation_defaults_to_the_current_one(self, component):
+        component._cartesian_client = MagicMock()
+        component._cartesian_client.send_request.return_value = None
+        component._fk_client = self._fk_client()
+        goal = self._unoriented_goal()
+
+        component.main_action_callback(TestGoalExecution._goal_handle(goal))
+
+        sent = component._cartesian_client.send_request.call_args[0][0]
+        orientation = sent.waypoints[0].orientation
+        assert (orientation.x, orientation.y, orientation.z, orientation.w) == (
+            0.1,
+            0.2,
+            0.3,
+            0.927,
+        )
+        # the goal itself is not mutated
+        goal_orientation = goal.cartesian_waypoints[0].orientation
+        assert goal_orientation.x == 0.0 and goal_orientation.w == 1.0
+
+    def test_explicit_waypoint_orientation_is_preserved(self, component):
+        component._cartesian_client = MagicMock()
+        component._cartesian_client.send_request.return_value = None
+        component._fk_client = self._fk_client()
+        goal = self._unoriented_goal()
+        orientation = goal.cartesian_waypoints[0].orientation
+        orientation.z, orientation.w = 0.707, 0.707
+
+        component.main_action_callback(TestGoalExecution._goal_handle(goal))
+
+        sent = component._cartesian_client.send_request.call_args[0][0]
+        assert sent.waypoints[0].orientation.z == pytest.approx(0.707)
+        component._fk_client.send_request.assert_not_called()
+
+    def test_identity_orientation_counts_as_unset(self, component):
+        """ROS2 defaults an untouched Quaternion to identity, so identity on
+        the wire is read as "no preference", not as a target."""
+        component._cartesian_client = MagicMock()
+        component._cartesian_client.send_request.return_value = None
+        component._fk_client = self._fk_client()
+
+        # _cartesian_goal sets orientation.w = 1.0 explicitly
+        component.main_action_callback(
+            TestGoalExecution._goal_handle(TestCartesianGoals._cartesian_goal())
+        )
+
+        sent = component._cartesian_client.send_request.call_args[0][0]
+        assert sent.waypoints[0].orientation.x == pytest.approx(0.1)
+        component._fk_client.send_request.assert_called_once()
+
+    def test_unset_orientation_falls_back_to_identity_without_fk(self, component):
+        component._cartesian_client = MagicMock()
+        component._cartesian_client.send_request.return_value = None
+        component._fk_client = None
+
+        component.main_action_callback(
+            TestGoalExecution._goal_handle(self._unoriented_goal())
+        )
+
+        sent = component._cartesian_client.send_request.call_args[0][0]
+        assert sent.waypoints[0].orientation.w == 1.0
+
+    def test_fk_failure_falls_back_to_identity_with_a_warning(self, component):
+        component._cartesian_client = MagicMock()
+        component._cartesian_client.send_request.return_value = None
+        component._fk_client = MagicMock()
+        component._fk_client.send_request.return_value = SimpleNamespace(
+            error_code=SimpleNamespace(val=99999), pose_stamped=[]
+        )
+
+        component.main_action_callback(
+            TestGoalExecution._goal_handle(self._unoriented_goal())
+        )
+
+        sent = component._cartesian_client.send_request.call_args[0][0]
+        assert sent.waypoints[0].orientation.w == 1.0
+        warning = component.get_logger().warning.call_args[0][0]
+        assert "end-effector pose" in warning
+
+    def test_descend_holds_the_current_orientation(self, component):
+        component._cartesian_client = MagicMock()
+        component._cartesian_client.send_request.return_value = (
+            TestCartesianGoals._path_response(1.0)
+        )
+        component._exec_client = TestGoalExecution._client()
+        component._fk_client = self._fk_client()
+        handle = TestGoalExecution._goal_handle(MagicMock(), active=True)
+
+        outcome, _ = component._sequence_descent(
+            0.2, 0.0, 0.05, None, handle, deadline=time.time() + 10
+        )
+
+        assert outcome == "ok"
+        sent = component._cartesian_client.send_request.call_args[0][0]
+        orientation = sent.waypoints[0].orientation
+        assert (orientation.x, orientation.y, orientation.z, orientation.w) == (
+            0.1,
+            0.2,
+            0.3,
+            0.927,
+        )
+        assert sent.group_name == "panda_arm"
+
+    def test_descend_respects_an_explicit_orientation(self, component):
+        from geometry_msgs.msg import Quaternion
+
+        component._cartesian_client = MagicMock()
+        component._cartesian_client.send_request.return_value = (
+            TestCartesianGoals._path_response(1.0)
+        )
+        component._exec_client = TestGoalExecution._client()
+        component._fk_client = self._fk_client()
+        handle = TestGoalExecution._goal_handle(MagicMock(), active=True)
+
+        explicit = Quaternion(x=0.0, y=0.0, z=0.707, w=0.707)
+        outcome, _ = component._sequence_descent(
+            0.2, 0.0, 0.05, explicit, handle, deadline=time.time() + 10
+        )
+
+        assert outcome == "ok"
+        sent = component._cartesian_client.send_request.call_args[0][0]
+        assert sent.waypoints[0].orientation.z == pytest.approx(0.707)
+        component._fk_client.send_request.assert_not_called()
+
 
 class TestGripperActions:
     @staticmethod

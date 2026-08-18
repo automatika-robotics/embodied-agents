@@ -41,7 +41,7 @@ class MoveIt(Component):
     - **pose**: an end-effector pose, planned with the configured planner and reached within the configured position/orientation tolerances.
     - **joints**: explicit joint positions.
     - **named**: a named target defined in the robot's SRDF (e.g. "home", "ready"), resolved to joint positions by reading the SRDF from the running `move_group` node.
-    - **cartesian**: a straight-line end-effector path through a list of waypoints, computed with MoveIt's Cartesian path service and executed only if enough of the path is achievable (see `cartesian_fraction_threshold`).
+    - **cartesian**: a straight-line end-effector path through a list of waypoints, computed with MoveIt's Cartesian path service and executed only if enough of the path is achievable (see `cartesian_fraction_threshold`). Waypoints without an orientation preference (identity) hold the current end-effector orientation, read from move_group's FK service — an arbitrary default may not be achievable, especially on underactuated arms.
     - **pick**: a full grasp sequence on a planning scene object, named with `target_object` (a scene id or detection label) or located by `target_pose`: approach above it, open the gripper, descend, close, attach the object and lift it.
     - **place**: the inverse sequence for the currently attached object: approach above `target_pose`, descend, open the gripper, detach (the object stays in the scene where released) and retreat.
 
@@ -142,6 +142,7 @@ class MoveIt(Component):
         self._apply_scene_client: Optional[ServiceClientHandler] = None
         self._get_scene_client: Optional[ServiceClientHandler] = None
         self._clear_octomap_client: Optional[ServiceClientHandler] = None
+        self._fk_client: Optional[ServiceClientHandler] = None
 
         # Named targets read from the SRDF, resolved lazily and cached, and
         # the raw SRDF they were read from
@@ -269,6 +270,19 @@ class MoveIt(Component):
             ),
         )
 
+        from moveit_msgs.srv import GetPositionFK
+
+        # Current end-effector pose, used to give Cartesian motions an
+        # achievable default orientation
+        self._fk_client = ServiceClientHandler(
+            self,
+            config=ServiceClientConfig(
+                srv_type=GetPositionFK,
+                name=self._resolve_name("compute_fk"),
+                timeout_secs=self.config.server_timeout,
+            ),
+        )
+
     def destroy_all_service_clients(self):
         """Destroy service clients to the move_group node"""
         super().destroy_all_service_clients()
@@ -280,12 +294,13 @@ class MoveIt(Component):
             self._apply_scene_client,
             self._get_scene_client,
             self._clear_octomap_client,
+            self._fk_client,
         ):
             if handler:
                 self.destroy_client(handler.client)
         self._cartesian_client = self._planner_client = self._param_client = None
         self._apply_scene_client = self._get_scene_client = None
-        self._clear_octomap_client = None
+        self._clear_octomap_client = self._fk_client = None
 
     def custom_on_activate(self):
         """Activate component and check the configured planner against move_group"""
@@ -432,6 +447,77 @@ class MoveIt(Component):
             f"Named target '{name}' is not defined in the robot SRDF. "
             f"Available named targets per group: {available}"
         )
+
+    @staticmethod
+    def _orientation_given(orientation: Optional[Any]) -> bool:
+        """Whether a quaternion expresses an actual orientation preference.
+
+        ROS2 defaults an untouched Quaternion field to identity (w=1), so an
+        identity on the wire cannot be distinguished from "no preference"
+        and is read as such. Any quaternion with a rotation axis (a non-zero
+        x, y or z) counts as explicit.
+        """
+        return orientation is not None and any((
+            orientation.x,
+            orientation.y,
+            orientation.z,
+        ))
+
+    def _current_ee_orientation(self) -> Optional[Any]:
+        """Orientation of the end effector, read from move_group's FK service.
+
+        Used as the default orientation of Cartesian motions. The Cartesian
+        interpolator validates the achieved orientation of every step, and
+        holding the current orientation is achievable wherever the arm can
+        move at all, where an arbitrary default (identity) may not be —
+        especially on underactuated arms.
+
+        :returns: geometry_msgs Quaternion, or None when FK is unavailable
+        """
+        if not self._fk_client or not self.config.end_effector_link:
+            return None
+        from moveit_msgs.srv import GetPositionFK
+
+        request = GetPositionFK.Request()
+        request.header.frame_id = self.config.pose_reference_frame
+        request.fk_link_names = [self.config.end_effector_link]
+        # an empty diff state means "the current monitored state"
+        request.robot_state.is_diff = True
+        response = self._fk_client.send_request(request)
+        if (
+            response is None
+            or getattr(response.error_code, "val", 0) != 1
+            or not response.pose_stamped
+        ):
+            self.get_logger().warning(
+                "Could not read the current end-effector pose from "
+                f"'{self._resolve_name('compute_fk')}'"
+            )
+            return None
+        return response.pose_stamped[0].pose.orientation
+
+    def _orient_waypoints(self, waypoints: Any) -> List[Any]:
+        """Give waypoints without an orientation preference an achievable one.
+
+        Waypoints carrying no orientation (see `_orientation_given`) follow
+        the current end-effector orientation. Waypoints with an explicit
+        orientation pass through unchanged, as does everything when FK is
+        unavailable (identity, the previous behavior).
+        """
+        from copy import deepcopy
+
+        oriented, default = [], None
+        for waypoint in waypoints:
+            if self._orientation_given(waypoint.orientation):
+                oriented.append(waypoint)
+                continue
+            if default is None:
+                default = self._current_ee_orientation()
+            if default is not None:
+                waypoint = deepcopy(waypoint)
+                waypoint.orientation = default
+            oriented.append(waypoint)
+        return oriented
 
     def _scalings(self, goal: Any) -> Tuple[float, float]:
         """Per-goal scaling overrides, falling back to the configured values"""
@@ -623,7 +709,7 @@ class MoveIt(Component):
         """Compute a Cartesian path, returning the trajectory if usable"""
         velocity, acceleration = self._scalings(goal)
         request = build_cartesian_request(
-            goal.cartesian_waypoints,
+            self._orient_waypoints(goal.cartesian_waypoints),
             frame_id=goal.frame_id or self.config.pose_reference_frame,
             # A dedicated Cartesian group, if any. Carries the orientation-tracking IK
             group_name=self.config.cartesian_group_name or self.config.arm_group_name,
@@ -1104,8 +1190,8 @@ class MoveIt(Component):
     def _pose_motion_goal(self, x: float, y: float, z: float, orientation=None) -> Any:
         """A collision-aware motion goal to an end-effector position.
 
-        :param orientation: Optional end-effector orientation. All-zero or
-            None means no preference: identity, with the configured
+        :param orientation: Optional end-effector orientation. None or
+            identity means no preference, with the configured
             orientation tolerance giving the planner its freedom
         """
         from ..ros import ROSPoseStamped
@@ -1114,12 +1200,7 @@ class MoveIt(Component):
         target.header.frame_id = self.config.pose_reference_frame
         position = target.pose.position
         position.x, position.y, position.z = float(x), float(y), float(z)
-        if orientation is not None and any((
-            orientation.x,
-            orientation.y,
-            orientation.z,
-            orientation.w,
-        )):
+        if self._orientation_given(orientation):
             target.pose.orientation = orientation
         else:
             target.pose.orientation.w = 1.0
@@ -1162,15 +1243,12 @@ class MoveIt(Component):
             float(y),
             float(z),
         )
-        if orientation is not None and any((
-            orientation.x,
-            orientation.y,
-            orientation.z,
-            orientation.w,
-        )):
+        if self._orientation_given(orientation):
             waypoint.orientation = orientation
-        else:
-            waypoint.orientation.w = 1.0
+        # Without a preference the waypoint holds the orientation the
+        # approach motion just reached: straight down at the current
+        # orientation is achievable, an arbitrary default may not be
+        waypoint = self._orient_waypoints([waypoint])[0]
 
         request = build_cartesian_request(
             [waypoint],
