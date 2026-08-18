@@ -625,7 +625,8 @@ class MoveIt(Component):
         request = build_cartesian_request(
             goal.cartesian_waypoints,
             frame_id=goal.frame_id or self.config.pose_reference_frame,
-            group_name=self.config.arm_group_name,
+            # A dedicated Cartesian group, if any. Carries the orientation-tracking IK
+            group_name=self.config.cartesian_group_name or self.config.arm_group_name,
             link_name=self.config.end_effector_link,
             max_step=self.config.cartesian_max_step,
             jump_threshold=self.config.cartesian_jump_threshold,
@@ -911,9 +912,7 @@ class MoveIt(Component):
         )
 
         with self._scene_lock:
-            held = any(
-                entry.get("attached") for entry in self._scene_objects.values()
-            )
+            held = any(entry.get("attached") for entry in self._scene_objects.values())
         if held:
             return (
                 "Scene refresh skipped while an object is held: the scene "
@@ -1176,7 +1175,7 @@ class MoveIt(Component):
         request = build_cartesian_request(
             [waypoint],
             frame_id=self.config.pose_reference_frame,
-            group_name=self.config.arm_group_name,
+            group_name=self.config.cartesian_group_name or self.config.arm_group_name,
             link_name=self.config.end_effector_link,
             max_step=self.config.cartesian_max_step,
             jump_threshold=self.config.cartesian_jump_threshold,

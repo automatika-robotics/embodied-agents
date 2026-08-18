@@ -1,5 +1,6 @@
 """Tests for MoveIt request-building utilities — no ROS node needed."""
 
+import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -759,6 +760,76 @@ class TestCartesianGoals:
         assert result.success is False
         assert "No response" in result.message
         handle.abort.assert_called_once()
+
+
+class TestCartesianGroupAndOrientation:
+    """The Cartesian planning group override, introduced so underactuated
+    arms can pair position-only IK for pose goals with orientation-tracking
+    IK for Cartesian paths."""
+
+    @staticmethod
+    def _component(rclpy_init, **config_fields):
+        pytest.importorskip("moveit_msgs.msg")
+        from agents.components.moveit import MoveIt
+        from agents.config import MoveItConfig
+
+        comp = MoveIt(
+            config=MoveItConfig(
+                arm_group_name="panda_arm",
+                end_effector_link="panda_link8",
+                **config_fields,
+            ),
+            component_name=f"test_moveit_cart_group_{len(config_fields)}",
+        )
+        comp.get_logger = MagicMock()
+        comp.health_status = MagicMock()
+        return comp
+
+    @pytest.fixture
+    def component(self, rclpy_init):
+        return self._component(rclpy_init)
+
+    @pytest.fixture
+    def component_with_group(self, rclpy_init):
+        return self._component(rclpy_init, cartesian_group_name="panda_arm_cartesian")
+
+    def test_cartesian_request_uses_the_arm_group_by_default(self, component):
+        component._cartesian_client = MagicMock()
+        component._cartesian_client.send_request.return_value = None
+        component.main_action_callback(
+            TestGoalExecution._goal_handle(TestCartesianGoals._cartesian_goal())
+        )
+
+        sent = component._cartesian_client.send_request.call_args[0][0]
+        assert sent.group_name == "panda_arm"
+
+    def test_cartesian_request_uses_the_configured_cartesian_group(
+        self, component_with_group
+    ):
+        component_with_group._cartesian_client = MagicMock()
+        component_with_group._cartesian_client.send_request.return_value = None
+        component_with_group.main_action_callback(
+            TestGoalExecution._goal_handle(TestCartesianGoals._cartesian_goal())
+        )
+
+        sent = component_with_group._cartesian_client.send_request.call_args[0][0]
+        assert sent.group_name == "panda_arm_cartesian"
+
+    def test_descend_uses_the_configured_cartesian_group(self, component_with_group):
+        component_with_group._cartesian_client = MagicMock()
+        component_with_group._cartesian_client.send_request.return_value = (
+            TestCartesianGoals._path_response(1.0)
+        )
+        component_with_group._exec_client = TestGoalExecution._client()
+        handle = TestGoalExecution._goal_handle(MagicMock(), active=True)
+
+        outcome, _ = component_with_group._sequence_descent(
+            0.2, 0.0, 0.05, None, handle, deadline=time.time() + 10
+        )
+
+        assert outcome == "ok"
+        sent = component_with_group._cartesian_client.send_request.call_args[0][0]
+        assert sent.group_name == "panda_arm_cartesian"
 
 
 class TestGripperActions:

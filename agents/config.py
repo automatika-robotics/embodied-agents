@@ -568,6 +568,8 @@ class MoveItConfig(BaseComponentConfig):
     :type arm_group_name: str
     :param gripper_group_name: Name of the SRDF planning group of the gripper (e.g. "hand"). Required for gripper control when `gripper_mode` is "move_group". Default is None.
     :type gripper_group_name: Optional[str]
+    :param cartesian_group_name: Planning group used for Cartesian path requests (straight-line motions, including the descend/retreat steps of pick and place). Default is None, which uses `arm_group_name`. Setting a separate group lets an underactuated (e.g. 5-DOF) arm pair a position-only IK configuration on the arm group (for pose goals) with an orientation-tracking IK configuration on a twin group over the same chain. MoveIt's Cartesian interpolator validates the achieved orientation of every step against a fixed precision the request cannot override, which a position-only solver cannot meet.
+    :type cartesian_group_name: Optional[str]
     :param end_effector_link: End-effector link that pose targets and Cartesian waypoints refer to. Empty (default) uses the planning group's default tip link.
     :type end_effector_link: str
     :param pose_reference_frame: Default reference frame for pose targets that carry an empty `header.frame_id`. Empty (default) uses move_group's planning frame.
@@ -649,6 +651,7 @@ class MoveItConfig(BaseComponentConfig):
 
     arm_group_name: str = field()
     gripper_group_name: Optional[str] = field(default=None)
+    cartesian_group_name: Optional[str] = field(default=None)
     end_effector_link: str = field(default="")
     pose_reference_frame: str = field(default="")
     planning_pipeline: str = field(default="")
