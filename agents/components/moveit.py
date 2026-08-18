@@ -1024,6 +1024,7 @@ class MoveIt(Component):
                 message,
                 min_thickness=self.config.min_object_thickness,
                 padding=self.config.object_padding,
+                include_labels=self.config.scene_detection_labels,
             ),
             now,
         )

@@ -496,6 +496,7 @@ def collision_objects_from_detections(
     min_thickness: float = 0.01,
     padding: float = 0.0,
     id_prefix: str = DETECTION_ID_PREFIX,
+    include_labels: Optional[Sequence[str]] = None,
 ) -> List[Any]:
     """Turn a Detections3D message into collision objects.
 
@@ -509,15 +510,24 @@ def collision_objects_from_detections(
     :param min_thickness: Floor for each box extent in meters
     :param padding: Margin added on every side of every box in meters, for
         planning clearance around imperfectly measured objects
+    :param include_labels: Labels allowed into the scene. None admits all.
+        A filtered-out object is invisible to planning even when it physically
+        sits inside the workspace, so fixed surroundings should be modelled in
+        the robot description or as manual objects
     :returns: moveit_msgs CollisionObjects with operation ADD
     """
     frame = detections.header.frame_id
     labels = list(detections.labels)
     scores = list(detections.scores)
+    allowed = set(include_labels) if include_labels is not None else None
     entries = []
     for index, box in enumerate(detections.boxes):
+        label = labels[index] if index < len(labels) else ""
+        # Filtered before ranking, so admitted ids stay contiguous
+        if allowed is not None and label not in allowed:
+            continue
         entries.append((
-            labels[index] if index < len(labels) else "",
+            label,
             scores[index] if index < len(scores) else 0.0,
             box,
         ))

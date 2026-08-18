@@ -1204,6 +1204,32 @@ class TestDetectionObjects:
             msg.scores.append(float(score))
         return msg
 
+    def test_include_labels_admits_only_listed_labels(self):
+        """Filtered before ranking, so admitted ids stay contiguous even
+        when a filtered label sits between two admitted ones."""
+        from agents.utils.moveit import collision_objects_from_detections
+
+        objects = collision_objects_from_detections(
+            self._detections([
+                ("orange", 0.9, (0.4, 0.0, 0.05), (0.06, 0.06, 0.06)),
+                ("dining table", 0.8, (0.5, 0.0, 0.2), (0.6, 0.8, 0.3)),
+                ("orange", 0.7, (0.6, 0.1, 0.05), (0.06, 0.06, 0.06)),
+            ]),
+            include_labels=["orange"],
+        )
+        assert sorted(o.id for o in objects) == ["det__orange_0", "det__orange_1"]
+
+    def test_no_filter_admits_everything(self):
+        from agents.utils.moveit import collision_objects_from_detections
+
+        objects = collision_objects_from_detections(
+            self._detections([
+                ("orange", 0.9, (0.4, 0.0, 0.05), (0.06, 0.06, 0.06)),
+                ("dining table", 0.8, (0.5, 0.0, 0.2), (0.6, 0.8, 0.3)),
+            ])
+        )
+        assert len(objects) == 2
+
     def test_ids_rank_per_label_by_score(self):
         """The strongest orange stays det__orange_0 between refreshes of a
         static scene, without needing a tracker."""
@@ -1832,6 +1858,36 @@ class TestSceneRefresh:
         )
         assert component._scene_objects["det__orange_0"]["source"] == "detection"
         assert "2 detected object(s)" in message
+
+    def test_configured_label_filter_reaches_the_scene(self, rclpy_init):
+        from agents.components import MoveIt
+        from agents.config import MoveItConfig
+        from agents.ros import Topic
+
+        comp = MoveIt(
+            config=MoveItConfig(
+                arm_group_name="arm", scene_detection_labels=["orange"]
+            ),
+            component_name="m_refresh_filtered",
+            inputs=[Topic(name="d3", msg_type="Detections3D")],
+        )
+        comp.get_logger = MagicMock()
+        comp._apply_scene_client = MagicMock()
+        comp._apply_scene_client.send_request.return_value = SimpleNamespace(
+            success=True
+        )
+        self._wire(
+            comp,
+            self._detections([
+                ("orange", 0.9, (0.3, 0.0, 0.05), (0.06, 0.06, 0.06)),
+                ("dining table", 0.8, (0.5, 0.0, 0.2), (0.6, 0.8, 0.3)),
+            ]),
+        )
+
+        comp.update_planning_scene.__wrapped__(comp)
+
+        scene = self._applied_scene(comp)
+        assert {o.id for o in scene.world.collision_objects} == {"det__orange_0"}
 
     def test_without_a_detections_input_it_says_so(self, rclpy_init):
         from agents.components import MoveIt

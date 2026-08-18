@@ -630,6 +630,8 @@ class MoveItConfig(BaseComponentConfig):
     :type scene_update_mode: Literal["manual", "on_goal", "continuous"]
     :param scene_update_rate: Scene refreshes per second in "continuous" mode. Default is 1.0.
     :type scene_update_rate: float
+    :param scene_detection_labels: Detection labels allowed into the planning scene. Default is None, which admits every label.
+    :type scene_detection_labels: Optional[List[str]]
     :param scene_object_ttl: Seconds a detection-sourced object stays in the scene after the detector stops reporting it, before a refresh removes it. Bridges detection dropouts without keeping ghost obstacles around. Default is 5.0.
     :type scene_object_ttl: float
     :param object_padding: Margin in meters added on every side of detected objects, for planning clearance around imperfectly measured geometry. Default is 0.0.
@@ -698,6 +700,7 @@ class MoveItConfig(BaseComponentConfig):
         validator=base_validators.in_(["manual", "on_goal", "continuous"]),
     )
     scene_update_rate: float = field(default=1.0, validator=base_validators.gt(0.0))
+    scene_detection_labels: Optional[List[str]] = field(default=None)
     scene_object_ttl: float = field(default=5.0, validator=base_validators.gt(0.0))
     object_padding: float = field(
         default=0.0, validator=base_validators.in_range(min_value=0.0, max_value=1.0)
