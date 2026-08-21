@@ -2516,6 +2516,50 @@ class TestPickSequence:
             [0.06, 0.06, 0.1]
         )
 
+    def test_side_approach_slides_in_and_lifts_straight_up(self, component):
+        """A mouth that takes objects horizontally approaches from BEHIND at
+        grasp height, slides in along the bearing, and lifts straight up —
+        hovering above and descending would close on the object's crown."""
+        component.config.approach_mode = "side"
+        handle = TestGoalExecution._goal_handle(self._pick_goal(target_object="mug"))
+
+        result = component.main_action_callback(handle)
+
+        assert result.success
+        assert self._states(handle) == [
+            "PRE_GRASP", "OPEN_GRIPPER", "DESCEND", "GRASP", "ATTACH", "LIFT",
+        ]
+        move_goals = [
+            call[0][0]
+            for call in component._move_client.send_request.call_args_list
+        ]
+        assert len(move_goals) == 2  # the pre-grasp, then the lift
+        # pre-grasp BEHIND the target at grasp height: center (0.4, 0, 0.05)
+        # backed off along the bearing by half-width 0.03 + clearance 0.1
+        pre_grasp = (
+            move_goals[0].request.goal_constraints[0]
+            .position_constraints[0].constraint_region.primitive_poses[0].position
+        )
+        assert pre_grasp.x == pytest.approx(0.27)
+        assert pre_grasp.y == pytest.approx(0.0)
+        assert pre_grasp.z == pytest.approx(0.05)
+        # the slide targets the object's center at grasp height
+        slide = (
+            component._cartesian_client.send_request.call_args[0][0].waypoints[0]
+        )
+        assert (slide.position.x, slide.position.z) == (
+            pytest.approx(0.4),
+            pytest.approx(0.05),
+        )
+        # the lift goes straight up to clearance above the box top
+        lift = (
+            move_goals[1].request.goal_constraints[0]
+            .position_constraints[0].constraint_region.primitive_poses[0].position
+        )
+        assert lift.x == pytest.approx(0.4)
+        assert lift.z == pytest.approx(0.2)
+        assert component._scene_objects["det__mug_0"]["attached"] == "hand"
+
     def test_pick_resolves_labels_to_the_best_rank(self, component):
         component._scene_objects["det__mug_1"] = {
             "source": "detection", "last_seen": 0.0,

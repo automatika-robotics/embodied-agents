@@ -642,6 +642,8 @@ class MoveItConfig(BaseComponentConfig):
     :type touch_links: Optional[List[str]]
     :param approach_clearance: Height in meters above a pick or place target at which the collision-aware approach motion ends and the straight-line descent begins; also the height objects are lifted or retreated to. Default is 0.1.
     :type approach_clearance: float
+    :param approach_mode: Geometry of the pick approach. "above" (default) hovers over the target and descends vertically, correct for grippers that can point down at their grasp. "side" puts the pre-grasp BEHIND the target at grasp height, backed off horizontally along the base-to-target bearing, so the straight-line descent becomes a horizontal slide into the grasp and the lift goes straight up instead of back to the pre-grasp point. For grippers whose mouths must take the object horizontally, such as surface-height grasps on underactuated arms.
+    :type approach_mode: Literal["above", "side"]
     :param target_match_radius: How far in meters a scene object may be from a pick goal's target_pose and still be taken as the intended target. Tighten for dense scenes, loosen for coarse target coordinates such as language-model guesses. Default is 0.2.
     :type target_match_radius: float
 
@@ -708,6 +710,9 @@ class MoveItConfig(BaseComponentConfig):
     min_object_thickness: float = field(default=0.01, validator=base_validators.gt(0.0))
     touch_links: Optional[List[str]] = field(default=None)
     approach_clearance: float = field(default=0.1, validator=base_validators.gt(0.0))
+    approach_mode: Literal["above", "side"] = field(
+        default="above", validator=base_validators.in_(["above", "side"])
+    )
     target_match_radius: float = field(default=0.2, validator=base_validators.gt(0.0))
 
     @goal_orientation_tolerance.validator

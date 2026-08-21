@@ -1430,9 +1430,11 @@ class MoveIt(Component):
     ) -> str:
         """Grasp a scene object and lift it.
 
-        Approach above the object (collision-aware), open, descend straight
-        onto it (contact permitted), close, attach, lift. Throughout, the
-        touch links may contact the target's box (every other link keeps
+        Approach the object (collision-aware), open, descend straight onto it
+        (contact permitted), close, attach, lift. With approach_mode "side"
+        the approach comes from behind at grasp height, the descent becomes
+        the slide into the grasp, and the lift goes straight up. Throughout,
+        the touch links may contact the target's box (every other link keeps
         avoiding it) and scene refreshes are frozen. After an interruption
         both stay that way until a motion succeeds, so the arm can retreat.
 
@@ -1447,13 +1449,31 @@ class MoveIt(Component):
         # link keeps avoiding it.
         self._contact_freeze = object_id
         self._set_grasp_contact(object_id, True)
-        approach_z = center[2] + size[2] / 2 + self.config.approach_clearance
         orientation = goal.target_pose.pose.orientation
+
+        above = (
+            center[0],
+            center[1],
+            center[2] + size[2] / 2 + self.config.approach_clearance,
+        )
+        approach = above
+        side = self.config.approach_mode == "side"
+        if side:
+            # Pre-grasp BEHIND the target at grasp height, backed off along
+            # the base->target bearing
+            horizontal = (center[0] ** 2 + center[1] ** 2) ** 0.5
+            standoff = max(size[0], size[1]) / 2 + self.config.approach_clearance
+            scale = (
+                max(horizontal - standoff, 0.0) / horizontal
+                if horizontal > 1e-6
+                else 0.0
+            )
+            approach = (center[0] * scale, center[1] * scale, center[2])
 
         self._publish_state(goal_handle, "PRE_GRASP")
         outcome, message = self._sequence_motion(
             self._move_client,
-            self._pose_motion_goal(center[0], center[1], approach_z, orientation),
+            self._pose_motion_goal(*approach, orientation),
             goal_handle,
             deadline,
         )
@@ -1515,9 +1535,10 @@ class MoveIt(Component):
         self._contact_freeze = None
 
         self._publish_state(goal_handle, "LIFT")
+        # In side mode the lift goes straight up, position-only
         outcome, message = self._sequence_motion(
             self._move_client,
-            self._pose_motion_goal(center[0], center[1], approach_z, orientation),
+            self._pose_motion_goal(*above, None if side else orientation),
             goal_handle,
             deadline,
         )
