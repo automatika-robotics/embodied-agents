@@ -96,8 +96,7 @@ def resolve_lift_camera(
     pictures = [
         t
         for t in inputs
-        if issubclass(t.msg_type, (Image, RGBD))
-        and (not depth or t.name != depth.name)
+        if issubclass(t.msg_type, (Image, RGBD)) and (not depth or t.name != depth.name)
     ]
     if camera_info and not issubclass(camera_info.msg_type, CameraInfo):
         raise TypeError(
@@ -277,6 +276,7 @@ def boxes_from_detections(
     boxes_2d: Sequence[Sequence[float]],
     image_size: Optional[Tuple[int, int]] = None,
     depth_range: Tuple[float, float] = (0.1, 5.0),
+    camera_position: Optional[Sequence[float]] = None,
 ) -> List[Box3D]:
     """Lift 2D detections into metric boxes.
 
@@ -290,6 +290,13 @@ def boxes_from_detections(
     :param image_size: Size of the image the boxes were found in as
         (width, height), taken from the depth image if unset
     :param depth_range: Usable range of the sensor in meters
+    :param camera_position: Position of the camera in the frame the boxes come
+        back in, which must be gravity aligned (z up). When given, each box's
+        center is pushed away from the camera along the view ray by half the
+        box's smallest extent, horizontally. The push
+        assumes the hidden half mirrors the visible one. Exact for spheres and
+        face-on boxes. Vertical extant is left alone as its observed in most
+        cases.
     :returns: The boxes that could be placed, in the frame the detector's
         camera pose was given in
     """
@@ -322,6 +329,11 @@ def boxes_from_detections(
     if not detected:
         return []
 
+    camera = (
+        None
+        if camera_position is None
+        else np.asarray(camera_position, dtype=np.float64)
+    )
     boxes = []
     for box in detected:
         try:
@@ -332,6 +344,14 @@ def boxes_from_detections(
             continue
         center = np.asarray(box.center, dtype=np.float64)
         size = np.asarray(box.size, dtype=np.float64)
+        if camera is not None:
+            # push center within the object (assumptions in docstring)
+            ray = center - camera
+            norm = float(np.linalg.norm(ray))
+            if norm > 1e-6:
+                push = float(size.min()) / 2.0
+                center[0] += ray[0] / norm * push
+                center[1] += ray[1] / norm * push
         boxes.append(
             Box3D(
                 index=index,

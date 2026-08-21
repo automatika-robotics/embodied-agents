@@ -104,8 +104,11 @@ class DepthLiftMixin:
     def _depth_detector(self):
         """The 3D detector for the lifted camera, and the depth to run it on.
 
-        :returns: (detector, depth in millimeters), both None when this tick
-            cannot be lifted
+        :returns: (detector, depth in millimeters, camera position in the
+            detections frame), all None when this tick cannot be lifted. The
+            camera position is also None when the detections stay in the
+            camera's own frame, where the surface-bias correction it feeds
+            does not apply
         """
         from ..callbacks import image_pre_processing, process_encoding
 
@@ -113,7 +116,7 @@ class DepthLiftMixin:
 
         depth_msg = self._depth_for()
         if depth_msg is None:
-            return None, None
+            return None, None, None
 
         intrinsics = self._camera_intrinsics()
         if intrinsics is None:
@@ -124,7 +127,7 @@ class DepthLiftMixin:
                 "or use an RGBD input, which carries its own.",
                 error=True,
             )
-            return None, None
+            return None, None, None
 
         # The intrinsics need to describe the depth image
         if (intrinsics.width, intrinsics.height) != (depth_msg.width, depth_msg.height):
@@ -136,7 +139,7 @@ class DepthLiftMixin:
                 "placed in metric space until the two agree.",
                 error=True,
             )
-            return None, None
+            return None, None, None
 
         # Check if the streams encoding changed (unlikely)
         if depth_msg.encoding != self._depth_encoding_key:
@@ -175,7 +178,7 @@ class DepthLiftMixin:
                     f"'{target}' has not been resolved yet, so detections are "
                     "not being published in 3D.",
                 )
-                return None, None
+                return None, None, None
             translation, rotation = listener.translation, listener.rotation
 
         # Rebuilding is cheap, so the detector is kept only until something it
@@ -197,7 +200,7 @@ class DepthLiftMixin:
                 depth_range=(self.config.min_depth, self.config.max_depth),
             )
             self._detector_key = key
-        return self._detector, depth_mm
+        return self._detector, depth_mm, translation
 
     # TODO: Upstream to sugarcoat component
     def _warn_once(self, key: str, message: str, error: bool = False) -> None:

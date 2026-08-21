@@ -885,7 +885,7 @@ class Vision(DepthLiftMixin, ModelComponent):
         # the color image, which an RGBD frame carries nested
         color = getattr(self._lift_msg, "rgb", self._lift_msg)
 
-        detector, depth_mm = self._depth_detector()
+        detector, depth_mm, camera_position = self._depth_detector()
         if detector is None:
             return None
 
@@ -897,6 +897,7 @@ class Vision(DepthLiftMixin, ModelComponent):
                 pixels,
                 image_size=(color.width, color.height),
                 depth_range=(self.config.min_depth, self.config.max_depth),
+                camera_position=camera_position,
             )
             # A box built from a handful of depth pixels is not trustworthy
             if box.validity >= self.config.min_depth_validity

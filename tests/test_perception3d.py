@@ -151,12 +151,14 @@ class TestLifting:
             frame_id="camera_optical",
         )
 
-    def _lift(self, boxes_2d, depth=None, **kwargs):
+    def _lift(self, boxes_2d, depth=None, camera_position=None, **kwargs):
         from agents.utils.perception3d import boxes_from_detections, make_detector
 
         detector = make_detector(self._intrinsics(), **kwargs)
         depth_mm = prepare_depth(scene() if depth is None else depth)
-        return boxes_from_detections(detector, depth_mm, boxes_2d)
+        return boxes_from_detections(
+            detector, depth_mm, boxes_2d, camera_position=camera_position
+        )
 
     def test_patch_is_placed_at_its_distance_and_size(self):
         boxes = self._lift([PATCH])
@@ -203,6 +205,63 @@ class TestLifting:
         here = self._lift([PATCH])[0]
         moved = self._lift([PATCH], translation=(1.0, 0.0, 0.0))[0]
         assert moved.center[0] - here.center[0] == pytest.approx(1.0, abs=0.01)
+
+    @staticmethod
+    def _deep_scene():
+        """A scene whose patch has depth of its own (a ramp), because a
+        perfectly flat patch has a zero depth extent and correctly gets no
+        surface-bias push at all."""
+        depth = np.full((HEIGHT, WIDTH), BACKGROUND_DEPTH_M, dtype=np.float32)
+        x1, y1, x2, y2 = PATCH
+        ramp = np.linspace(0.48, 0.52, x2 - x1, dtype=np.float32)
+        depth[y1:y2, x1:x2] = ramp[None, :]
+        return depth
+
+    def test_camera_position_pushes_the_center_past_the_surface(self):
+        """Depth pixels come from an object's camera-facing skin, so with the
+        camera's position known the center must move past that surface, along
+        the view ray, by half the box's smallest extent — and horizontally
+        only, since the vertical center is genuinely observed."""
+        body = {"rotation": (-0.5, 0.5, -0.5, 0.5)}  # boxes in x-fwd, z-up axes
+        depth = self._deep_scene()
+        surface = self._lift([PATCH], depth=depth, **body)[0]
+        pushed = self._lift(
+            [PATCH], depth=depth, camera_position=(0.0, 0.0, 0.0), **body
+        )[0]
+
+        ray = np.asarray(surface.center)  # the camera sits at the origin
+        expected = ray + min(surface.size) / 2 * ray / np.linalg.norm(ray)
+        assert pushed.center[0] == pytest.approx(expected[0], abs=1e-9)
+        assert pushed.center[1] == pytest.approx(expected[1], abs=1e-9)
+        assert pushed.center[2] == pytest.approx(surface.center[2], abs=1e-9)
+        assert pushed.size == surface.size
+        # the push is real: the corrected center is farther from the camera
+        assert pushed.center[0] > surface.center[0]
+
+    def test_a_flat_object_gets_no_push(self):
+        """The flat wall patch has a zero depth extent, and half its smallest
+        extent is honestly zero: the estimator never invents depth."""
+        body = {"rotation": (-0.5, 0.5, -0.5, 0.5)}
+        surface = self._lift([PATCH], **body)[0]
+        pushed = self._lift([PATCH], camera_position=(0.0, 0.0, 0.0), **body)[0]
+        assert pushed.center == pytest.approx(surface.center, abs=1e-9)
+
+    def test_the_push_follows_the_ray_from_the_cameras_own_position(self):
+        """With the camera mounted away from the origin the push direction is
+        camera-to-box, not origin-to-box."""
+        camera = (-0.2, 0.1, 0.4)
+        pose = {"rotation": (-0.5, 0.5, -0.5, 0.5), "translation": camera}
+        depth = self._deep_scene()
+        surface = self._lift([PATCH], depth=depth, **pose)[0]
+        pushed = self._lift([PATCH], depth=depth, camera_position=camera, **pose)[0]
+
+        ray = np.asarray(surface.center) - camera
+        expected = np.asarray(surface.center) + (
+            min(surface.size) / 2 * ray / np.linalg.norm(ray)
+        )
+        assert pushed.center[0] == pytest.approx(expected[0], abs=1e-9)
+        assert pushed.center[1] == pytest.approx(expected[1], abs=1e-9)
+        assert pushed.center[2] == pytest.approx(surface.center[2], abs=1e-9)
 
     def test_boxes_without_depth_are_dropped_and_indices_survive(self):
         """kompass drops boxes it cannot place, so the surviving boxes must
