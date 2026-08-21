@@ -1859,6 +1859,28 @@ class TestSceneRefresh:
         assert component._scene_objects["det__orange_0"]["source"] == "detection"
         assert "2 detected object(s)" in message
 
+    def test_refresh_records_extents_with_and_without_padding(self, component):
+        """The scene box carries planning padding, but attachment needs the
+        measured extents back: a padded box overlaps whatever the object
+        rests on, poisoning the first post-grasp motion's start state."""
+        component.config.object_padding = 0.01
+        self._wire(
+            component,
+            self._detections([
+                ("orange", 0.9, (0.3, 0.0, 0.05), (0.06, 0.06, 0.06)),
+                ("card", 0.8, (0.5, 0.1, 0.01), (0.05, 0.05, 0.001)),
+            ]),
+        )
+
+        component.update_planning_scene.__wrapped__(component)
+
+        orange = component._scene_objects["det__orange_0"]
+        assert orange["size"] == pytest.approx((0.08, 0.08, 0.08))
+        assert orange["attach_size"] == pytest.approx((0.06, 0.06, 0.06))
+        # stripping padding can never produce a degenerate box
+        card = component._scene_objects["det__card_0"]
+        assert card["attach_size"][2] == pytest.approx(0.01)
+
     def test_configured_label_filter_reaches_the_scene(self, rclpy_init):
         from agents.components import MoveIt
         from agents.config import MoveItConfig
@@ -2369,6 +2391,53 @@ class TestPickSequence:
         assert request.waypoints[0].position.z == pytest.approx(0.05)
         # the object now travels with the arm
         assert component._scene_objects["det__mug_0"]["attached"] == "hand"
+
+    def test_attach_reshapes_the_box_to_measured_extents_first(self, component):
+        """Attaching by id carries the world box along, so just before the
+        attach the box is re-applied at the extents measured without planning
+        padding — the padded box would rest inside the support surface."""
+        from moveit_msgs.msg import CollisionObject
+
+        component._scene_objects["det__mug_0"]["attach_size"] = (0.04, 0.04, 0.08)
+        handle = TestGoalExecution._goal_handle(self._pick_goal(target_object="mug"))
+
+        result = component.main_action_callback(handle)
+
+        assert result.success
+        applies = [
+            call[0][0].scene
+            for call in component._apply_scene_client.send_request.call_args_list
+        ]
+        reshapes = [
+            scene
+            for scene in applies
+            if scene.world.collision_objects
+            and scene.world.collision_objects[0].operation == CollisionObject.ADD
+        ]
+        attaches = [
+            scene for scene in applies if scene.robot_state.attached_collision_objects
+        ]
+        assert len(reshapes) == 1 and len(attaches) == 1
+        assert applies.index(reshapes[0]) < applies.index(attaches[0])
+        box = reshapes[0].world.collision_objects[0]
+        assert list(box.primitives[0].dimensions) == pytest.approx([0.04, 0.04, 0.08])
+
+    def test_attach_keeps_the_size_of_objects_added_by_hand(self, component):
+        """Manual objects were never padded: without a recorded attach_size
+        the re-shape uses the size as given."""
+        handle = TestGoalExecution._goal_handle(self._pick_goal(target_object="mug"))
+
+        result = component.main_action_callback(handle)
+
+        assert result.success
+        reshape = next(
+            call[0][0].scene.world.collision_objects[0]
+            for call in component._apply_scene_client.send_request.call_args_list
+            if call[0][0].scene.world.collision_objects
+        )
+        assert list(reshape.primitives[0].dimensions) == pytest.approx(
+            [0.06, 0.06, 0.1]
+        )
 
     def test_pick_resolves_labels_to_the_best_rank(self, component):
         component._scene_objects["det__mug_1"] = {

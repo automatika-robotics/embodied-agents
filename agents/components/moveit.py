@@ -1048,6 +1048,15 @@ class MoveIt(Component):
                 dimensions = obj.primitives[0].dimensions
                 entry["center"] = (position.x, position.y, position.z)
                 entry["size"] = (dimensions[0], dimensions[1], dimensions[2])
+                # NOTE: The padded box overlaps whatever the object is resting
+                # on, which would put the first post-grasp motion's start state
+                # in collision. Add the measured extents without the planning
+                # padding, for re-shaping the box at attachment.
+                padding = 2 * self.config.object_padding
+                entry["attach_size"] = tuple(
+                    max(extent - padding, self.config.min_object_thickness)
+                    for extent in entry["size"]
+                )
                 added.append(obj.id)
             for object_id in stale:
                 self._scene_objects.pop(object_id, None)
@@ -1355,6 +1364,8 @@ class MoveIt(Component):
 
         :returns: Outcome of the last step, for _finish_sequence
         """
+        from ..utils.moveit import build_collision_object
+
         object_id, center, size = self._resolve_pick_target(goal)
         self.get_logger().info(f"Picking '{object_id}' at {center}")
         approach_z = center[2] + size[2] / 2 + self.config.approach_clearance
@@ -1400,6 +1411,23 @@ class MoveIt(Component):
             return "aborted"
 
         self._publish_state(goal_handle, "ATTACH")
+        # Attaching by id carries the world box along with the link, so
+        # re-shape it first to the measured extents without planning padding
+        # (manual objects were never padded and keep their size).
+        with self._scene_lock:
+            entry = self._scene_objects.get(object_id, {})
+            attach_size = entry.get("attach_size", size)
+        self._apply_scene(
+            [
+                build_collision_object(
+                    object_id,
+                    self.config.pose_reference_frame,
+                    center,
+                    attach_size,
+                    min_thickness=self.config.min_object_thickness,
+                )
+            ]
+        )
         ok, message = self._do_attach(object_id)
         if not ok:
             result.message = message
