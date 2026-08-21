@@ -469,6 +469,7 @@ def build_remove_object(object_id: str) -> Any:
 def build_scene_diff(
     collision_objects: Sequence[Any] = (),
     attached_objects: Sequence[Any] = (),
+    allowed_collision_matrix: Any = None,
 ) -> Any:
     """Wrap scene changes as one diff against move_group's current scene.
 
@@ -477,6 +478,9 @@ def build_scene_diff(
 
     :param collision_objects: World objects to add, move or remove
     :param attached_objects: Objects to attach to or detach from the robot
+    :param allowed_collision_matrix: Complete AllowedCollisionMatrix to
+        install. A diff cannot express single entries, so the matrix read from
+        move_group is edited and carried back whole
     :returns: moveit_msgs PlanningScene diff
     """
     ensure_moveit_msgs()
@@ -487,7 +491,42 @@ def build_scene_diff(
     scene.robot_state.is_diff = True
     scene.world.collision_objects.extend(collision_objects)
     scene.robot_state.attached_collision_objects.extend(attached_objects)
+    if allowed_collision_matrix is not None:
+        scene.allowed_collision_matrix = allowed_collision_matrix
     return scene
+
+
+def set_acm_contact(
+    acm: Any, links: Sequence[str], object_id: str, allowed: bool
+) -> Any:
+    """Set the allowed-collision entries between gripper links and one object.
+
+    Names absent from the matrix are appended with everything forbidden, then
+    the link-object pairs are set symmetrically.
+
+    :param acm: moveit_msgs AllowedCollisionMatrix, edited in place
+    :param links: Robot links allowed to touch the object
+    :param object_id: Scene object the links may touch
+    :param allowed: True to allow the contact, False to forbid it again
+    :returns: The same matrix, for passing into a scene diff
+    """
+    ensure_moveit_msgs()
+    from moveit_msgs.msg import AllowedCollisionEntry
+
+    names = list(acm.entry_names)
+    for name in [*links, object_id]:
+        if name not in names:
+            names.append(name)
+            for row in acm.entry_values:
+                row.enabled.append(False)
+            acm.entry_values.append(AllowedCollisionEntry(enabled=[False] * len(names)))
+    acm.entry_names = names
+    column = names.index(object_id)
+    for link in links:
+        row = names.index(link)
+        acm.entry_values[row].enabled[column] = allowed
+        acm.entry_values[column].enabled[row] = allowed
+    return acm
 
 
 def collision_objects_from_detections(

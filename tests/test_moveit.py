@@ -1176,6 +1176,47 @@ class TestSceneBuilders:
         assert detached.object.operation == CollisionObject.REMOVE
         assert detached.link_name == ""
 
+    def test_acm_contact_is_symmetric_reversible_and_grows_the_matrix(self):
+        from moveit_msgs.msg import AllowedCollisionEntry, AllowedCollisionMatrix
+
+        from agents.utils.moveit import set_acm_contact
+
+        acm = AllowedCollisionMatrix()
+        acm.entry_names = ["base", "hand"]
+        acm.entry_values = [
+            AllowedCollisionEntry(enabled=[False, False]),
+            AllowedCollisionEntry(enabled=[False, False]),
+        ]
+
+        set_acm_contact(acm, ["hand", "jaw"], "det__mug_0", True)
+
+        names = list(acm.entry_names)
+        assert names == ["base", "hand", "jaw", "det__mug_0"]
+        # the matrix stayed square while growing
+        assert all(len(row.enabled) == 4 for row in acm.entry_values)
+        base, hand, jaw, mug = (names.index(n) for n in names)
+        assert acm.entry_values[hand].enabled[mug]
+        assert acm.entry_values[mug].enabled[hand]
+        assert acm.entry_values[jaw].enabled[mug]
+        # only the touch links may contact the target
+        assert not acm.entry_values[base].enabled[mug]
+        assert not acm.entry_values[mug].enabled[base]
+
+        set_acm_contact(acm, ["hand", "jaw"], "det__mug_0", False)
+        assert not acm.entry_values[hand].enabled[mug]
+        assert not acm.entry_values[mug].enabled[jaw]
+
+    def test_scene_diff_carries_a_full_acm(self):
+        from moveit_msgs.msg import AllowedCollisionMatrix
+
+        from agents.utils.moveit import build_scene_diff
+
+        acm = AllowedCollisionMatrix()
+        acm.entry_names = ["hand"]
+        scene = build_scene_diff(allowed_collision_matrix=acm)
+        assert scene.is_diff and scene.robot_state.is_diff
+        assert list(scene.allowed_collision_matrix.entry_names) == ["hand"]
+
 
 class TestDetectionObjects:
     """Detections3D messages turned into collision objects."""
@@ -2005,6 +2046,26 @@ class TestSceneRefresh:
         component._apply_scene_client.send_request.assert_not_called()
         assert component._scene_objects["det__orange_0"]["attached"] == "hand"
 
+    def test_update_planning_scene_overrides_an_interrupted_picks_freeze(
+        self, component
+    ):
+        """Internal refreshes stay frozen after an interrupted pick, but an
+        explicit update_planning_scene call is the operator reconciling the
+        scene deliberately — it clears the freeze and refreshes."""
+        component._contact_freeze = "det__orange_0"
+        assert "skipped" in component._refresh_scene_from_detections()
+
+        self._wire(
+            component,
+            self._detections([
+                ("orange", 0.9, (0.3, 0.0, 0.05), (0.06, 0.06, 0.06)),
+            ]),
+        )
+        message = component.update_planning_scene.__wrapped__(component)
+
+        assert component._contact_freeze is None
+        assert "1 detected object(s)" in message
+
     def test_the_first_refresh_after_release_reconciles(self, component):
         entry = {
             "source": "detection",
@@ -2341,6 +2402,18 @@ class TestPickSequence:
         comp._apply_scene_client.send_request.return_value = SimpleNamespace(
             success=True
         )
+        # a fresh matrix per read: the contact editor mutates in place, and
+        # move_group hands out the current matrix on every call
+        from moveit_msgs.msg import AllowedCollisionMatrix
+
+        comp._get_scene_client = MagicMock()
+        comp._get_scene_client.send_request.side_effect = lambda request: (
+            SimpleNamespace(
+                scene=SimpleNamespace(
+                    allowed_collision_matrix=AllowedCollisionMatrix()
+                )
+            )
+        )
         comp._scene_objects["det__mug_0"] = {
             "source": "detection",
             "last_seen": 0.0,
@@ -2430,10 +2503,14 @@ class TestPickSequence:
         result = component.main_action_callback(handle)
 
         assert result.success
+        from moveit_msgs.msg import CollisionObject
+
         reshape = next(
             call[0][0].scene.world.collision_objects[0]
             for call in component._apply_scene_client.send_request.call_args_list
             if call[0][0].scene.world.collision_objects
+            and call[0][0].scene.world.collision_objects[0].operation
+            == CollisionObject.ADD
         )
         assert list(reshape.primitives[0].dimensions) == pytest.approx(
             [0.06, 0.06, 0.1]
@@ -2515,6 +2592,88 @@ class TestPickSequence:
 
         assert not result.success and result.message.startswith("Descent:")
 
+    @staticmethod
+    def _acm_scenes(component):
+        """Applied scenes that carry an allowed-collision matrix."""
+        return [
+            call[0][0].scene
+            for call in component._apply_scene_client.send_request.call_args_list
+            if call[0][0].scene.allowed_collision_matrix.entry_names
+        ]
+
+    @staticmethod
+    def _contact(scene, link, object_id):
+        acm = scene.allowed_collision_matrix
+        names = list(acm.entry_names)
+        row, column = names.index(link), names.index(object_id)
+        return (
+            acm.entry_values[row].enabled[column],
+            acm.entry_values[column].enabled[row],
+        )
+
+    def test_pick_allows_grasp_contact_and_retires_it_on_attach(self, component):
+        """Closing on a grasp is contact by design: the pick allows the touch
+        links to meet the target's box (everything else keeps avoiding it),
+        and retires the allowance once the object leaves the world for the
+        gripper — before a future object under the same id inherits it."""
+        handle = TestGoalExecution._goal_handle(self._pick_goal(target_object="mug"))
+
+        result = component.main_action_callback(handle)
+
+        assert result.success
+        allow, retire = self._acm_scenes(component)
+        for link in ("hand", "jaw"):
+            assert self._contact(allow, link, "det__mug_0") == (True, True)
+            assert self._contact(retire, link, "det__mug_0") == (False, False)
+        assert component._contact_freeze is None
+
+    def test_an_interrupted_pick_keeps_the_allowance_and_freezes_the_scene(
+        self, component
+    ):
+        """Forbidding the contact while the gripper is parked at the object
+        would put every start state in collision, including the retreat's:
+        after an abort the allowance stands and refreshes are frozen until a
+        motion succeeds."""
+        component._cartesian_client.send_request.return_value = SimpleNamespace(
+            fraction=0.0, solution=_trajectory(), error_code=SimpleNamespace(val=1)
+        )
+        handle = TestGoalExecution._goal_handle(self._pick_goal(target_object="mug"))
+
+        result = component.main_action_callback(handle)
+
+        assert not result.success
+        assert "stays allowed" in result.message
+        assert component._contact_freeze == "det__mug_0"
+        scenes = self._acm_scenes(component)
+        assert len(scenes) == 1  # the allowance was never retired
+        assert self._contact(scenes[0], "hand", "det__mug_0") == (True, True)
+        assert "skipped" in component._refresh_scene_from_detections()
+
+    def test_a_successful_motion_lifts_the_freeze_and_retires_the_allowance(
+        self, component
+    ):
+        """The first executed motion to succeed after an interrupted pick
+        proves the arm moved away; a plan-only success proves nothing."""
+        from automatika_embodied_agents.action import MoveManipulator
+
+        goal = MoveManipulator.Goal()
+        goal.mode = "joints"
+        goal.joint_names = ["shoulder_pan"]
+        goal.joint_positions = [0.5]
+
+        component._contact_freeze = "det__mug_0"
+        goal.plan_only = True
+        component.main_action_callback(TestGoalExecution._goal_handle(goal))
+        assert component._contact_freeze == "det__mug_0"
+        assert not self._acm_scenes(component)
+
+        goal.plan_only = False
+        result = component.main_action_callback(TestGoalExecution._goal_handle(goal))
+        assert result.success
+        assert component._contact_freeze is None
+        retire = self._acm_scenes(component)[-1]
+        assert self._contact(retire, "hand", "det__mug_0") == (False, False)
+
     def test_cancellation_cancels_the_goal(self, component):
         handle = TestGoalExecution._goal_handle(
             self._pick_goal(target_object="mug"), cancel_requested=True
@@ -2564,6 +2723,16 @@ class TestPlaceSequence:
         comp._apply_scene_client = MagicMock()
         comp._apply_scene_client.send_request.return_value = SimpleNamespace(
             success=True
+        )
+        from moveit_msgs.msg import AllowedCollisionMatrix
+
+        comp._get_scene_client = MagicMock()
+        comp._get_scene_client.send_request.side_effect = lambda request: (
+            SimpleNamespace(
+                scene=SimpleNamespace(
+                    allowed_collision_matrix=AllowedCollisionMatrix()
+                )
+            )
         )
         comp._scene_objects["det__mug_0"] = {
             "source": "detection",
@@ -2646,3 +2815,71 @@ class TestPlaceSequence:
 
         assert not result.success and result.message.startswith("Descent:")
         assert component._scene_objects["det__mug_0"]["attached"] == "hand"
+
+    def test_place_allows_contact_for_the_release_and_retires_it_after_retreat(
+        self, component
+    ):
+        """Detaching puts the object's box back into the world around the
+        open jaws — that contact must be legal until the retreat clears it,
+        the mirror of the pick's grasp contract."""
+        handle = TestGoalExecution._goal_handle(self._place_goal())
+
+        result = component.main_action_callback(handle)
+
+        assert result.success
+        allow, retire = TestPickSequence._acm_scenes(component)
+        for link in ("hand", "jaw"):
+            assert TestPickSequence._contact(allow, link, "det__mug_0") == (True, True)
+            assert TestPickSequence._contact(retire, link, "det__mug_0") == (
+                False,
+                False,
+            )
+        # the allowance lands before the detach reaches move_group
+        applies = component._apply_scene_client.send_request.call_args_list
+        detach_index = next(
+            index
+            for index, call in enumerate(applies)
+            if call[0][0].scene.robot_state.attached_collision_objects
+        )
+        allow_index = next(
+            index
+            for index, call in enumerate(applies)
+            if call[0][0].scene.allowed_collision_matrix.entry_names
+        )
+        assert allow_index < detach_index
+        assert component._contact_freeze is None
+
+    def test_an_interrupted_retreat_keeps_the_allowance_and_freezes_the_scene(
+        self, component
+    ):
+        """With the jaws around the released object, forbidding the contact
+        again would strand the arm: the allowance and the frozen scene stay
+        until a motion succeeds."""
+        from moveit_msgs.msg import MoveItErrorCodes
+
+        motions = []
+
+        def fail_the_retreat(goal):
+            motions.append(goal)
+            if len(motions) == 2:  # 1: pre-place approach, 2: retreat
+                component._move_client.action_result.error_code.val = (
+                    MoveItErrorCodes.PLANNING_FAILED
+                )
+            return True
+
+        component._move_client.send_request.side_effect = fail_the_retreat
+        handle = TestGoalExecution._goal_handle(self._place_goal())
+
+        result = component.main_action_callback(handle)
+
+        assert not result.success
+        assert result.message.startswith("Retreat:")
+        assert "stays allowed" in result.message
+        assert component._contact_freeze == "det__mug_0"
+        scenes = TestPickSequence._acm_scenes(component)
+        assert len(scenes) == 1  # allowed, never retired
+        assert TestPickSequence._contact(scenes[0], "hand", "det__mug_0") == (
+            True,
+            True,
+        )
+        assert "skipped" in component._refresh_scene_from_detections()

@@ -153,6 +153,8 @@ class MoveIt(Component):
         # id -> {"source": "manual" | "detection", "last_seen": time}
         self._scene_objects: Dict[str, Dict[str, Any]] = {}
         self._scene_lock = threading.Lock()
+        # Id of a scene object the gripper is currently allowed to touch
+        self._contact_freeze: Optional[str] = None
 
         # Continuous mode refresh timer and message last applied
         self._scene_timer = None
@@ -758,6 +760,7 @@ class MoveIt(Component):
         if listener and handler:
             handler.remove_feedback_listener(listener)
 
+        interrupted_grasp = None
         with self._main_goal_lock:
             if not goal_handle.is_active:
                 self.get_logger().info(
@@ -772,8 +775,18 @@ class MoveIt(Component):
                 self.health_status.set_fail_component()
             else:
                 goal_handle.succeed()
+                if self._contact_freeze and not goal_handle.request.plan_only:
+                    # if first executed motion after pick or place succeeds
+                    # the contact allowance is retired and refreshes resume
+                    interrupted_grasp, self._contact_freeze = (
+                        self._contact_freeze,
+                        None,
+                    )
                 self.get_logger().info(f"Motion completed: {result.message}")
                 self.health_status.set_healthy()
+        if interrupted_grasp:
+            # a scene service round trip, kept outside the goal lock
+            self._set_grasp_contact(interrupted_grasp, False)
         return result
 
     def _terminate_by_wait(
@@ -872,11 +885,13 @@ class MoveIt(Component):
     # PLANNING SCENE
     # =========================================================================
 
-    def _apply_scene(self, collision_objects=(), attached_objects=()) -> bool:
+    def _apply_scene(self, collision_objects=(), attached_objects=(), acm=None) -> bool:
         """Apply scene changes as one diff through move_group.
 
         :param collision_objects: World objects to add, move or remove
         :param attached_objects: Objects to attach to or detach from the robot
+        :param acm: Complete AllowedCollisionMatrix to install, None leaves
+            the matrix alone
         :returns: Whether move_group confirmed the change
         """
         from moveit_msgs.srv import ApplyPlanningScene
@@ -890,7 +905,7 @@ class MoveIt(Component):
             return False
 
         request = ApplyPlanningScene.Request()
-        request.scene = build_scene_diff(collision_objects, attached_objects)
+        request.scene = build_scene_diff(collision_objects, attached_objects, acm)
         response = self._apply_scene_client.send_request(request)
         if response is None or not response.success:
             self.get_logger().error(
@@ -898,6 +913,42 @@ class MoveIt(Component):
             )
             return False
         return True
+
+    def _set_grasp_contact(self, object_id: str, allowed: bool) -> None:
+        """Toggle the grasp-contact allowance between the gripper and a target.
+
+        During the pick, the touch links may meet the target's collision box,
+        and every other link keeps avoiding it. Best effort: on scene trouble the
+        pick proceeds with the contact still forbidden.
+        """
+        from moveit_msgs.msg import PlanningSceneComponents
+        from moveit_msgs.srv import GetPlanningScene
+
+        from ..utils.moveit import set_acm_contact
+
+        # get touch links
+        links = self._resolve_touch_links(None)
+        if not (self._get_scene_client and self._apply_scene_client and links):
+            return
+        # get current allowed collision matrix
+        request = GetPlanningScene.Request()
+        request.components.components = PlanningSceneComponents.ALLOWED_COLLISION_MATRIX
+        response = self._get_scene_client.send_request(request)
+        if response is None:
+            self.get_logger().warning(
+                "Could not read the allowed collision matrix; gripper contact "
+                f"with '{object_id}' stays as it was"
+            )
+            return
+        # set new acm
+        acm = set_acm_contact(
+            response.scene.allowed_collision_matrix, links, object_id, allowed
+        )
+        if self._apply_scene(acm=acm):
+            self.get_logger().info(
+                f"Grasp contact {'allowed' if allowed else 'forbidden'}: "
+                f"{links} x '{object_id}'"
+            )
 
     def _resolve_touch_links(self, explicit: Optional[List[str]]) -> List[str]:
         """Links allowed to stay in contact with an attached object.
@@ -986,7 +1037,9 @@ class MoveIt(Component):
         `scene_object_ttl` seconds before a refresh removes them, so
         detection dropouts do not flicker. Attached objects are never evicted
         or re-added. While an object is held the scene is frozen entirely. The
-        first refresh after release reconciles it.
+        first refresh after release reconciles it. The scene is equally frozen
+        while a grasp-contact allowance is active since the allowance is keyed
+        to a detection id, and a refresh could hand that id to a different object
 
         :param message: Detections to refresh from, when the caller has
             already read them. Default reads the latest received message
@@ -999,10 +1052,21 @@ class MoveIt(Component):
 
         with self._scene_lock:
             held = any(entry.get("attached") for entry in self._scene_objects.values())
-        if held:
+        if held or self._contact_freeze:
             return (
-                "Scene refresh skipped while an object is held: the scene "
-                "stays as captured before the grasp, until release"
+                (
+                    "Scene refresh skipped while an object is held: the scene "
+                    "stays as captured before the grasp, until release"
+                )
+                if held
+                else (
+                    f"Scene refresh skipped while gripper contact with "
+                    f"'{self._contact_freeze}' is allowed: the allowance is "
+                    "keyed to its detection id, which a refresh could re-rank "
+                    "onto a different object. Refreshes resume once a motion "
+                    "succeeds, or when update_planning_scene is called "
+                    "explicitly"
+                )
             )
 
         if message is None:
@@ -1155,8 +1219,15 @@ class MoveIt(Component):
 
     def _finish_sequence(self, outcome: str, goal_handle, result: Any) -> Any:
         """Transition a sequence goal by the outcome of its last step"""
+        if outcome != "ok" and self._contact_freeze:
+            # an interrupted pick or place keeps its contact allowance and
+            # freeze so the arm can retreat.
+            result.message = (
+                f"{result.message or 'Motion canceled'}. Gripper contact with "
+                f"'{self._contact_freeze}' stays allowed and scene refreshes stay "
+                "frozen until a motion succeeds"
+            )
         if outcome == "canceled":
-            result.message = result.message or "Motion canceled"
             return self._terminate(goal_handle, result, cancel=True)
         if outcome == "preempted":
             return self._terminate(goal_handle, result)
@@ -1360,7 +1431,10 @@ class MoveIt(Component):
         """Grasp a scene object and lift it.
 
         Approach above the object (collision-aware), open, descend straight
-        onto it (contact permitted), close, attach, lift.
+        onto it (contact permitted), close, attach, lift. Throughout, the
+        touch links may contact the target's box (every other link keeps
+        avoiding it) and scene refreshes are frozen. After an interruption
+        both stay that way until a motion succeeds, so the arm can retreat.
 
         :returns: Outcome of the last step, for _finish_sequence
         """
@@ -1368,6 +1442,11 @@ class MoveIt(Component):
 
         object_id, center, size = self._resolve_pick_target(goal)
         self.get_logger().info(f"Picking '{object_id}' at {center}")
+
+        # allow the touch links to meet the target's box, while every other
+        # link keeps avoiding it.
+        self._contact_freeze = object_id
+        self._set_grasp_contact(object_id, True)
         approach_z = center[2] + size[2] / 2 + self.config.approach_clearance
         orientation = goal.target_pose.pose.orientation
 
@@ -1417,21 +1496,23 @@ class MoveIt(Component):
         with self._scene_lock:
             entry = self._scene_objects.get(object_id, {})
             attach_size = entry.get("attach_size", size)
-        self._apply_scene(
-            [
-                build_collision_object(
-                    object_id,
-                    self.config.pose_reference_frame,
-                    center,
-                    attach_size,
-                    min_thickness=self.config.min_object_thickness,
-                )
-            ]
-        )
+        self._apply_scene([
+            build_collision_object(
+                object_id,
+                self.config.pose_reference_frame,
+                center,
+                attach_size,
+                min_thickness=self.config.min_object_thickness,
+            )
+        ])
         ok, message = self._do_attach(object_id)
         if not ok:
             result.message = message
             return "aborted"
+        # The objects gripper contact is now governed by the attachment's
+        # touch_links, so the world allowance is retired
+        self._set_grasp_contact(object_id, False)
+        self._contact_freeze = None
 
         self._publish_state(goal_handle, "LIFT")
         outcome, message = self._sequence_motion(
@@ -1454,8 +1535,10 @@ class MoveIt(Component):
 
         The inverse of pick: approach above the release pose (planned with
         the held object still attached), descend straight down (contact
-        permitted), open, detach and retreat back up. The object stays in the
-        scene where it was released.
+        permitted), open, detach and retreat back up. The released object
+        stays in the scene, and the touch links may contact it from the
+        detach until the retreat succeeds — the pick's grasp contract,
+        mirrored.
 
         :returns: Outcome of the last step, for _finish_sequence
         :raises ValueError: When nothing is attached
@@ -1515,6 +1598,11 @@ class MoveIt(Component):
             return "aborted"
 
         self._publish_state(goal_handle, "DETACH")
+        # NOTE: Detaching puts the object's box back into the world, wrapped by
+        # the open jaws. Allow that contact first, or the retreat's start state
+        # is born in collision.
+        self._contact_freeze = object_id
+        self._set_grasp_contact(object_id, True)
         ok, message = self._do_detach(object_id)
         if not ok:
             result.message = message
@@ -1535,6 +1623,9 @@ class MoveIt(Component):
         if outcome != "ok":
             result.message = f"Retreat: {message}"
             return outcome
+        # clear of the released object
+        self._set_grasp_contact(object_id, False)
+        self._contact_freeze = None
 
         result.message = f"Placed '{object_id}'"
         return "ok"
@@ -2003,6 +2094,12 @@ class MoveIt(Component):
     def update_planning_scene(self) -> str:
         """Update the planning scene from the latest received detections.
 
+        Calling this explicitly overrides the automatic freeze left by an
+        interrupted pick or place. The freeze while an object is held stands.
+
         :returns: What happened, for the caller and for tool use
         """
+        if self._contact_freeze:
+            self._set_grasp_contact(self._contact_freeze, False)
+            self._contact_freeze = None
         return self._refresh_scene_from_detections()
