@@ -276,18 +276,15 @@ def build_cartesian_request(
 def load_named_targets(
     srdf: Optional[Union[str, ET.Element]] = None,
     srdf_file: Optional[str] = None,
-    overrides: Optional[Dict] = None,
     logger_name: str = "moveit",
 ) -> Dict[str, Dict[str, Dict[str, float]]]:
     """Collect the named targets available per planning group.
 
     Named targets are read from the robot SRDF, either from already
-    retrieved content or from a file when no content is given. Manually
-    provided targets take precedence over the ones defined in the SRDF.
+    retrieved content or from a file when no content is given.
 
     :param srdf: SRDF document content, e.g. as read from the move_group node
     :param srdf_file: Path or URL of an SRDF file, used when no content is given
-    :param overrides: Manually defined targets, {group: {name: {joint: position}}}
     :param logger_name: Name of the logger to report failures on
     :returns: Mapping of group name to {state name: {joint name: position}}
     """
@@ -304,9 +301,6 @@ def load_named_targets(
             states = parse_srdf_group_states(srdf)
         except Exception as e:
             get_logger(logger_name).warning(f"Could not parse the robot SRDF: {e}")
-
-    for group, group_states in (overrides or {}).items():
-        states.setdefault(group, {}).update(group_states)
     return states
 
 
