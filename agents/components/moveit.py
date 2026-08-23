@@ -1,3 +1,4 @@
+import math
 import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -420,7 +421,6 @@ class MoveIt(Component):
             self._named_targets = load_named_targets(
                 srdf=srdf,
                 srdf_file=self.config.srdf_file,
-                overrides=self.config.named_targets,
                 logger_name=self.node_name,
             )
         return self._named_targets
@@ -455,9 +455,8 @@ class MoveIt(Component):
         """Whether a quaternion expresses an actual orientation preference.
 
         ROS2 defaults an untouched Quaternion field to identity (w=1), so an
-        identity on the wire cannot be distinguished from "no preference"
-        and is read as such. Any quaternion with a rotation axis (a non-zero
-        x, y or z) counts as explicit.
+        identity on in the ROS msg is read as "no preference". Any quaternion
+        with a rotation axis (a non-zero x, y or z) counts as explicit.
         """
         return orientation is not None and any((
             orientation.x,
@@ -673,11 +672,24 @@ class MoveIt(Component):
             target_pose = goal.target_pose
             if not target_pose.header.frame_id:
                 target_pose.header.frame_id = self.config.pose_reference_frame
+            # goals with an explicit orientation use the oriented group and
+            # tolerance; the wide default would let the planner ignore it
+            oriented = self._orientation_given(target_pose.pose.orientation)
+            if oriented:
+                group_name = (
+                    self.config.oriented_group_name
+                    or self.config.cartesian_group_name
+                    or self.config.arm_group_name
+                )
             constraints = pose_to_constraints(
                 target_pose,
                 link_name=self.config.end_effector_link,
                 position_tolerance=self.config.goal_position_tolerance,
-                orientation_tolerance=self.config.goal_orientation_tolerance,
+                orientation_tolerance=(
+                    self.config.oriented_orientation_tolerance
+                    if oriented
+                    else self.config.goal_orientation_tolerance
+                ),
             )
         elif mode is MoveMode.JOINTS:
             if len(goal.joint_names) != len(goal.joint_positions):
@@ -1272,8 +1284,11 @@ class MoveIt(Component):
         """A collision-aware motion goal to an end-effector position.
 
         :param orientation: Optional end-effector orientation. None or
-            identity means no preference, with the configured
-            orientation tolerance giving the planner its freedom
+            identity means no preference, with the configured orientation
+            tolerance giving the planner its freedom. An explicit
+            orientation plans on the oriented group with the tight
+            `oriented_orientation_tolerance` instead. The configured
+            tolerance is deliberately wide for underactuated arms.
         """
         from ..ros import ROSPoseStamped
 
@@ -1281,7 +1296,8 @@ class MoveIt(Component):
         target.header.frame_id = self.config.pose_reference_frame
         position = target.pose.position
         position.x, position.y, position.z = float(x), float(y), float(z)
-        if self._orientation_given(orientation):
+        oriented = self._orientation_given(orientation)
+        if oriented:
             target.pose.orientation = orientation
         else:
             target.pose.orientation.w = 1.0
@@ -1290,11 +1306,21 @@ class MoveIt(Component):
             target,
             link_name=self.config.end_effector_link,
             position_tolerance=self.config.goal_position_tolerance,
-            orientation_tolerance=self.config.goal_orientation_tolerance,
+            orientation_tolerance=(
+                self.config.oriented_orientation_tolerance
+                if oriented
+                else self.config.goal_orientation_tolerance
+            ),
         )
         return build_move_group_goal(
             constraints,
-            self.config.arm_group_name,
+            (
+                self.config.oriented_group_name
+                or self.config.cartesian_group_name
+                or self.config.arm_group_name
+            )
+            if oriented
+            else self.config.arm_group_name,
             pipeline_id=self.config.planning_pipeline,
             planner_id=self.config.planner_id,
             num_attempts=self.config.num_planning_attempts,
@@ -1326,8 +1352,8 @@ class MoveIt(Component):
         )
         if self._orientation_given(orientation):
             waypoint.orientation = orientation
-        # Without a preference the waypoint holds the orientation the
-        # approach motion just reached: straight down at the current
+        # NOTE: Without a preference the waypoint holds the orientation the
+        # approach motion just reached. Straight down at the current
         # orientation is achievable, an arbitrary default may not be
         waypoint = self._orient_waypoints([waypoint])[0]
 
@@ -1440,17 +1466,33 @@ class MoveIt(Component):
 
         :returns: Outcome of the last step, for _finish_sequence
         """
-        from ..utils.moveit import build_collision_object
+        from ..utils.moveit import build_collision_object, rotate_attitude_to_bearing
 
+        # resolve the goal to a scene object
         object_id, center, size = self._resolve_pick_target(goal)
         self.get_logger().info(f"Picking '{object_id}' at {center}")
 
-        # allow the touch links to meet the target's box, while every other
-        # link keeps avoiding it.
+        # allow the touch links to meet the target's box  and freeze scene
+        # refreshes
         self._contact_freeze = object_id
         self._set_grasp_contact(object_id, True)
-        orientation = goal.target_pose.pose.orientation
 
+        # choose the grasp attitude, when the config provides one and the
+        # goal carries none
+        orientation = goal.target_pose.pose.orientation
+        if not self._orientation_given(orientation) and self.config.grasp_orientation:
+            # NOTE: the goal adopts the configured attitude, so the sampler
+            # cannot land an arbitrary wrist posture
+            attitude = self.config.grasp_orientation
+            if self.config.approach_mode == "side":
+                attitude = rotate_attitude_to_bearing(
+                    attitude, math.atan2(center[1], center[0])
+                )
+            orientation.x, orientation.y, orientation.z, orientation.w = (
+                float(v) for v in attitude
+            )
+
+        # pick the pre-grasp point above the target, or behind it in side mode
         above = (
             center[0],
             center[1],
@@ -1459,8 +1501,6 @@ class MoveIt(Component):
         approach = above
         side = self.config.approach_mode == "side"
         if side:
-            # Pre-grasp BEHIND the target at grasp height, backed off along
-            # the base->target bearing
             horizontal = (center[0] ** 2 + center[1] ** 2) ** 0.5
             standoff = max(size[0], size[1]) / 2 + self.config.approach_clearance
             scale = (
@@ -1470,6 +1510,7 @@ class MoveIt(Component):
             )
             approach = (center[0] * scale, center[1] * scale, center[2])
 
+        # collision-aware approach to the pre-grasp point
         self._publish_state(goal_handle, "PRE_GRASP")
         outcome, message = self._sequence_motion(
             self._move_client,
@@ -1481,6 +1522,7 @@ class MoveIt(Component):
             result.message = f"Pre-grasp: {message}"
             return outcome
 
+        # open the jaws
         self._publish_state(goal_handle, "OPEN_GRIPPER")
         ok, message = self._command_gripper(
             named_target=self.config.gripper_open_target,
@@ -1491,14 +1533,17 @@ class MoveIt(Component):
             result.message = message
             return "aborted"
 
+        # straight line onto the target ( slide in side mode)
+        # NOTE: Hold the orientation the approach ACHIEVED, not the requested one
         self._publish_state(goal_handle, "DESCEND")
         outcome, message = self._sequence_descent(
-            center[0], center[1], center[2], orientation, goal_handle, deadline
+            center[0], center[1], center[2], None, goal_handle, deadline
         )
         if outcome != "ok":
             result.message = f"Descent: {message}"
             return outcome
 
+        # close on the object
         self._publish_state(goal_handle, "GRASP")
         ok, message = self._command_gripper(
             named_target=self.config.gripper_close_target,
@@ -1509,10 +1554,11 @@ class MoveIt(Component):
             result.message = message
             return "aborted"
 
-        self._publish_state(goal_handle, "ATTACH")
-        # Attaching by id carries the world box along with the link, so
+        # 9. attach the object to the gripper
+        # NOTE: Attaching by id carries the world box along with the link, so
         # re-shape it first to the measured extents without planning padding
-        # (manual objects were never padded and keep their size).
+        # (manual objects were never padded and keep their size)
+        self._publish_state(goal_handle, "ATTACH")
         with self._scene_lock:
             entry = self._scene_objects.get(object_id, {})
             attach_size = entry.get("attach_size", size)
@@ -1529,13 +1575,13 @@ class MoveIt(Component):
         if not ok:
             result.message = message
             return "aborted"
-        # The objects gripper contact is now governed by the attachment's
+        # NOTE: The objects gripper contact is now governed by the attachment's
         # touch_links, so the world allowance is retired
         self._set_grasp_contact(object_id, False)
         self._contact_freeze = None
 
+        # lift the object clear (straight up, position-only in side mode)
         self._publish_state(goal_handle, "LIFT")
-        # In side mode the lift goes straight up, position-only
         outcome, message = self._sequence_motion(
             self._move_client,
             self._pose_motion_goal(*above, None if side else orientation),
@@ -1564,6 +1610,7 @@ class MoveIt(Component):
         :returns: Outcome of the last step, for _finish_sequence
         :raises ValueError: When nothing is attached
         """
+        # get the held object
         with self._scene_lock:
             held = next(
                 (
@@ -1579,8 +1626,9 @@ class MoveIt(Component):
             )
         object_id, size = held
 
-        # target_pose gives where the object's center ends up and the gripper
-        # holds the object at its center
+        # release targets
+        # NOTE: target_pose gives where the object's center ends up, and the
+        # gripper holds the object at its center
         position = goal.target_pose.pose.position
         orientation = goal.target_pose.pose.orientation
         approach_z = position.z + size[2] / 2 + self.config.approach_clearance
@@ -1589,6 +1637,8 @@ class MoveIt(Component):
             f"({position.x:.3f}, {position.y:.3f}, {position.z:.3f})"
         )
 
+        # collision-aware approach above the release pose, with the held
+        # object still attached
         self._publish_state(goal_handle, "PRE_PLACE")
         outcome, message = self._sequence_motion(
             self._move_client,
@@ -1600,6 +1650,7 @@ class MoveIt(Component):
             result.message = f"Pre-place: {message}"
             return outcome
 
+        # straight line down to the release pose
         self._publish_state(goal_handle, "DESCEND")
         outcome, message = self._sequence_descent(
             position.x, position.y, position.z, orientation, goal_handle, deadline
@@ -1608,6 +1659,7 @@ class MoveIt(Component):
             result.message = f"Descent: {message}"
             return outcome
 
+        # open the jaws
         self._publish_state(goal_handle, "RELEASE")
         ok, message = self._command_gripper(
             named_target=self.config.gripper_open_target,
@@ -1618,10 +1670,11 @@ class MoveIt(Component):
             result.message = message
             return "aborted"
 
-        self._publish_state(goal_handle, "DETACH")
+        # return the object to the world at its release spot.
         # NOTE: Detaching puts the object's box back into the world, wrapped by
         # the open jaws. Allow that contact first, or the retreat's start state
         # is born in collision.
+        self._publish_state(goal_handle, "DETACH")
         self._contact_freeze = object_id
         self._set_grasp_contact(object_id, True)
         ok, message = self._do_detach(object_id)
@@ -1634,6 +1687,7 @@ class MoveIt(Component):
                 entry["center"] = (position.x, position.y, position.z)
                 entry["last_seen"] = time.time()
 
+        # retreat back up
         self._publish_state(goal_handle, "RETREAT")
         outcome, message = self._sequence_motion(
             self._move_client,
@@ -1644,7 +1698,8 @@ class MoveIt(Component):
         if outcome != "ok":
             result.message = f"Retreat: {message}"
             return outcome
-        # clear of the released object
+
+        # retire the contact allowance once clear
         self._set_grasp_contact(object_id, False)
         self._contact_freeze = None
 

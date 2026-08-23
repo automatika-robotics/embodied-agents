@@ -570,6 +570,12 @@ class MoveItConfig(BaseComponentConfig):
     :type gripper_group_name: Optional[str]
     :param cartesian_group_name: Planning group used for Cartesian path requests (straight-line motions, including the descend/retreat steps of pick and place). Default is None, which uses `arm_group_name`. Setting a separate group lets an underactuated (e.g. 5-DOF) arm pair a position-only IK configuration on the arm group (for pose goals) with an orientation-tracking IK configuration on a twin group over the same chain. MoveIt's Cartesian interpolator validates the achieved orientation of every step against a fixed precision the request cannot override, which a position-only solver cannot meet.
     :type cartesian_group_name: Optional[str]
+    :param oriented_group_name: Planning group for pose goals that carry an explicit orientation. Sampling orientation-constrained goals and tracking Cartesian interpolation steps place opposite demands on an IK solver, so underactuated arms may need a third IK profile here. Default is None, which falls back to `cartesian_group_name`, then `arm_group_name`.
+    :type oriented_group_name: Optional[str]
+    :param oriented_orientation_tolerance: Orientation tolerance in radians for pose goals that carry an explicit orientation. Kept tight because wrist slack moves the gripper jaws centimeters, while `goal_orientation_tolerance` stays wide for unoriented goals. Default is 0.15.
+    :type oriented_orientation_tolerance: float
+    :param grasp_orientation: End-effector attitude for pick goals without an orientation of their own, as a quaternion [x, y, z, w] in the pose reference frame. Derive it from a known-good grasp (e.g. FK over a demonstration pose). With approach_mode "side" it describes a grasp along +x and is rotated to the target's bearing, so one calibration serves every direction. Default is None (goals keep their own orientation, given or not).
+    :type grasp_orientation: Optional[List[float]]
     :param end_effector_link: End-effector link that pose targets and Cartesian waypoints refer to. Empty (default) uses the planning group's default tip link.
     :type end_effector_link: str
     :param pose_reference_frame: Default reference frame for pose targets that carry an empty `header.frame_id`. Empty (default) uses move_group's planning frame.
@@ -618,8 +624,6 @@ class MoveItConfig(BaseComponentConfig):
     :type move_group_namespace: str
     :param move_group_node_name: Name of the move_group node, used to fetch the SRDF (named targets) from its parameters. Default is "move_group".
     :type move_group_node_name: str
-    :param named_targets: Manual named-target definitions per group, overriding the SRDF: {group: {target_name: {joint: position}}}. Default is None.
-    :type named_targets: Optional[Dict]
     :param srdf_file: Path or URL of a local SRDF file used as fallback for named targets when the SRDF cannot be fetched from move_group. Default is None.
     :type srdf_file: Optional[str]
     :param server_timeout: Time in seconds to wait for move_group's servers to become available. Default is 30.0.
@@ -656,6 +660,11 @@ class MoveItConfig(BaseComponentConfig):
     arm_group_name: str = field()
     gripper_group_name: Optional[str] = field(default=None)
     cartesian_group_name: Optional[str] = field(default=None)
+    oriented_group_name: Optional[str] = field(default=None)
+    oriented_orientation_tolerance: float = field(
+        default=0.15, validator=base_validators.gt(0.0)
+    )
+    grasp_orientation: Optional[List[float]] = field(default=None)
     end_effector_link: str = field(default="")
     pose_reference_frame: str = field(default="")
     planning_pipeline: str = field(default="")
@@ -693,7 +702,6 @@ class MoveItConfig(BaseComponentConfig):
     gripper_max_effort: float = field(default=0.0)
     move_group_namespace: str = field(default="")
     move_group_node_name: str = field(default="move_group")
-    named_targets: Optional[Dict] = field(default=None)
     srdf_file: Optional[str] = field(default=None)
     server_timeout: float = field(default=30.0, validator=base_validators.gt(0.0))
     execution_timeout: float = field(default=120.0, validator=base_validators.gt(0.0))
@@ -726,6 +734,14 @@ class MoveItConfig(BaseComponentConfig):
             raise ValueError(
                 "goal_orientation_tolerance must be a single positive value or "
                 "a list of 3 positive per-axis (x, y, z) values"
+            )
+
+    @grasp_orientation.validator
+    def _check_grasp_orientation(self, _, value):
+        """Grasp orientation validator"""
+        if value is not None and len(value) != 4:
+            raise ValueError(
+                "grasp_orientation must be a quaternion as [x, y, z, w]"
             )
 
     @gripper_command_action.validator

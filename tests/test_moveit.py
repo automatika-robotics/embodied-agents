@@ -164,21 +164,6 @@ class TestNamedTargets:
         assert states["panda_arm"]["ready"]["panda_joint2"] == -0.785
         assert states["hand"]["open"] == {"panda_finger_joint1": 0.035}
 
-    def test_overrides_take_precedence(self):
-        from agents.utils.moveit import load_named_targets
-
-        states = load_named_targets(
-            srdf=SAMPLE_SRDF,
-            overrides={
-                "panda_arm": {"ready": {"panda_joint1": 1.57}},
-                "extra": {"parked": {"j": 0.0}},
-            },
-        )
-        # overridden target replaces the SRDF one, others are kept
-        assert states["panda_arm"]["ready"] == {"panda_joint1": 1.57}
-        assert "extended" in states["panda_arm"]
-        assert states["extra"]["parked"] == {"j": 0.0}
-
     def test_file_used_when_no_content_given(self, tmp_path):
         from agents.utils.moveit import load_named_targets
 
@@ -936,6 +921,83 @@ class TestCartesianGroupAndOrientation:
         warning = component.get_logger().warning.call_args[0][0]
         assert "end-effector pose" in warning
 
+    def test_oriented_pose_goals_use_the_oriented_group_and_snug_tolerance(
+        self, rclpy_init
+    ):
+        """An explicit orientation would be vacuous under the wide tolerance
+        that unoriented goals need on underactuated arms, and goal sampling
+        needs a different IK profile than Cartesian stepping."""
+        from geometry_msgs.msg import Quaternion
+
+        component = self._component(
+            rclpy_init,
+            cartesian_group_name="panda_arm_cartesian",
+            oriented_group_name="panda_arm_sampler",
+        )
+        attitude = Quaternion(x=0.0, y=0.707, z=0.0, w=0.707)
+
+        goal = component._pose_motion_goal(0.3, 0.0, 0.2, attitude)
+
+        assert goal.request.group_name == "panda_arm_sampler"
+        orientation = goal.request.goal_constraints[0].orientation_constraints[0]
+        assert orientation.absolute_x_axis_tolerance == pytest.approx(0.15)
+
+    def test_oriented_group_falls_back_to_cartesian_then_arm(self, rclpy_init):
+        from geometry_msgs.msg import Quaternion
+
+        attitude = Quaternion(x=0.0, y=0.707, z=0.0, w=0.707)
+        with_cartesian = self._component(
+            rclpy_init, cartesian_group_name="panda_arm_cartesian"
+        )
+        goal = with_cartesian._pose_motion_goal(0.3, 0.0, 0.2, attitude)
+        assert goal.request.group_name == "panda_arm_cartesian"
+
+        bare = self._component(rclpy_init)
+        goal = bare._pose_motion_goal(0.3, 0.0, 0.2, attitude)
+        assert goal.request.group_name == "panda_arm"
+        # unoriented goals keep the arm group and the wide tolerance
+        goal = with_cartesian._pose_motion_goal(0.3, 0.0, 0.2)
+        assert goal.request.group_name == "panda_arm"
+
+    def test_pose_mode_goals_route_their_orientation_the_same_way(self, rclpy_init):
+        """A user-sent pose goal with an explicit orientation must behave
+        exactly like the pick's internal pose motions: oriented group, snug
+        tolerance. Unoriented goals keep the arm group and the wide default."""
+        from automatika_embodied_agents.action import MoveManipulator
+        from geometry_msgs.msg import Quaternion
+
+        component = self._component(
+            rclpy_init, oriented_group_name="panda_arm_sampler"
+        )
+        component._move_client = TestGoalExecution._client()
+
+        goal = MoveManipulator.Goal()
+        goal.mode = "pose"
+        goal.target_pose.pose.position.x = 0.3
+        goal.target_pose.pose.orientation = Quaternion(x=0.0, y=0.707, z=0.0, w=0.707)
+        component.main_action_callback(TestGoalExecution._goal_handle(goal))
+
+        sent = component._move_client.send_request.call_args[0][0]
+        assert sent.request.group_name == "panda_arm_sampler"
+        orientation = sent.request.goal_constraints[0].orientation_constraints[0]
+        assert orientation.absolute_x_axis_tolerance == pytest.approx(0.15)
+
+        unoriented = MoveManipulator.Goal()
+        unoriented.mode = "pose"
+        unoriented.target_pose.pose.position.x = 0.3
+        component.main_action_callback(TestGoalExecution._goal_handle(unoriented))
+
+        sent = component._move_client.send_request.call_args[0][0]
+        assert sent.request.group_name == "panda_arm"
+        orientation = sent.request.goal_constraints[0].orientation_constraints[0]
+        assert orientation.absolute_x_axis_tolerance == pytest.approx(1e-2)
+
+    def test_grasp_orientation_must_be_a_quaternion(self):
+        from agents.config import MoveItConfig
+
+        with pytest.raises(ValueError, match="quaternion"):
+            MoveItConfig(arm_group_name="arm", grasp_orientation=[1.0, 0.0, 0.0])
+
     def test_descend_holds_the_current_orientation(self, component):
         component._cartesian_client = MagicMock()
         component._cartesian_client.send_request.return_value = (
@@ -1175,6 +1237,19 @@ class TestSceneBuilders:
         detached = build_detach_object("det__orange_0")
         assert detached.object.operation == CollisionObject.REMOVE
         assert detached.link_name == ""
+
+    def test_attitude_rotates_with_the_bearing(self):
+        import math
+
+        from agents.utils.moveit import rotate_attitude_to_bearing
+
+        attitude = [0.0, 0.707, 0.0, 0.707]
+        assert rotate_attitude_to_bearing(attitude, 0.0) == pytest.approx(attitude)
+        # a +y target turns the +x-calibrated attitude 90 degrees about z
+        rotated = rotate_attitude_to_bearing(attitude, math.pi / 2)
+        assert rotated == pytest.approx((-0.5, 0.5, 0.5, 0.5), abs=1e-3)
+        # a rotation never changes the quaternion's length
+        assert sum(v * v for v in rotated) == pytest.approx(1.0, abs=1e-3)
 
     def test_acm_contact_is_symmetric_reversible_and_grows_the_matrix(self):
         from moveit_msgs.msg import AllowedCollisionEntry, AllowedCollisionMatrix
@@ -2559,6 +2634,65 @@ class TestPickSequence:
         assert lift.x == pytest.approx(0.4)
         assert lift.z == pytest.approx(0.2)
         assert component._scene_objects["det__mug_0"]["attached"] == "hand"
+
+    @staticmethod
+    def _pre_grasp_orientation(component):
+        goal = component._move_client.send_request.call_args_list[0][0][0]
+        constraint = goal.request.goal_constraints[0].orientation_constraints[0]
+        return constraint.orientation, constraint.absolute_x_axis_tolerance
+
+    def test_unoriented_pick_grasps_in_the_configured_attitude(self, component):
+        """Without an attitude, position-only IK lands a different wrist
+        configuration per approach and the jaws' closing line wanders."""
+        component.config.grasp_orientation = [0.0, 0.707, 0.0, 0.707]
+        handle = TestGoalExecution._goal_handle(self._pick_goal(target_object="mug"))
+
+        result = component.main_action_callback(handle)
+
+        assert result.success
+        orientation, tolerance = self._pre_grasp_orientation(component)
+        assert orientation.y == pytest.approx(0.707)
+        assert orientation.w == pytest.approx(0.707)
+        assert tolerance == pytest.approx(0.15)
+
+    def test_side_mode_rotates_the_attitude_to_the_bearing(self, component):
+        """One calibrated attitude serves every direction: for a target on
+        the +y axis the +x-calibrated attitude turns 90 degrees about z."""
+        component.config.approach_mode = "side"
+        component.config.grasp_orientation = [0.0, 0.707, 0.0, 0.707]
+        component._scene_objects["det__mug_0"]["center"] = (0.0, 0.4, 0.05)
+        handle = TestGoalExecution._goal_handle(self._pick_goal(target_object="mug"))
+
+        result = component.main_action_callback(handle)
+
+        assert result.success
+        orientation, _ = self._pre_grasp_orientation(component)
+        # rot_z(pi/2) * [0, 0.707, 0, 0.707]
+        assert orientation.x == pytest.approx(-0.5, abs=1e-3)
+        assert orientation.y == pytest.approx(0.5, abs=1e-3)
+        assert orientation.z == pytest.approx(0.5, abs=1e-3)
+        assert orientation.w == pytest.approx(0.5, abs=1e-3)
+
+    def test_an_explicit_goal_orientation_wins_over_the_configured_attitude(
+        self, component
+    ):
+        from geometry_msgs.msg import Quaternion
+
+        component.config.grasp_orientation = [0.0, 0.707, 0.0, 0.707]
+        goal = self._pick_goal(target_object="mug")
+        goal.target_pose.pose.orientation = Quaternion(x=0.5, y=0.5, z=0.5, w=0.5)
+        handle = TestGoalExecution._goal_handle(goal)
+
+        result = component.main_action_callback(handle)
+
+        assert result.success
+        orientation, _ = self._pre_grasp_orientation(component)
+        assert (orientation.x, orientation.y, orientation.z, orientation.w) == (
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+        )
 
     def test_pick_resolves_labels_to_the_best_rank(self, component):
         component._scene_objects["det__mug_1"] = {

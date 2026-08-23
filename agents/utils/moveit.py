@@ -7,6 +7,7 @@ no MoveIt python bindings are required. MoveIt message definitions are imported
 lazily.
 """
 
+import math
 import xml.etree.ElementTree as ET
 from enum import Enum
 from importlib.util import find_spec
@@ -96,6 +97,29 @@ def ensure_moveit_msgs() -> None:
     """Raise an actionable error when moveit_msgs is unavailable."""
     if find_spec("moveit_msgs") is None:
         raise ModuleNotFoundError(_MOVEIT_INSTALL_HINT)
+
+
+def rotate_attitude_to_bearing(
+    attitude: Sequence[float], bearing: float
+) -> tuple:
+    """Turn a grasp attitude toward a target's bearing.
+
+    An attitude calibrated for a grasp along +x of the planning frame,
+    rotated about z by the target's bearing, serves targets in every
+    direction with one calibration.
+
+    :param attitude: Quaternion as (x, y, z, w)
+    :param bearing: Angle of the base-to-target direction about z, in radians
+    :returns: The rotated quaternion as (x, y, z, w)
+    """
+    x, y, z, w = (float(v) for v in attitude)
+    rz, rw = math.sin(bearing / 2.0), math.cos(bearing / 2.0)
+    return (
+        rw * x - rz * y,
+        rw * y + rz * x,
+        rw * z + rz * w,
+        rw * w - rz * z,
+    )
 
 
 def pose_to_constraints(
