@@ -21,9 +21,10 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 from attrs import define, field
 
+_KOMPASS_MIN_VERSION = (0, 8, 4)
 _KOMPASS_INSTALL_HINT = (
-    "'kompass-core' is required to lift 2D detections into 3D but it is not "
-    "installed. Install it with: pip install kompass-core"
+    "'kompass-core' >= 0.8.4 is required to lift 2D detections into 3D. "
+    "Install it with: pip install 'kompass-core>=0.8.4'"
 )
 
 # Depth encodings carrying integer millimeters rather than float meters
@@ -32,31 +33,21 @@ _MILLIMETER_ENCODINGS = {"16uc1", "mono16"}
 # kompass-core works in millimeters
 _METERS_TO_MM = 1000.0
 
-# NOTE: Rotation taking a camera's optical axes (x right, y down, z forward) to the
-# body aligned axes (x forward, y left, z up) the detector reports in, as
-# (x, y, z, w). This is the fixed quarter turn ROS puts between a camera's link
-# frame and its optical frame.
-_OPTICAL_TO_BODY = (-0.5, 0.5, -0.5, 0.5)
-
-
-def _quaternion_multiply(
-    first: Sequence[float], second: Sequence[float]
-) -> Tuple[float, float, float, float]:
-    """Compose two rotations given as (x, y, z, w), applying `second` first."""
-    x1, y1, z1, w1 = first
-    x2, y2, z2, w2 = second
-    return (
-        w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
-        w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
-        w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
-        w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
-    )
-
 
 def ensure_kompass_core() -> None:
-    """Raise an actionable error when kompass_core is unavailable."""
+    """Raise an actionable error when kompass_core is missing or too old."""
     if find_spec("kompass_core") is None:
         raise ModuleNotFoundError(_KOMPASS_INSTALL_HINT)
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        installed = tuple(int(part) for part in version("kompass-core").split(".")[:3])
+    except (PackageNotFoundError, ValueError):
+        return  # a source checkout with no metadata: trust it
+    if installed < _KOMPASS_MIN_VERSION:
+        raise ImportError(
+            f"{_KOMPASS_INSTALL_HINT} (found {'.'.join(map(str, installed))})"
+        )
 
 
 def resolve_lift_camera(
@@ -246,16 +237,11 @@ def make_detector(
     :returns: kompass_core DepthDetector
     """
     ensure_kompass_core()
-    from kompass_core.vision import DepthDetector
+    from kompass_core.vision import CameraFrameConvention, DepthDetector
 
-    # NOTE: The detector turns the camera's optical axes into body aligned ones
-    # itself before applying the pose it is built with, so that fixed turn has
-    # to be taken back out of the pose given here. Drop this once the detector
-    # can be told which convention the pose is in, and pass the pose straight
-    # through: https://github.com/automatika-robotics/kompass-core/issues/49
+    # The pose is that of the OPTICAL frame, what a TF lookup against an
+    # image's frame_id gives; the convention is passed explicitly below
     rotation = rotation if rotation is not None else (0.0, 0.0, 0.0, 1.0)
-    x, y, z, w = _OPTICAL_TO_BODY
-    body_in_target = _quaternion_multiply(rotation, (-x, -y, -z, w))
 
     return DepthDetector(
         np.asarray(depth_range, dtype=np.float32),
@@ -263,10 +249,11 @@ def make_detector(
             translation if translation is not None else (0.0, 0.0, 0.0),
             dtype=np.float32,
         ),
-        np.asarray(body_in_target, dtype=np.float32),
+        np.asarray(rotation, dtype=np.float32),
         np.asarray([intrinsics.fx, intrinsics.fy], dtype=np.float32),
         np.asarray([intrinsics.cx, intrinsics.cy], dtype=np.float32),
         1e-3,  # the depth images handed over are in millimeters
+        convention=CameraFrameConvention.OPTICAL,
     )
 
 

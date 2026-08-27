@@ -134,6 +134,14 @@ class TestKompassCoreGuard:
         with pytest.raises(ModuleNotFoundError, match="kompass-core"):
             ensure_kompass_core()
 
+    def test_an_old_release_is_refused(self, monkeypatch):
+        """Before 0.8.4 the detector rotated every box a quarter turn on its
+        own; running against it would misplace boxes silently."""
+        monkeypatch.setattr("agents.utils.perception3d.find_spec", lambda name: object())
+        monkeypatch.setattr("importlib.metadata.version", lambda name: "0.8.3")
+        with pytest.raises(ImportError, match="0.8.4.*found 0.8.3"):
+            ensure_kompass_core()
+
 
 class TestLifting:
     """The geometry itself, against a synthetic camera and scene."""
