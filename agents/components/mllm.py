@@ -479,7 +479,12 @@ class MLLM(DepthLiftMixin, LLM):
                     time_stamp=self.get_ros_time(),
                 )
         elif self._task in ("grounding", "affordance"):
-            boxes = {"bboxes": result["output"], "labels": [], "scores": []}
+            # use the query to label the boxes
+            boxes = {
+                "bboxes": result["output"],
+                "labels": [self._lift_label] * len(result["output"]),
+                "scores": [],
+            }
             for pub_name in self._detections_publishers:
                 publisher = self.publishers_dict[pub_name]
                 # NOTE: The model grounds against the image set as a whole, so there

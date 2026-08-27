@@ -352,9 +352,10 @@ class TestGroundedLift(_SyntheticCamera):
         assert published["boxes_2d"] == [list(self.PATCH)]
         (center, _), = boxes
         assert center[2] == pytest.approx(self.PATCH_DEPTH_M, abs=0.02)
-        # the 2D output still goes out alongside
+        # the 2D output still goes out alongside, labeled the same way
         pixels, _ = self._published(grounder, "d2")
         assert pixels["bboxes"] == [list(self.PATCH)]
+        assert pixels["labels"] == ["the orange"]
 
     def test_nothing_grounded_is_an_empty_message(
         self, grounder, mock_model_client
