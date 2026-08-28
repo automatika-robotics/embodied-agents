@@ -279,9 +279,8 @@ class TestMLLMSetTask:
             mllm.set_task("invalid_task")
 
 
-class TestGroundedLift(_SyntheticCamera):
-    """Grounded 2D boxes are lifted onto the depth latched with the picture
-    the model saw, and published as Detections3D named by the query."""
+class _GrounderSetup(_SyntheticCamera):
+    """A grounding MLLM with a 2D and a 3D output, over the synthetic camera."""
 
     @pytest.fixture
     def grounder(self, rclpy_init, mock_model_client):
@@ -336,6 +335,11 @@ class TestGroundedLift(_SyntheticCamera):
 
     def _trigger(self, comp):
         comp._execution_step(topic=Topic(name="text_in", msg_type="String"))
+
+
+class TestGroundedLift(_GrounderSetup):
+    """Grounded 2D boxes are lifted onto the depth latched with the picture
+    the model saw, and published as Detections3D named by the query."""
 
     def test_grounded_boxes_are_published_in_metric_space(
         self, grounder, mock_model_client
@@ -397,3 +401,100 @@ class TestGroundedLift(_SyntheticCamera):
 
         assert grounder.publishers_dict["d3"].publish.call_count == 0
         assert "max_depth_age" in _warnings(grounder)
+
+
+class TestRunTask(_GrounderSetup):
+    """The one-shot task action: one frame, one query, published like the
+    streaming path, summarized for the caller."""
+
+    def _frame(self, comp):
+        """Stand in for the frame grab: the synthetic camera's picture."""
+        msg = _image("cam", width=self.WIDTH, height=self.HEIGHT)
+        comp._grab_frame = MagicMock(
+            return_value=(np.zeros((self.HEIGHT, self.WIDTH, 3)), msg)
+        )
+        return msg
+
+    def test_run_task_publishes_and_returns_the_located_objects(
+        self, grounder, mock_model_client
+    ):
+        mock_model_client.inference.return_value = {"output": [list(self.PATCH)]}
+        self._wire(grounder)
+        msg = self._frame(grounder)
+
+        summary = grounder.run_task.__wrapped__(grounder, query="the orange")
+
+        # the frame came from the lift camera, and the depth was latched with it
+        grounder._grab_frame.assert_called_once_with("img_in", 0.5)
+        assert grounder._lift_msg is msg and grounder._lift_depth is not None
+        # published exactly as the streaming path does, 2D and 3D
+        pixels, kwargs = self._published(grounder, "d2")
+        assert pixels["labels"] == ["the orange"] and kwargs["images"] is msg
+        _, published = self._published(grounder)
+        assert published["labels"] == ["the orange"]
+        # the summary is what a planner can act on: metric objects, by name
+        assert summary["task"] == "grounding" and summary["query"] == "the orange"
+        assert summary["published"] == ["d2", "d3"] and summary["count"] == 1
+        (found,) = summary["objects"]
+        assert found["label"] == "the orange" and found["frame"] == "cam"
+        assert found["center"][2] == pytest.approx(self.PATCH_DEPTH_M, abs=0.02)
+        # the inference carried the configured task
+        assert mock_model_client.inference.call_args[0][0]["task"] == "grounding"
+
+    def test_run_task_needs_a_configured_task(self, mllm):
+        mllm._task = None
+        with pytest.raises(ValueError, match="set `task`"):
+            mllm.run_task.__wrapped__(mllm, query="anything")
+
+    def test_run_task_sends_general_to_describe(self, mllm):
+        mllm._task = "general"
+        with pytest.raises(ValueError, match="describe"):
+            mllm.run_task.__wrapped__(mllm, query="anything")
+
+    def test_run_task_needs_an_output_of_the_tasks_type(self, grounder):
+        grounder._detections_publishers = []
+        grounder._detections3d_publishers = []
+        with pytest.raises(ValueError, match="nothing to publish"):
+            grounder.run_task.__wrapped__(grounder, query="the orange")
+
+    def test_run_task_without_a_frame_fails_loudly(self, grounder):
+        grounder._grab_frame = MagicMock(return_value=(None, None))
+        with pytest.raises(RuntimeError, match="image"):
+            grounder.run_task.__wrapped__(grounder, query="the orange")
+
+    def test_run_task_off_the_lift_camera_publishes_2d_only(
+        self, grounder, mock_model_client
+    ):
+        """A frame from a camera the lift is not calibrated for still gives
+        2D boxes; 3D boxes are not fabricated for it."""
+        mock_model_client.inference.return_value = {"output": [list(self.PATCH)]}
+        self._wire(grounder)
+        grounder.callbacks["other"] = _callback(name="other")
+        self._frame(grounder)
+
+        summary = grounder.run_task.__wrapped__(
+            grounder, query="the orange", topic_name="other"
+        )
+
+        assert summary["published"] == ["d2"] and "objects" not in summary
+        grounder.publishers_dict["d3"].publish.assert_not_called()
+
+
+class TestDescribe(_GrounderSetup):
+    def test_describe_is_general_vqa_whatever_task_is_configured(
+        self, grounder, mock_model_client
+    ):
+        """On a grounding-configured component, describe must still answer
+        with text: the configured task belongs to the streaming path and
+        run_task, never to a description."""
+        mock_model_client.inference.return_value = {"output": "a table with fruit"}
+        grounder._grab_frame = MagicMock(
+            return_value=(np.zeros((self.HEIGHT, self.WIDTH, 3)), None)
+        )
+
+        answer = grounder.describe.__wrapped__(
+            grounder, topic_name="img_in", query="what is on the table?"
+        )
+
+        assert answer == '"a table with fruit"'
+        assert "task" not in mock_model_client.inference.call_args[0][0]
