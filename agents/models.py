@@ -406,18 +406,18 @@ class RoboBrain2(Model):
     }
         :param name: An arbitrary name given to the model.
         :type name: str
-        :param checkpoint: The name of the pre-trained model's checkpoint. Default is "BAAI/RoboBrain2.5-4B". For available checkpoints consult [RoboBrain2 and RoboBrain2.5 Model Collections](https://huggingface.co/collections/BAAI) on HuggingFace or ModelScope.
+        :param checkpoint: The name of the pre-trained model's checkpoint. Default is "BAAI/RoboBrain2.0-3B". For available checkpoints consult [RoboBrain2 and RoboBrain2.5 Model Collections](https://huggingface.co/collections/BAAI) on HuggingFace or ModelScope.
         :type checkpoint: str
         :param init_timeout: The timeout in seconds for the initialization process. Defaults to None.
         :type init_timeout: int, optional
 
         Example usage:
         ```python
-        robobrain = RoboBrain2(name='robobrain', checkpoint="BAAI/RoboBrain2.5-8B-NV")
+        robobrain = RoboBrain2(name='robobrain', checkpoint="BAAI/RoboBrain2.0-7B")
         ```
     """
 
-    checkpoint: str = field(default="BAAI/RoboBrain2.5-4B")
+    checkpoint: str = field(default="BAAI/RoboBrain2.0-3B")
 
     def _get_init_params(self) -> Dict:
         """Get init params for model initialization."""
