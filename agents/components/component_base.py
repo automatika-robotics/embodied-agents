@@ -121,8 +121,14 @@ class Component(BaseComponent):
             )  # second condition is necessary if being triggered by events
             else self.callbacks.values()
         )
+        # NOTE: Skip creating subscribers for plugin topics, similar to upstream
+        external = getattr(self, "_external_topics", set())
         for callback in all_callbacks:
+            if callback.input_topic.name in external:
+                # fed by the robot plugin bus, not by ROS
+                continue
             callback.set_node_name(self.node_name)
+            # Skip creating subscribers for fixed topics
             if not hasattr(callback.input_topic, "fixed"):
                 callback.set_subscriber(self._add_ros_subscriber(callback))
 
