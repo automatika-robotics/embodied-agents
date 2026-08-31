@@ -336,11 +336,13 @@ class Component(BaseComponent):
             topic_name[1:] if topic_name.startswith("/") else topic_name
         )
 
-        if topic_name not in self.trig_callbacks:
+        # trig_callbacks only exists once init_variables ran at activation
+        trig_callbacks = getattr(self, "trig_callbacks", None)
+        if not trig_callbacks or normalized_topic_name not in trig_callbacks:
             error_msg = f"Topic {topic_name} is not found in Component inputs"
             return error_msg
 
-        old_callback = self.trig_callbacks[normalized_topic_name]
+        old_callback = trig_callbacks[normalized_topic_name]
 
         # Create New Topic/Callback
         try:
@@ -363,7 +365,7 @@ class Component(BaseComponent):
 
         # Update callbacks dictionary
         self.trig_callbacks.pop(normalized_topic_name)
-        self.trig_callbacks[new_name] = new_callback
+        self.trig_callbacks[new_topic.name] = new_callback
 
         # update the internal lists
         old_topic = old_callback.input_topic
