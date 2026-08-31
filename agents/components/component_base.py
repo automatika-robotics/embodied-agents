@@ -329,6 +329,17 @@ class Component(BaseComponent):
         """
         error_msg = super()._replace_input_topic(topic_name, new_name, msg_type)
         if not error_msg:
+            # replace in the trig topic name if called before activation and topic
+            # is a trigger
+            names = getattr(self, "_trigger_topic_names", None)
+            normalized_old = (
+                topic_name[1:] if topic_name.startswith("/") else topic_name
+            )
+            if names and normalized_old in names:
+                normalized_new = (
+                    new_name[1:] if new_name.startswith("/") else new_name
+                )
+                names[names.index(normalized_old)] = normalized_new
             return
 
         # topic to be replaced is not found in callbacks -> check in trigger callbacks
