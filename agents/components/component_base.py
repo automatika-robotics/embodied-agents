@@ -85,6 +85,28 @@ class Component(BaseComponent):
         if self.run_type is ComponentRunType.EVENT:
             self.activate_all_triggers()
 
+    def init_variables(self):
+        """
+        Partition trigger inputs out of the callbacks dict, at activation.
+
+        This runs AFTER a robot plugin adapted the callbacks, so the
+        objects moved into trig_callbacks are the adapted ones. Idempotent
+        across reactivations.
+        """
+        super().init_variables()
+        trigger_names = getattr(self, "_trigger_topic_names", None)
+        if not trigger_names:
+            return
+        self.trig_callbacks = getattr(self, "trig_callbacks", {})
+        for name in trigger_names:
+            if name in self.callbacks:
+                self.trig_callbacks[name] = self.callbacks.pop(name)
+            elif name not in self.trig_callbacks:
+                self.get_logger().error(
+                    f"Trigger input '{name}' is no longer among this "
+                    "component's callbacks, so it will never fire."
+                )
+
     def create_all_subscribers(self):
         """
         Override to handle trigger topics and fixed inputs.
@@ -121,7 +143,8 @@ class Component(BaseComponent):
         """
         self.get_logger().info("DESTROYING ALL SUBSCRIBERS")
         all_callbacks = (
-            list(self.callbacks.values()) + list(self.trig_callbacks.values())
+            list(self.callbacks.values())
+            + list(getattr(self, "trig_callbacks", {}).values())
             if self.run_type is ComponentRunType.EVENT
             else self.callbacks.values()
         )
