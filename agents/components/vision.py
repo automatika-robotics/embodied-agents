@@ -201,7 +201,7 @@ class Vision(DepthLiftMixin, ModelComponent):
         # Where the lifted camera's picture sits in this tick's results
         self._lift_index: Optional[int] = None
 
-        triggers = getattr(self, "trig_callbacks", {})
+        triggers = getattr(self, "_trigger_topic_names", [])
         if any(name in triggers for name in self._aux_inputs):
             raise TypeError(
                 "Vision depth and camera_info topics describe a camera rather "

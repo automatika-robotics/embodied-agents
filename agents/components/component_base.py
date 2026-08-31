@@ -131,19 +131,18 @@ class Component(BaseComponent):
 
     def _trigger(self, trigger: Union[Topic, List[Topic], float, Event, None]) -> None:
         """
-        Set component trigger
+        Set component triggers. Trigger inputs are only RECORDED here and the partition
+        into trig_callbacks happens at activation, AFTER a robot plugin had its
+        chance to adapt the callbacks.
         """
         if isinstance(trigger, list):
             self.run_type = ComponentRunType.EVENT
-            self.trig_callbacks = {}
             for t in trigger:
                 if t.name not in self.callbacks:
                     raise TypeError(
                         f"Invalid configuration for component trigger {t.name} - A trigger needs to be one of the inputs already defined in component inputs."
                     )
-                self.trig_callbacks[t.name] = self.callbacks[t.name]
-                # remove trigger inputs from self.callbacks
-                del self.callbacks[t.name]
+            self._trigger_topic_names = [t.name for t in trigger]
 
         elif isinstance(trigger, Topic):
             if trigger.name not in self.callbacks:
@@ -151,8 +150,7 @@ class Component(BaseComponent):
                     f"Invalid configuration for component trigger {trigger.name} - A trigger needs to be one of the inputs already defined in component inputs."
                 )
             self.run_type = ComponentRunType.EVENT
-            self.trig_callbacks = {trigger.name: self.callbacks[trigger.name]}
-            del self.callbacks[trigger.name]
+            self._trigger_topic_names = [trigger.name]
 
         elif isinstance(trigger, Event):
             self.run_type = ComponentRunType.EVENT

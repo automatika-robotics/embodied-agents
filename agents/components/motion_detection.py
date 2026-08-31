@@ -138,7 +138,7 @@ class MotionDetector(Component):
         )
 
         # Check that position topic was not provided as a trigger
-        if position and position.name in getattr(self, "trig_callbacks", {}):
+        if position and position.name in getattr(self, "_trigger_topic_names", []):
             raise TypeError(
                 "MotionDetector position topic cannot be used as the component trigger."
             )
