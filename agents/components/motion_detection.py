@@ -277,7 +277,10 @@ class MotionDetector(Component):
                 self.config.threshold,
                 self.config.flow_kwargs,
             )
-        return True
+        # this should not happen after config validation
+        raise ValueError(
+            f"Unknown motion_estimation_func {self.config.motion_estimation_func!r}"
+        )
 
     def _ego_motion_paused(self) -> bool:
         """True when image processing should pause because the robot itself is moving."""

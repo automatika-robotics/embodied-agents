@@ -36,6 +36,24 @@ def test_frame_difference_static_vs_motion():
     assert motion.frame_difference(frame, moved, threshold=0.3)
 
 
+def test_frame_difference_ignores_sensor_noise():
+    """A static webcam frame with pixel noise is still, not motion."""
+    rng = np.random.default_rng(3)
+    smooth = np.full((64, 64), 120, dtype=np.uint8)
+    noisy = np.clip(smooth + rng.normal(0, 3, smooth.shape), 0, 255).astype(np.uint8)
+    assert not motion.frame_difference(smooth, noisy, threshold=0.3)
+
+
+def test_frame_difference_sees_a_darkening_object():
+    """An object moving over a lighter background darkens pixels; that is
+    motion too (a one-sided subtraction would miss the covered half)."""
+    background = np.full((64, 64), 200, dtype=np.uint8)
+    before, after = background.copy(), background.copy()
+    before[24:40, 8:24] = 40
+    after[24:40, 16:32] = 40
+    assert motion.frame_difference(before, after, threshold=0.3)
+
+
 def test_optical_flow_static_vs_motion():
     flow_kwargs = MotionDetectorConfig().flow_kwargs
     frame = _textured_frame()
@@ -416,9 +434,16 @@ class TestStateMachine:
 
 
 class TestImagePath:
+    def test_default_estimator_is_frame_difference(self):
+        assert MotionDetectorConfig().motion_estimation_func == "frame_difference"
+
+    def test_an_unknown_estimator_is_rejected(self):
+        with pytest.raises(ValueError):
+            MotionDetectorConfig(motion_estimation_func="always_true")
+
     def test_video_published_at_max_frames(self, rclpy_init):
-        # with no motion_estimation_func every frame after the first counts
-        # as motion; a full buffer ends the episode and publishes the video
+        # every frame moves relative to the previous one, so each counts as
+        # motion; a full buffer ends the episode and publishes the video
         component = _prep(
             _image_detector(
                 rclpy_init,
@@ -428,8 +453,9 @@ class TestImagePath:
         video_publisher = MagicMock()
         component._video_publishers = [video_publisher]
 
-        frame = np.dstack([_textured_frame()] * 3)
+        texture = _textured_frame()
         for i in range(6):
+            frame = np.dstack([np.roll(texture, 8 * i, axis=1)] * 3)
             component._process_image(SimpleNamespace(number=i), frame)
 
         video_publisher.publish.assert_called_once()

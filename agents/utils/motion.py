@@ -39,7 +39,10 @@ _KEY_MASK = (1 << _KEY_BITS) - 1
 
 
 def frame_difference(
-    previous_gray: np.ndarray, current_gray: np.ndarray, threshold: float
+    previous_gray: np.ndarray,
+    current_gray: np.ndarray,
+    threshold: float,
+    pixel_threshold: int = 25,
 ) -> bool:
     """Difference between two grayscale frames thresholded to a motion bool.
 
@@ -49,17 +52,20 @@ def frame_difference(
     :type current_gray: np.ndarray
     :param threshold: Percentage of changed pixels for detecting motion
     :type threshold: float
+    :param pixel_threshold: Absolute grayscale change (0-255) above which a
+        pixel counts as changed. Sensor and compression noise stay well below
+        the default after the blur; real change is far above it
+    :type pixel_threshold: int
     :rtype: bool
     """
-    # calculate frame difference
-    diff = cv2.subtract(current_gray, previous_gray)
-    # apply blur to improve thresholding
-    diff = cv2.medianBlur(diff, 3)
-    # apply adaptive thresholding
-    mask = cv2.adaptiveThreshold(
-        diff, 1, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2
+    # Blur first so pixel noise cannot register as change, then take the
+    # absolute difference.
+    diff = cv2.absdiff(
+        cv2.GaussianBlur(current_gray, (5, 5), 0),
+        cv2.GaussianBlur(previous_gray, (5, 5), 0),
     )
-    return mask.sum() > (threshold * math.prod(current_gray.shape) / 100)
+    changed = np.count_nonzero(diff > pixel_threshold)
+    return changed > threshold * diff.size / 100
 
 
 def optical_flow(

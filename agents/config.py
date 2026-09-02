@@ -1381,7 +1381,7 @@ class MotionDetectorConfig(BaseComponentConfig):
     :type min_video_frames: int
     :param max_video_frames: The maximum number of frames in a video segment. Default is 600, assuming a 20 second video at 30 fps.
     :type max_video_frames: int
-    :param motion_estimation_func: The function used for motion estimation. Can be one of "frame_difference" or "optical_flow". Default is None.
+    :param motion_estimation_func: The function used for image motion estimation, one of "frame_difference" (blurred absolute difference) or "optical_flow" (Farneback). Default is "frame_difference".
     :type motion_estimation_func: Optional[str]
     :param threshold: The threshold value for image motion detection. A float between 0.1 and 5.0. Default is 0.3.
     :type threshold: float
@@ -1436,13 +1436,9 @@ class MotionDetectorConfig(BaseComponentConfig):
 
     min_video_frames: int = field(default=15)  # assuming 0.5 second video at 30 fps
     max_video_frames: int = field(default=600)  # assuming 20 second video at 30 fps
-    motion_estimation_func: Optional[Literal["frame_difference", "optical_flow"]] = (
-        field(
-            default=None,
-            validator=validators.optional(
-                base_validators.in_(["frame_difference", "optical_flow"])
-            ),
-        )
+    motion_estimation_func: Literal["frame_difference", "optical_flow"] = field(
+        default="frame_difference",
+        validator=base_validators.in_(["frame_difference", "optical_flow"]),
     )
     threshold: float = field(
         default=0.3, validator=base_validators.in_range(min_value=0.1, max_value=5.0)
