@@ -80,6 +80,16 @@ def test_optical_flow_static_vs_motion():
     assert motion.optical_flow(frame, moved, 0.3, flow_kwargs)
 
 
+def test_optical_flow_counts_motion_in_every_direction():
+    """Flow is thresholded by magnitude: motion to the left or upward (negative
+    components) counts exactly like motion to the right or downward."""
+    flow_kwargs = MotionDetectorConfig().flow_kwargs
+    frame = _textured_frame()
+    for shift, axis in ((-8, 1), (-8, 0)):
+        moved = np.roll(frame, shift, axis=axis)
+        assert motion.optical_flow(frame, moved, 0.3, flow_kwargs)
+
+
 def test_roi_mask():
     mask = motion.roi_mask((10, 10), [(0, 0), (0, 4), (4, 4), (4, 0)])
     assert mask.shape == (10, 10)

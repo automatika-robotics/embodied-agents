@@ -3,7 +3,6 @@
 Point cloud voxelization can optionally run on GPU through torch when available.
 """
 
-import math
 import warnings
 from typing import Dict, List, Tuple
 
@@ -80,6 +79,7 @@ def optical_flow(
     current_gray: np.ndarray,
     threshold: float,
     flow_kwargs: Dict,
+    flow_threshold: float = 1.0,
 ) -> bool:
     """Farneback optical flow between two frames thresholded to a motion bool.
 
@@ -91,13 +91,18 @@ def optical_flow(
     :type threshold: float
     :param flow_kwargs: Keyword arguments for cv2.calcOpticalFlowFarneback
     :type flow_kwargs: Dict
+    :param flow_threshold: Flow magnitude in pixels per frame above which a
+        pixel counts as moving, whatever its direction
+    :type flow_threshold: float
     :rtype: bool
     """
     flow = cv2.calcOpticalFlowFarneback(
         previous_gray, current_gray, None, **flow_kwargs
     )
-    mask = np.uint8(flow > 1) / 10
-    return mask.sum() > (threshold * math.prod(current_gray.shape) / 100)
+    # the fraction of PIXELS that moved, by flow magnitude
+    magnitude = np.hypot(flow[..., 0], flow[..., 1])
+    moving = np.count_nonzero(magnitude > flow_threshold)
+    return moving > threshold * magnitude.size / 100
 
 
 def roi_mask(
