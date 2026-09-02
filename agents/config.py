@@ -1392,6 +1392,8 @@ class MotionDetectorConfig(BaseComponentConfig):
     :type pause_on_ego_motion: bool
     :param ego_speed_threshold: Speed (m/s) above which the robot is considered moving for ``pause_on_ego_motion``. Default is 0.05.
     :type ego_speed_threshold: float
+    :param ego_turn_threshold: Heading rate (rad/s) above which the robot is considered turning for ``pause_on_ego_motion``. A robot turning in place has no linear speed while the whole image sweeps past. Default is 0.1.
+    :type ego_turn_threshold: float
 
     --
     Point cloud input params
@@ -1459,6 +1461,9 @@ class MotionDetectorConfig(BaseComponentConfig):
     pause_on_ego_motion: bool = field(default=True)
     ego_speed_threshold: float = field(
         default=0.05, validator=base_validators.in_range(min_value=0.0, max_value=1e3)
+    )
+    ego_turn_threshold: float = field(
+        default=0.1, validator=base_validators.in_range(min_value=0.0, max_value=1e3)
     )
 
     voxel_size: float = field(

@@ -641,3 +641,75 @@ class TestCloudPath:
         component._process_cloud(self._cloud(scene))
 
         assert bool_publisher.publish.call_args.kwargs["output"] is False
+
+
+class TestEgoMotionGate:
+    """Image motion detection pauses while the robot itself moves."""
+
+    def _component(self, rclpy_init):
+        component = _prep(_image_detector(rclpy_init, position=ODOM))
+        bool_publisher = MagicMock()
+        component._bool_publishers = [bool_publisher]
+        clock = {"t": 0.0}
+        component.get_ros_time = MagicMock(
+            side_effect=lambda: SimpleNamespace(
+                sec=int(clock["t"]), nanosec=int((clock["t"] % 1) * 1e9)
+            )
+        )
+        odom = MagicMock()
+        component.callbacks = {ODOM.name: odom}
+        return component, bool_publisher, clock, odom
+
+    @staticmethod
+    def _state(x, y, heading, speed):
+        return np.array([x, y, 0.0, heading, speed])
+
+    def _feed(self, component, clock, frame, dt=0.1):
+        clock["t"] += dt
+        component._process_image(SimpleNamespace(), frame)
+
+    def test_turning_in_place_pauses_detection(self, rclpy_init):
+        """Rotation sweeps the whole image with zero linear speed: the old
+        speed-only gate let that through as motion."""
+        component, bool_publisher, clock, odom = self._component(rclpy_init)
+        texture = _textured_frame()
+        headings = iter([0.0, 0.3, 0.6, 0.9])
+        odom.get_output.side_effect = lambda: self._state(0, 0, next(headings), 0.0)
+
+        for i in range(4):
+            self._feed(component, clock, np.roll(texture, 8 * i, axis=1))
+
+        published = [c.kwargs["output"] for c in bool_publisher.publish.call_args_list]
+        assert published == [False, False, False, False]
+        assert component._last_frame is None
+
+    def test_translation_still_pauses_detection(self, rclpy_init):
+        component, bool_publisher, clock, odom = self._component(rclpy_init)
+        texture = _textured_frame()
+        odom.get_output.return_value = self._state(0, 0, 0.0, 0.5)
+
+        for i in range(3):
+            self._feed(component, clock, np.roll(texture, 8 * i, axis=1))
+
+        assert all(
+            c.kwargs["output"] is False for c in bool_publisher.publish.call_args_list
+        )
+
+    def test_the_first_frame_after_a_pause_only_seeds(self, rclpy_init):
+        """The frame taken while moving must not become the reference for the
+        first still frame, or every stop would register as motion."""
+        component, bool_publisher, clock, odom = self._component(rclpy_init)
+        texture = _textured_frame()
+        # turning for two frames, then perfectly still
+        headings = iter([0.0, 0.5, 1.0, 1.0, 1.0, 1.0])
+        odom.get_output.side_effect = lambda: self._state(0, 0, next(headings), 0.0)
+
+        self._feed(component, clock, texture)                          # seeds
+        self._feed(component, clock, np.roll(texture, 8, axis=1))      # turning
+        self._feed(component, clock, np.roll(texture, 16, axis=1))     # turning
+        self._feed(component, clock, np.roll(texture, 24, axis=1))     # stopped: seeds only
+        self._feed(component, clock, np.roll(texture, 24, axis=1))     # still
+        self._feed(component, clock, np.roll(texture, 32, axis=1))     # real motion
+
+        published = [c.kwargs["output"] for c in bool_publisher.publish.call_args_list]
+        assert published == [False, False, False, False, False, True]

@@ -147,6 +147,9 @@ class MotionDetector(Component):
         self._frames: Union[List[ROSImage], List[ROSCompressedImage]] = []
         self._last_frame: Optional[np.ndarray] = None
         self._roi_mask: Optional[np.ndarray] = None
+        # heading of the previous odometry reading, for the turn rate
+        self._last_heading: Optional[float] = None
+        self._last_heading_time: float = 0.0
 
         # Point cloud modality state
         # occupancy history of the last `accumulation_window` clouds
@@ -283,11 +286,28 @@ class MotionDetector(Component):
         )
 
     def _ego_motion_paused(self) -> bool:
-        """True when image processing should pause because the robot itself is moving."""
+        """True when image processing should pause because the robot itself is
+        moving. Translating faster than ``ego_speed_threshold`` or turning
+        faster than ``ego_turn_threshold``.
+        """
         if not (self.position and self.config.pause_on_ego_motion):
             return False
         odom = self.callbacks[self.position.name].get_output()
-        return odom is not None and abs(odom[4]) > self.config.ego_speed_threshold
+        if odom is None:
+            return False
+        ros_time = self.get_ros_time()
+        now = ros_time.sec + ros_time.nanosec * 1e-9
+        heading = float(odom[3])
+        turn_rate = 0.0
+        if self._last_heading is not None and now > self._last_heading_time:
+            delta = heading - self._last_heading
+            delta = float(np.arctan2(np.sin(delta), np.cos(delta)))  # wrapped
+            turn_rate = abs(delta) / (now - self._last_heading_time)
+        self._last_heading, self._last_heading_time = heading, now
+        return (
+            abs(odom[4]) > self.config.ego_speed_threshold
+            or turn_rate > self.config.ego_turn_threshold
+        )
 
     def _process_image(self, msg, output: np.ndarray) -> None:
         """Collects incoming image messages while motion is detected and
@@ -312,9 +332,13 @@ class MotionDetector(Component):
             gray = gray * self._roi_mask
 
         detected = False
-        if self._last_frame is not None and not self._ego_motion_paused():
-            detected = self._estimate_image_motion(gray)
-        self._last_frame = gray
+        if self._ego_motion_paused():
+            # do not keep a moving frame as the reference for the first still one
+            self._last_frame = None
+        else:
+            if self._last_frame is not None:
+                detected = self._estimate_image_motion(gray)
+            self._last_frame = gray
 
         buffer_full = False
         if detected:
