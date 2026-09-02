@@ -1387,6 +1387,8 @@ class MotionDetectorConfig(BaseComponentConfig):
     :param threshold: The threshold value for image motion detection. A float between 0.1 and 5.0. Default is 0.3.
     :type threshold: float
     :param flow_kwargs: Additional keyword arguments for the optical flow algorithm. Default is a dictionary with reasonable values.
+    :param image_scale: Factor by which image frames are downscaled before motion estimation, in (0, 1]; 1.0 processes full resolution. Default is 0.5.
+    :type image_scale: float
     :param roi_ignore_polygon: Optional polygon of (x, y) pixel coordinates to ignore during image motion estimation (e.g. a visible robot arm). Default is None.
     :type roi_ignore_polygon: Optional[List]
     :param pause_on_ego_motion: When a position (odometry) topic is provided with image inputs, suppress motion detection while the robot itself is moving. Default is True.
@@ -1460,6 +1462,9 @@ class MotionDetectorConfig(BaseComponentConfig):
             "flags": 0,
         },
         validator=validate_kwargs_from_default,
+    )
+    image_scale: float = field(
+        default=0.5, validator=base_validators.in_range(min_value=0.05, max_value=1.0)
     )
     roi_ignore_polygon: Optional[List] = field(default=None)
     pause_on_ego_motion: bool = field(default=True)

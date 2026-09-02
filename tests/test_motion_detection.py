@@ -499,6 +499,42 @@ class TestImagePath:
         published = [c.kwargs["output"] for c in bool_publisher.publish.call_args_list]
         assert published == [False, False, True]
 
+    def test_large_frames_are_downscaled_before_estimation(self, rclpy_init):
+        """Motion estimation runs at a bounded resolution: the reference frame
+        is stored downscaled, detection still works, and an ROI polygon given
+        in camera pixels lands on the same part of the scene."""
+        component = _prep(
+            _image_detector(
+                rclpy_init,
+                # ignore the right half of a 640-wide camera image
+                config=MotionDetectorConfig(
+                    image_scale=0.5,
+                    roi_ignore_polygon=[(320, 0), (640, 0), (640, 480), (320, 480)],
+                ),
+            )
+        )
+        bool_publisher = MagicMock()
+        component._bool_publishers = [bool_publisher]
+        texture = _textured_frame(size=640)[:480]  # 480 x 640
+
+        component._process_image(SimpleNamespace(), texture)
+        assert component._last_frame.shape == (240, 320)
+        assert component._roi_mask.shape == (240, 320)
+        assert component._roi_mask[:, :160].all() and not component._roi_mask[:, 160:].any()
+
+        # motion in the LEFT (kept) half is seen ...
+        moved = texture.copy()
+        moved[:, :320] = np.roll(texture[:, :320], 16, axis=1)
+        component._process_image(SimpleNamespace(), moved)
+        assert bool_publisher.publish.call_args.kwargs["output"] is True
+        # ... motion confined to the ignored right half is not
+        for _ in range(component.config.motion_stop_delay + 1):
+            component._process_image(SimpleNamespace(), moved)  # settle
+        ignored = moved.copy()
+        ignored[:, 320:] = np.roll(moved[:, 320:], 16, axis=1)
+        component._process_image(SimpleNamespace(), ignored)
+        assert bool_publisher.publish.call_args.kwargs["output"] is False
+
     def test_video_published_at_max_frames(self, rclpy_init):
         # every frame moves relative to the previous one, so each counts as
         # motion; a full buffer ends the episode and publishes the video

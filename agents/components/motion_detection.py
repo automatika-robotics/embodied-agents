@@ -325,11 +325,18 @@ class MotionDetector(Component):
                 )
             # perform a FIXED rescale to keep consecutive frames comparable
             gray = cv2.convertScaleAbs(gray, alpha=255.0 / np.iinfo(gray.dtype).max)
-        # ignore set polygons of robot's own body
+        scale = self.config.image_scale
+        if scale < 1.0:
+            gray = cv2.resize(
+                gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA
+            )
+        # ignore set polygons of robot's own body, given in the camera's
+        # pixels, scale them with the frame they are applied to
         if self.config.roi_ignore_polygon:
             if self._roi_mask is None:
                 self._roi_mask = motion.roi_mask(
-                    gray.shape, self.config.roi_ignore_polygon
+                    gray.shape,
+                    [(x * scale, y * scale) for x, y in self.config.roi_ignore_polygon],
                 )
             gray = gray * self._roi_mask
 
