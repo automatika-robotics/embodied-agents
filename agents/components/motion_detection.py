@@ -145,6 +145,8 @@ class MotionDetector(Component):
 
         # Image modality state
         self._frames: Union[List[ROSImage], List[ROSCompressedImage]] = []
+        # buffer for frames just before an episode opens
+        self._preroll: Deque = deque(maxlen=self.config.video_preroll_frames)
         self._last_frame: Optional[np.ndarray] = None
         self._roi_mask: Optional[np.ndarray] = None
         # heading of the previous odometry reading, for the turn rate
@@ -341,11 +343,19 @@ class MotionDetector(Component):
             self._last_frame = gray
 
         buffer_full = False
-        if detected:
+        in_episode = self._motion_active
+        if detected and not in_episode:
+            # motion episode opens, put the frames leading up to it
+            self._frames.extend(self._preroll)
+            self._preroll.clear()
+        if detected or in_episode:
+            # keep all frames of the episode, including the still frames of the tail
             self._frames.append(msg)
             # A full buffer ends the episode early so long motion produces
             # consecutive videos
             buffer_full = len(self._frames) >= self.config.max_video_frames
+        else:
+            self._preroll.append(msg)
 
         episode_ended = self._step_motion_state(detected)
 

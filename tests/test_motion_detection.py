@@ -505,7 +505,9 @@ class TestImagePath:
         component = _prep(
             _image_detector(
                 rclpy_init,
-                config=MotionDetectorConfig(min_video_frames=2, max_video_frames=4),
+                config=MotionDetectorConfig(
+                    min_video_frames=2, max_video_frames=4, video_preroll_frames=0
+                ),
             )
         )
         video_publisher = MagicMock()
@@ -521,6 +523,41 @@ class TestImagePath:
         assert len(frames) == 4
         # motion continues after the flush: a new episode starts buffering
         assert len(component._frames) == 1
+
+    def test_video_opens_with_the_preroll_and_closes_with_the_tail(self, rclpy_init):
+        """A motion video shows the scene before the event and the still
+        frames that end it, and holds the very message objects received:
+        no copies, and never more pre-roll than configured."""
+        component = _prep(
+            _image_detector(
+                rclpy_init,
+                config=MotionDetectorConfig(
+                    min_video_frames=1,
+                    motion_stop_delay=2,
+                    video_preroll_frames=2,
+                ),
+            )
+        )
+        video_publisher = MagicMock()
+        component._video_publishers = [video_publisher]
+        texture = _textured_frame()
+        msgs = [SimpleNamespace(number=i) for i in range(8)]
+
+        for i in (0, 1, 2):  # still: only the last two are kept as pre-roll
+            component._process_image(msgs[i], texture)
+        assert len(component._preroll) == 2
+        for i in (3, 4):  # moving
+            component._process_image(msgs[i], np.roll(texture, 8 * i, axis=1))
+        for i in (5, 6):  # still again: the debounce tail, closes the episode
+            component._process_image(msgs[i], np.roll(texture, 32, axis=1))
+
+        video_publisher.publish.assert_called_once()
+        frames = video_publisher.publish.call_args.kwargs["output"]
+        assert [f.number for f in frames] == [1, 2, 3, 4, 5, 6]
+        assert all(frame is msgs[frame.number] for frame in frames)
+        # the pre-roll was consumed by the episode and starts collecting afresh
+        component._process_image(msgs[7], np.roll(texture, 32, axis=1))
+        assert [f.number for f in component._preroll] == [7]
 
 
 class TestCloudPath:

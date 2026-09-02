@@ -1380,6 +1380,7 @@ class MotionDetectorConfig(BaseComponentConfig):
     :param min_video_frames: The minimum number of frames in a video segment. Default is 15, assuming a 0.5 second video at 30 fps.
     :type min_video_frames: int
     :param max_video_frames: The maximum number of frames in a video segment. Default is 600, assuming a 20 second video at 30 fps.
+    :param video_preroll_frames: Number of frames from just before a motion episode begins that open its video, so the video shows the scene before the event; the still frames of the ``motion_stop_delay`` debounce close it. 0 disables. Default is 5.
     :type max_video_frames: int
     :param motion_estimation_func: The function used for image motion estimation, one of "frame_difference" (blurred absolute difference) or "optical_flow" (Farneback). Default is "frame_difference".
     :type motion_estimation_func: Optional[str]
@@ -1437,6 +1438,9 @@ class MotionDetectorConfig(BaseComponentConfig):
     )
 
     min_video_frames: int = field(default=15)  # assuming 0.5 second video at 30 fps
+    video_preroll_frames: int = field(
+        default=5, validator=base_validators.in_range(min_value=0, max_value=1e3)
+    )
     max_video_frames: int = field(default=600)  # assuming 20 second video at 30 fps
     motion_estimation_func: Literal["frame_difference", "optical_flow"] = field(
         default="frame_difference",
