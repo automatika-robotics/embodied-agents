@@ -1,5 +1,4 @@
 from .utils import (
-    create_detection_context,
     draw_detection_bounding_boxes,
     draw_points_2d,
     validate_kwargs_from_default,
@@ -30,7 +29,6 @@ __all__ = [
     "flatten",
     "get_frame_id",
     "get_stamp_secs",
-    "create_detection_context",
     "draw_detection_bounding_boxes",
     "draw_points_2d",
     "validate_kwargs_from_default",

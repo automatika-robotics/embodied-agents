@@ -17,7 +17,6 @@ from ros_sugar.io.utils import (
 )
 
 from .utils import (
-    create_detection_context,
     draw_detection_bounding_boxes,
     draw_points_2d,
 )
@@ -220,25 +219,25 @@ class DetectionsMultiSourceCallback(GenericCallback):
         """
         if self.msg is None:
             return None
-        # send fixed list of labels if it exists
-        if isinstance(self.msg, list):
-            return create_detection_context(self.msg)
-
-        # send labels from ROS message
-        label_list = [
-            label for detection in self.msg.detections for label in detection.labels
-        ]
-        detections_string = create_detection_context(label_list)
-        return detections_string
+        labels = (
+            self.msg
+            if isinstance(self.msg, list)  # a fixed input is already a list of labels
+            else [
+                label
+                for detection in self.msg.detections
+                for label in detection.labels
+            ]
+        )
+        return ", ".join(labels) if labels else None
 
     def _get_ui_content(self, **_) -> str:
         """Get UI content for the first Detections2D msg in Detections2DMultiSource: draw bounding boxes and labels on the image."""
         if self.msg is None:
             return ""
 
-        # If msg is a list, return precomputed detection context
+        # a fixed input is already a list of labels
         if isinstance(self.msg, list):
-            return create_detection_context(self.msg)
+            return ", ".join(self.msg)
 
         detections = self.msg.detections
         if not detections:
@@ -301,24 +300,18 @@ class DetectionsCallback(GenericCallback):
         """
         if self.msg is None:
             return None
-
-        # send fixed list of labels if it exists
-        if isinstance(self.msg, list):
-            return create_detection_context(self.msg)
-
-        # send labels from ROS message
-        label_list = list(self.msg.labels)
-        detections_string = create_detection_context(label_list)
-        return detections_string
+        # a fixed input is already a list of labels
+        labels = self.msg if isinstance(self.msg, list) else list(self.msg.labels)
+        return ", ".join(labels) if labels else None
 
     def _get_ui_content(self, **_) -> str:
         """Get UI content for Detections2D: draw bounding boxes and labels on the image."""
         if self.msg is None:
             return ""
 
-        # If msg is a list, return precomputed detection context
+        # a fixed input is already a list of labels
         if isinstance(self.msg, list):
-            return create_detection_context(self.msg)
+            return ", ".join(self.msg)
 
         img = None
 
