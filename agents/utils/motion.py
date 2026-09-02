@@ -38,6 +38,11 @@ _KEY_MASK = (1 << _KEY_BITS) - 1
 # ---------------------------------------------------------------------------
 
 
+# Median frame-to-frame shift (gray levels) above which the whole frame is
+# taken to have changed exposure rather than content
+_GLOBAL_SHIFT_MIN = 3
+
+
 def frame_difference(
     previous_gray: np.ndarray,
     current_gray: np.ndarray,
@@ -58,14 +63,16 @@ def frame_difference(
     :type pixel_threshold: int
     :rtype: bool
     """
-    # Blur first so pixel noise cannot register as change, then take the
-    # absolute difference.
-    diff = cv2.absdiff(
-        cv2.GaussianBlur(current_gray, (5, 5), 0),
-        cv2.GaussianBlur(previous_gray, (5, 5), 0),
-    )
-    changed = np.count_nonzero(diff > pixel_threshold)
-    return changed > threshold * diff.size / 100
+    # Blur first so pixel noise cannot register as change.
+    delta = cv2.GaussianBlur(current_gray, (5, 5), 0).astype(np.int16)
+    delta -= cv2.GaussianBlur(previous_gray, (5, 5), 0).astype(np.int16)
+    # Take that global shift out before thresholding so a white balance or auto-exposure
+    # doesn't generate false moves
+    shift = float(np.median(delta))
+    if abs(shift) > _GLOBAL_SHIFT_MIN:
+        delta -= int(round(shift))
+    changed = np.count_nonzero(np.abs(delta) > pixel_threshold)
+    return changed > threshold * delta.size / 100
 
 
 def optical_flow(

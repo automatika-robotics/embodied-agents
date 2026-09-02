@@ -54,6 +54,24 @@ def test_frame_difference_sees_a_darkening_object():
     assert motion.frame_difference(before, after, threshold=0.3)
 
 
+def test_frame_difference_ignores_an_exposure_step():
+    """Auto-exposure re-exposes the WHOLE frame at once; that is not motion."""
+    frame = _textured_frame()
+    brighter = np.clip(frame.astype(int) + 40, 0, 255).astype(np.uint8)
+    assert not motion.frame_difference(frame, brighter, threshold=0.3)
+
+
+def test_frame_difference_sees_motion_during_an_exposure_step():
+    """The global shift is removed from the SIGNED difference, so an object
+    that moved while the exposure stepped is still seen."""
+    background = np.full((64, 64), 150, dtype=np.uint8)
+    before, after = background.copy(), background.copy()
+    before[24:40, 8:24] = 40
+    after[24:40, 16:32] = 40
+    after = np.clip(after.astype(int) + 40, 0, 255).astype(np.uint8)
+    assert motion.frame_difference(before, after, threshold=0.3)
+
+
 def test_optical_flow_static_vs_motion():
     flow_kwargs = MotionDetectorConfig().flow_kwargs
     frame = _textured_frame()
