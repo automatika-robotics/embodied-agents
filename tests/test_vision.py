@@ -940,7 +940,9 @@ class TestDetections3DMessage:
         message.header.frame_id = "base_link"
         callback.msg = message
 
-        assert callback.get_output() == "1 orange"
+        context = callback.get_output()
+        assert "orange" in context and "base_link" in context
+        assert "at (" in context
         assert callback.get_output(get_msg=True) is message
 
         content = callback._get_ui_content()

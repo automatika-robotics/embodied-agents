@@ -110,7 +110,12 @@ class MLLM(DepthLiftMixin, LLM):
     ):
         self.allowed_inputs = {
             "Required": [String, [Image, RGBD]],
-            "Optional": [DetectionsMultiSource, Detections, CameraInfo],
+            "Optional": [
+                DetectionsMultiSource,
+                Detections,
+                Detections3D,
+                CameraInfo,
+            ],
         }
 
         config = config or MLLMConfig()
@@ -273,7 +278,7 @@ class MLLM(DepthLiftMixin, LLM):
             if msg_type == String:
                 query = query or item
                 context[i.input_topic.name] = item
-            elif msg_type in [DetectionsMultiSource, Detections]:
+            elif msg_type in [DetectionsMultiSource, Detections, Detections3D]:
                 context[i.input_topic.name] = item
             # get images from image topics
             if issubclass(msg_type, (Image, RGBD)):

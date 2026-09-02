@@ -17,6 +17,7 @@ from ..ros import (
     Topic,
     DetectionsMultiSource,
     Detections,
+    Detections3D,
     StreamingString,
     BaseComponent,
     ServiceClientHandler,
@@ -107,7 +108,7 @@ class LLM(ModelComponent):
             if kwargs.get("allowed_inputs")
             else {
                 "Required": [String],
-                "Optional": [DetectionsMultiSource, Detections],
+                "Optional": [DetectionsMultiSource, Detections, Detections3D],
             }
         )
         self.handled_outputs = [String, StreamingString]
@@ -472,7 +473,7 @@ class LLM(ModelComponent):
             if msg_type == String:
                 query = query or item
                 context[i.input_topic.name] = item
-            elif msg_type in [DetectionsMultiSource, Detections]:
+            elif msg_type in [DetectionsMultiSource, Detections, Detections3D]:
                 context[i.input_topic.name] = item
 
         if query is None:

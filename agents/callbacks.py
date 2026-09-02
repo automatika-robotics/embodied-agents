@@ -484,13 +484,8 @@ class Detections3DCallback(GenericCallback):
         if get_msg:
             return self.msg
 
-        return create_detection_context(list(self.msg.labels))
-
-    def _get_ui_content(self, **_) -> str:
-        """Get UI content for Detections3D: what was found and how far away."""
-        if self.msg is None or not self.msg.labels:
-            return "No objects detected"
-
+        if not self.msg.labels:
+            return None
         frame = self.msg.header.frame_id or "camera frame"
         objects = ", ".join(
             f"{label} at ({box.center.position.x:.2f}, {box.center.position.y:.2f}, "
@@ -498,3 +493,7 @@ class Detections3DCallback(GenericCallback):
             for label, box in zip(self.msg.labels, self.msg.boxes)
         )
         return f"In {frame}: {objects}"
+
+    def _get_ui_content(self, **_) -> str:
+        """Get UI content for Detections3D: what was found and how far away."""
+        return self._get_output() or "No objects detected"

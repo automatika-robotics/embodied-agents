@@ -260,6 +260,33 @@ class TestMLLMCreateInput:
         result = mllm._create_input(topic=trigger)
         assert result is not None
         assert "query" in result
+
+    def test_detections3d_input_enriches_the_prompt_context(self, mllm):
+        """A Detections3D context input puts metric positions into the
+        rendered prompt, which is its value over the 2D detections input."""
+        from agents.utils import get_prompt_template
+
+        trigger = Topic(name="text_in", msg_type="String")
+        mock_trig_cb = MagicMock()
+        mock_trig_cb.get_output.return_value = "What can you reach?"
+        mllm.trig_callbacks = {"text_in": mock_trig_cb}
+
+        mock_img_cb = MagicMock()
+        mock_img_cb.get_output.return_value = np.zeros((100, 100, 3))
+        mock_img_cb.msg = MagicMock()
+        mock_img_cb.input_topic = Topic(name="img_in", msg_type="Image")
+
+        mock_d3 = MagicMock()
+        mock_d3.get_output.return_value = "In odom: orange at (2.00, 3.00, 0.05)"
+        mock_d3.msg = MagicMock()
+        mock_d3.input_topic = Topic(name="d3", msg_type="Detections3D")
+
+        mllm.callbacks = {"img_in": mock_img_cb, "d3": mock_d3}
+        mllm.component_prompt = get_prompt_template("Scene: {{ d3 }}")
+
+        result = mllm._create_input(topic=trigger)
+
+        assert "orange at (2.00, 3.00, 0.05)" in result["query"][-1]["content"]
         assert "images" in result
 
 
