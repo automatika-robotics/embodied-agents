@@ -431,10 +431,14 @@ class MotionDetector(Component):
         frame_id = cloud.frame_id
         if self.position:
             odom = self.callbacks[self.position.name].get_output()
-            if odom is not None:
-                points = self._apply_sensor_extrinsic(points, cloud.frame_id)
-                points = motion.transform_cloud(points, odom)
-                frame_id = self.callbacks[self.position.name].frame_id or frame_id
+            if odom is None:
+                # dont accumulate points before odometry so we dont have clouds
+                # in different frames
+                self.get_logger().debug("No odometry yet, not accumulating clouds")
+                return
+            points = self._apply_sensor_extrinsic(points, cloud.frame_id)
+            points = motion.transform_cloud(points, odom)
+            frame_id = self.callbacks[self.position.name].frame_id or frame_id
 
         voxels = motion.unique_voxels(
             points, self.config.voxel_size, device=self.config.device

@@ -601,6 +601,43 @@ class TestCloudPath:
             centers_call.kwargs["output"][0], (-2.0, 1.0, 0.5), atol=0.2
         )
 
+    def test_clouds_are_not_accumulated_before_odometry_arrives(self, rclpy_init):
+        """With a position topic wired, clouds received before the first
+        odometry reading would enter the history in the sensor frame, and
+        every voxel would look new once the history is in the odometry frame."""
+        component = _prep(
+            MotionDetector(
+                inputs=[CLOUD],
+                outputs=[BOOL_OUT],
+                trigger=CLOUD,
+                position=ODOM,
+                component_name="test_motion",
+                config=MotionDetectorConfig(accumulation_window=1),
+            )
+        )
+        bool_publisher = MagicMock()
+        component._bool_publishers = [bool_publisher]
+        odom = MagicMock(frame_id="odom")
+        odom.get_output.return_value = None
+        component.callbacks = {ODOM.name: odom}
+        # clouds already in the base frame: no sensor TF lookup involved
+        cloud = SimpleNamespace(
+            xyz=_blob((2.0, 0.0, 0.5), n=60).astype(np.float32), frame_id="base_link"
+        )
+
+        component._process_cloud(cloud)
+        component._process_cloud(cloud)
+        assert len(component._voxel_history) == 0
+        bool_publisher.publish.assert_not_called()
+
+        # odometry arrives: accumulation starts, and the same static scene
+        # differenced against itself is still
+        odom.get_output.return_value = np.array([0.0, 0.0, 0.0, 0.0, 0.0])
+        component._process_cloud(cloud)
+        component._process_cloud(cloud)
+        assert len(component._voxel_history) == 1
+        assert bool_publisher.publish.call_args.kwargs["output"] is False
+
     def test_sensor_extrinsic_from_tf(self, rclpy_init):
         component = _prep(
             MotionDetector(
