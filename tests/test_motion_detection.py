@@ -469,6 +469,36 @@ class TestImagePath:
         with pytest.raises(ValueError):
             MotionDetectorConfig(motion_estimation_func="always_true")
 
+    def test_mono_frames_are_processed(self, rclpy_init):
+        """A single-channel stream (mono8, RealSense infrared) arrives as a 2D
+        array and must be differenced as-is rather than color-converted."""
+        component = _prep(_image_detector(rclpy_init))
+        bool_publisher = MagicMock()
+        component._bool_publishers = [bool_publisher]
+        texture = _textured_frame()
+
+        component._process_image(SimpleNamespace(number=0), texture)
+        component._process_image(SimpleNamespace(number=1), texture)
+        component._process_image(SimpleNamespace(number=2), np.roll(texture, 8, axis=1))
+
+        published = [c.kwargs["output"] for c in bool_publisher.publish.call_args_list]
+        assert published == [False, False, True]
+
+    def test_16bit_mono_frames_are_rescaled_consistently(self, rclpy_init):
+        """16-bit mono (IR16, depth as image) is brought to 8 bits with a fixed
+        scale, so an unchanged scene stays still and a shifted one moves."""
+        component = _prep(_image_detector(rclpy_init))
+        bool_publisher = MagicMock()
+        component._bool_publishers = [bool_publisher]
+        texture = (_textured_frame().astype(np.uint16) * 257)  # full 16-bit range
+
+        component._process_image(SimpleNamespace(number=0), texture)
+        component._process_image(SimpleNamespace(number=1), texture)
+        component._process_image(SimpleNamespace(number=2), np.roll(texture, 8, axis=1))
+
+        published = [c.kwargs["output"] for c in bool_publisher.publish.call_args_list]
+        assert published == [False, False, True]
+
     def test_video_published_at_max_frames(self, rclpy_init):
         # every frame moves relative to the previous one, so each counts as
         # motion; a full buffer ends the episode and publishes the video

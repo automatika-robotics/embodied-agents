@@ -293,7 +293,17 @@ class MotionDetector(Component):
         """Collects incoming image messages while motion is detected and
         publishes them as a video when the motion ends.
         """
-        gray = cv2.cvtColor(output, cv2.COLOR_RGB2GRAY)
+        # single-channel streams arrive as 2D arrays and are already gray
+        gray = output if output.ndim == 2 else cv2.cvtColor(output, cv2.COLOR_RGB2GRAY)
+        if gray.dtype != np.uint8:
+            if not np.issubdtype(gray.dtype, np.integer):
+                raise TypeError(
+                    "Image motion detection expects 8- or 16-bit images, got "
+                    f"{gray.dtype}"
+                )
+            # perform a FIXED rescale to keep consecutive frames comparable
+            gray = cv2.convertScaleAbs(gray, alpha=255.0 / np.iinfo(gray.dtype).max)
+        # ignore set polygons of robot's own body
         if self.config.roi_ignore_polygon:
             if self._roi_mask is None:
                 self._roi_mask = motion.roi_mask(
