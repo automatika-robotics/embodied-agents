@@ -873,7 +873,7 @@ class Vision(DepthLiftMixin, ModelComponent):
         )
 
         if self._lift_index is None or self._lift_index >= len(output):
-            self._warn_once(
+            self.log_once(
                 "no_lift_frame",
                 f"No picture arrived on '{self._lift_camera}', so nothing can "
                 "be placed in space this tick.",

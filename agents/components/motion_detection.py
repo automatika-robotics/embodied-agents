@@ -159,7 +159,6 @@ class MotionDetector(Component):
             maxlen=self.config.accumulation_window
         )
         self._sensor_tf_listener: Optional[TFListener] = None
-        self._sensor_tf_warned: bool = False
 
         # Motion state machine
         self._motion_active: bool = False
@@ -403,13 +402,12 @@ class MotionDetector(Component):
             )
 
         if not self._sensor_tf_listener.got_transform:
-            if not self._sensor_tf_warned:
-                self.get_logger().warning(
-                    f"Transform from cloud frame '{cloud_frame}' to base frame "
-                    f"'{self.config.base_frame}' is not available (yet). Assuming the "
-                    "cloud is given in the robot base frame until the transform is found."
-                )
-                self._sensor_tf_warned = True
+            self.log_once(
+                "sensor_tf",
+                f"Transform from cloud frame '{cloud_frame}' to base frame "
+                f"'{self.config.base_frame}' is not available (yet). Assuming the "
+                "cloud is given in the robot base frame until the transform is found.",
+            )
             return points
 
         return motion.apply_transform(

@@ -29,7 +29,6 @@ class DepthLiftMixin:
         self._depth_encoding_key = None
         self._lift_msg = None
         self._lift_depth = None
-        self._warned: set = set()
 
     def _depth_snapshot(self) -> Optional[Any]:
         """Depth as it stands the instant its picture is taken.
@@ -52,19 +51,19 @@ class DepthLiftMixin:
             return depth
 
         if (depth := self._lift_depth) is None:
-            self._warn_once(
+            self.log_once(
                 "no_depth",
                 f"Nothing has been received on depth topic "
                 f"'{self.depth_topic.name if self.depth_topic else '<unknown>'}', so no detection "
                 "can be placed in space.",
-                error=True,
+                level="error",
             )
             return None
 
         # For Image. Captured at the same instant, check for age nonetheless
         age = abs(get_stamp_secs(self._lift_msg) - get_stamp_secs(depth))
         if age > self.config.max_depth_age:
-            self._warn_once(
+            self.log_once(
                 "depth_age",
                 f"Depth on '{self.depth_topic.name}' is {age:.2f}s away from the "
                 f"picture it would be paired with, more than max_depth_age "
@@ -122,12 +121,12 @@ class DepthLiftMixin:
 
         intrinsics = self._camera_intrinsics()
         if intrinsics is None:
-            self._warn_once(
+            self.log_once(
                 "no_intrinsics",
                 "No camera calibration has been received, so depth cannot be "
                 "turned into distances. Pass the camera's `camera_info` topic, "
                 "or use an RGBD input, which carries its own.",
-                error=True,
+                level="error",
             )
             return None, None, None
 
@@ -138,14 +137,14 @@ class DepthLiftMixin:
         # cloud is projected onto
         measured = depth_msg if cloud is None else color
         if (intrinsics.width, intrinsics.height) != (measured.width, measured.height):
-            self._warn_once(
+            self.log_once(
                 "intrinsics_resolution",
                 f"The camera reports intrinsics for {intrinsics.width}x"
                 f"{intrinsics.height} images but the "
                 f"{'depth' if cloud is None else 'pictures'} come at "
                 f"{measured.width}x{measured.height}. Detections cannot be "
                 "placed in metric space until the two agree.",
-                error=True,
+                level="error",
             )
             return None, None, None
 
@@ -153,7 +152,7 @@ class DepthLiftMixin:
         color_frame = get_frame_id(color)
         depth_frame = get_frame_id(depth_msg)
         if cloud is None and color_frame and depth_frame and color_frame != depth_frame:
-            self._warn_once(
+            self.log_once(
                 "frame_mismatch",
                 f"The depth stream reports frame '{depth_frame}' while the "
                 f"pictures are in '{color_frame}'. Depth registered to the "
@@ -208,7 +207,7 @@ class DepthLiftMixin:
             frame, target, self.config.static_camera_tf
         )
         if not listener.got_transform:
-            self._warn_once(
+            self.log_once(
                 f"{what}_transform",
                 f"The transform from {what} frame '{frame}' to '{target}' has "
                 "not been resolved yet, so detections are not being published "
@@ -228,14 +227,3 @@ class DepthLiftMixin:
             encoding=depth_msg.encoding,
             scale=self.config.depth_scale,
         )
-
-    # TODO: Upstream to sugarcoat component
-    def _warn_once(self, key: str, message: str, error: bool = False) -> None:
-        """Report a lasting misconfiguration the first time it is noticed"""
-        if key in self._warned:
-            return
-        self._warned.add(key)
-        if error:
-            self.get_logger().error(message)
-        else:
-            self.get_logger().warning(message)

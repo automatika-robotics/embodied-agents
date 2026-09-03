@@ -688,7 +688,7 @@ class MLLM(DepthLiftMixin, LLM):
         )
 
         if self._lift_msg is None:
-            self._warn_once(
+            self.log_once(
                 "no_lift_frame",
                 f"No picture was captured on '{self._lift_camera}', so the "
                 "grounded boxes cannot be placed in space.",
