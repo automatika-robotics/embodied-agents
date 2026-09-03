@@ -690,23 +690,23 @@ class TestCloudPath:
             translation=np.array([1.0, 0.0, 0.0]),
             rotation=np.array([0.0, 0.0, 0.0, 1.0]),
         )
-        component.create_tf_listener = MagicMock(return_value=listener)
+        component.get_transform_listener = MagicMock(return_value=listener)
 
         points = np.array([[1.0, 1.0, 1.0]], dtype=np.float32)
         np.testing.assert_allclose(
             component._apply_sensor_extrinsic(points, "lidar"), [[2.0, 1.0, 1.0]]
         )
-        # listener is created once and reused
-        component._apply_sensor_extrinsic(points, "lidar")
-        component.create_tf_listener.assert_called_once()
-        tf_config = component.create_tf_listener.call_args.args[0]
-        assert tf_config.source_frame == "lidar"
-        assert tf_config.goal_frame == "base_link"
+        # the mount is static, so the component's cached listener is asked for once
+        component.get_transform_listener.assert_called_once_with(
+            "lidar", "base_link", static_tf=True
+        )
 
         # cloud already in the base frame: no lookup needed
+        component.get_transform_listener.reset_mock()
         np.testing.assert_allclose(
             component._apply_sensor_extrinsic(points, "base_link"), points
         )
+        component.get_transform_listener.assert_not_called()
 
     def test_sensor_extrinsic_unavailable_warns_once(self, rclpy_init):
         component = _prep(
@@ -718,7 +718,7 @@ class TestCloudPath:
                 component_name="test_motion",
             )
         )
-        component.create_tf_listener = MagicMock(
+        component.get_transform_listener = MagicMock(
             return_value=SimpleNamespace(got_transform=False)
         )
         points = np.array([[1.0, 1.0, 1.0]], dtype=np.float32)

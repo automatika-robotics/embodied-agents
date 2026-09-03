@@ -3,8 +3,6 @@ from typing import Deque, List, Optional, Union
 
 import cv2
 import numpy as np
-from ros_sugar.tf import TFListener, TFListenerConfig
-
 from ..config import MotionDetectorConfig
 from ..ros import (
     Bool,
@@ -158,7 +156,6 @@ class MotionDetector(Component):
         self._voxel_history: Deque[np.ndarray] = deque(
             maxlen=self.config.accumulation_window
         )
-        self._sensor_tf_listener: Optional[TFListener] = None
 
         # Motion state machine
         self._motion_active: bool = False
@@ -392,16 +389,11 @@ class MotionDetector(Component):
         if not cloud_frame or cloud_frame == self.config.base_frame:
             return points
 
-        if self._sensor_tf_listener is None:
-            self._sensor_tf_listener = self.create_tf_listener(
-                TFListenerConfig(
-                    source_frame=cloud_frame,
-                    goal_frame=self.config.base_frame,
-                    static_tf=True,
-                )
-            )
-
-        if not self._sensor_tf_listener.got_transform:
+        # Cached per frame pair by the component; a static mount is looked up once
+        listener = self.get_transform_listener(
+            cloud_frame, self.config.base_frame, static_tf=True
+        )
+        if not listener.got_transform:
             self.log_once(
                 "sensor_tf",
                 f"Transform from cloud frame '{cloud_frame}' to base frame "
@@ -410,11 +402,7 @@ class MotionDetector(Component):
             )
             return points
 
-        return motion.apply_transform(
-            points,
-            self._sensor_tf_listener.translation,
-            self._sensor_tf_listener.rotation,
-        )
+        return motion.apply_transform(points, listener.translation, listener.rotation)
 
     def _process_cloud(self, cloud) -> None:
         """Differences the incoming cloud against the accumulated occupancy
