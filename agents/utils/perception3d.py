@@ -1,16 +1,16 @@
 """Turn 2D detections into metric 3D boxes given a depth image registered to the
-frame the detections were made in and the camera's intrinsics.
+frame the detections were made in and the camera's intrinsics or a point cloud from
+a LiDAR or a stereo camera.
 
 The geometry itself is done by kompass-core's depth detector, which takes the
-median of the depth pixels inside a box, keeps the pixels within a median
+median of the depth pixels or points inside a box, keeps them within a median
 absolute deviation of it, and derives the object's extents from those. It is an
 optional dependency.
 
 Being a median, the reported distance is that of whatever fills most of the
-box, so detections should be tight around their objects.
-
-Boxes come back in the frame the camera's pose was given in, or in the
-camera's own optical frame when no pose is given.
+box, so detections should be tight around their objects. Boxes come back in the
+frame the camera's pose was given in, or in the camera's own optical frame when no
+pose is given.
 """
 
 # TODO: See if any of these utilities need to be upstreamed
@@ -61,10 +61,9 @@ def resolve_lift_camera(
     """Validate a component's 3D lifting contract and name its lift camera.
 
     A component asked for Detections3D output needs a frame to report boxes
-    in, and depth registered to the picture stream the detections are made
-    on: either an RGBD input, or a plain depth topic with the calibration of
-    the stream it was measured on. Raises TypeError describing whichever
-    part of the contract is missing.
+    in, and depth for the picture stream the detections are made on. It can be RGBD
+    input, or a depth Image registered to the pictures or a PointCloud2, each
+    with the camera's calibration.
 
     :param inputs: The component's input topics
     :param depth: Topic given as the ``depth`` keyword, if any
@@ -73,7 +72,7 @@ def resolve_lift_camera(
     :param component: Component name for the error messages
     :return: Name of the picture topic the lift applies to
     """
-    from ..ros import CameraInfo, CompressedImage, Image, RGBD
+    from ..ros import CameraInfo, CompressedImage, Image, PointCloud2, RGBD
 
     # Check if detection frame has been set. 3D Boxes are axis aligned in it.
     if not frame:
@@ -106,23 +105,29 @@ def resolve_lift_camera(
             f"{component} was given a Detections3D output, which requires "
             "depth to place detections in space. Either give it an RGBD "
             "input, which carries depth registered to its picture, or pass "
-            "the camera's registered depth topic as `depth=Topic(...)` along "
-            f"with its `camera_info=Topic(...)`. Inputs given: "
-            f"{[t.name for t in inputs]}"
+            "`depth=Topic(...)`, a depth Image registered to the pictures or "
+            "a PointCloud2, along with the camera's `camera_info=Topic(...)`. "
+            f"Inputs given: {[t.name for t in inputs]}"
         )
     if issubclass(depth.msg_type, CompressedImage) or not issubclass(
-        depth.msg_type, Image
+        depth.msg_type, (Image, PointCloud2)
     ):
         raise TypeError(
-            f"{component} depth topic must be an uncompressed Image, got "
-            f"{depth.msg_type.__name__}."
+            f"{component} depth topic must be an uncompressed Image or a "
+            f"PointCloud2, got {depth.msg_type.__name__}."
         )
     if not camera_info:
         raise TypeError(
             f"{component} was given a depth topic but no camera_info topic. "
-            "Depth pixels cannot be turned into distances without the "
-            "calibration of the stream they were measured on: pass it as "
+            "Depth cannot be tied to the picture's pixels without the "
+            "calibration of the camera that took it: pass it as "
             "`camera_info=Topic(...)`."
+        )
+    if not pictures:
+        raise TypeError(
+            f"{component} has no picture topic to detect on: `inputs` needs an "
+            "Image other than the depth topic. Inputs given: "
+            f"{[t.name for t in inputs]}"
         )
     # Take first image topic by default
     return pictures[0].name
@@ -138,7 +143,8 @@ class Box3D:
     :param center: Center of the box in meters
     :param size: Full extents of the box in meters
     :param validity: Fraction of the depth pixels inside the 2D box that were
-        usable, in [0, 1]
+        usable, in [0, 1]. A point cloud has no pixels to count, so boxes
+        lifted from one carry 1.0
     """
 
     index: int = field()
@@ -257,45 +263,48 @@ def make_detector(
     )
 
 
-def boxes_from_detections(
+def set_cloud_sensor(
     detector: Any,
-    depth_mm: np.ndarray,
-    boxes_2d: Sequence[Sequence[float]],
-    image_size: Optional[Tuple[int, int]] = None,
-    depth_range: Tuple[float, float] = (0.1, 5.0),
-    camera_position: Optional[Sequence[float]] = None,
-) -> List[Box3D]:
-    """Lift 2D detections into metric boxes.
+    translation: Optional[Sequence[float]] = None,
+    rotation: Optional[Sequence[float]] = None,
+    field_datatype: Optional[int] = None,
+) -> None:
+    """Tell a detector where its point clouds are measured from.
 
-    Detections whose pixels carry no usable depth cannot be placed in space
-    and are left out, so each returned box records which detection it came
-    from rather than relying on position.
+    The pose is that of the cloud's frame in the same frame the detector's
+    camera pose was given in.
 
     :param detector: Detector from :func:`make_detector`
-    :param depth_mm: Depth image from :func:`prepare_depth`
-    :param boxes_2d: 2D boxes as (x1, y1, x2, y2) in pixels
-    :param image_size: Size of the image the boxes were found in as
-        (width, height), taken from the depth image if unset
-    :param depth_range: Usable range of the sensor in meters
-    :param camera_position: Position of the camera in the frame the boxes come
-        back in, which must be gravity aligned (z up). When given, each box's
-        center is pushed away from the camera along the view ray by half the
-        box's smallest extent, horizontally. The push
-        assumes the hidden half mirrors the visible one. Exact for spheres and
-        face-on boxes. Vertical extant is left alone as its observed in most
-        cases.
-    :returns: The boxes that could be placed, in the frame the detector's
-        camera pose was given in
+    :param translation: Position of the cloud's frame, identity if unset
+    :param rotation: Orientation of the cloud's frame as (x, y, z, w),
+        identity if unset
+    :param field_datatype: sensor_msgs/PointField datatype of the x, y, z
+        fields, FLOAT32 if unset
     """
-    ensure_kompass_core()
+    from kompass_cpp.types import PointFieldType, SensorConfig
+
+    detector.set_point_cloud_sensor(
+        SensorConfig(
+            position=np.asarray(
+                translation if translation is not None else (0.0, 0.0, 0.0),
+                dtype=np.float32,
+            ),
+            rotation=np.asarray(
+                rotation if rotation is not None else (0.0, 0.0, 0.0, 1.0),
+                dtype=np.float32,
+            ),
+            cloud_field_type=PointFieldType.FLOAT32
+            if field_datatype is None
+            else PointFieldType.from_int(field_datatype),
+        )
+    )
+
+
+def _pixel_boxes(
+    boxes_2d: Sequence[Sequence[float]], image_size: Tuple[int, int]
+) -> List[Any]:
+    """The 2D boxes as detector inputs, each labelled with its index."""
     from kompass_cpp.types import Bbox2D
-
-    if not len(boxes_2d):
-        return []
-
-    height, width = depth_mm.shape[:2]
-    if image_size is None:
-        image_size = (width, height)
 
     inputs = []
     for index, box in enumerate(boxes_2d):
@@ -311,8 +320,68 @@ def boxes_from_detections(
         )
         detection.set_img_size(np.array(image_size, dtype=np.int32))
         inputs.append(detection)
+    return inputs
 
-    detected = detector.compute_3d_detections(depth_mm, inputs, 0.0, 0.0, 0.0, 0.0)
+
+def boxes_from_detections(
+    detector: Any,
+    depth: Any,
+    boxes_2d: Sequence[Sequence[float]],
+    image_size: Optional[Tuple[int, int]] = None,
+    depth_range: Tuple[float, float] = (0.1, 5.0),
+    camera_position: Optional[Sequence[float]] = None,
+) -> List[Box3D]:
+    """Lift 2D detections into metric boxes.
+
+    Detections whose pixels carry no usable depth cannot be placed in space
+    and are left out, so each returned box records which detection it came
+    from rather than relying on position.
+
+    :param detector: Detector from `make_detector`
+    :param depth: Depth image from `prepare_depth`, or a point cloud as
+        a ros_sugar.io.PointCloudData, from a sensor the detector was told
+        about with `set_cloud_sensor`
+    :param boxes_2d: 2D boxes as (x1, y1, x2, y2) in pixels
+    :param image_size: Size of the image the boxes were found in as
+        (width, height), taken from the depth image if unset. Required with
+        a point cloud, which has no pixel grid of its own
+    :param depth_range: Usable range of the sensor in meters
+    :param camera_position: Position of the camera in the frame the boxes come
+        back in, which must be gravity aligned (z up). When given, each box's
+        center is pushed away from the camera along the view ray by half the
+        box's smallest extent, horizontally. The push
+        assumes the hidden half mirrors the visible one. Exact for spheres and
+        face-on boxes. Vertical extant is left alone as its observed in most
+        cases.
+    :returns: The boxes that could be placed, in the frame the detector's
+        camera pose was given in
+    """
+    from ..ros import PointCloudData
+
+    if not len(boxes_2d):
+        return []
+
+    cloud = isinstance(depth, PointCloudData)
+    if image_size is None:
+        if cloud:
+            raise TypeError(
+                "image_size is required to lift detections from a point cloud"
+            )
+        height, width = depth.shape[:2]
+        image_size = (width, height)
+
+    inputs = _pixel_boxes(boxes_2d, image_size)
+    if cloud:
+        detected = detector.compute_3d_detections(
+            **depth.buffer_layout(),
+            input=inputs,
+            robot_x=0.0,
+            robot_y=0.0,
+            robot_yaw=0.0,
+            robot_speed=0.0,
+        )
+    else:
+        detected = detector.compute_3d_detections(depth, inputs, 0.0, 0.0, 0.0, 0.0)
     if not detected:
         return []
 
@@ -344,7 +413,9 @@ def boxes_from_detections(
                 index=index,
                 center=(float(center[0]), float(center[1]), float(center[2])),
                 size=(float(size[0]), float(size[1]), float(size[2])),
-                validity=depth_validity(depth_mm, boxes_2d[index], depth_range),
+                validity=1.0
+                if cloud
+                else depth_validity(depth, boxes_2d[index], depth_range),
             )
         )
     return boxes
