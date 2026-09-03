@@ -121,9 +121,12 @@ class Component(BaseComponent):
             )  # second condition is necessary if being triggered by events
             else self.callbacks.values()
         )
-        # NOTE: Skip creating subscribers for plugin topics, similar to upstream
+        # NOTE: Skip creating subscribers for plugin topics (external), similar
+        # to upstream
         external = getattr(self, "_external_topics", set())
         for callback in all_callbacks:
+            # Attach transform provider similar to upstream
+            self._attach_transform_provider(callback.input_topic.name, callback)
             if callback.input_topic.name in external:
                 # fed by the robot plugin bus, not by ROS
                 continue

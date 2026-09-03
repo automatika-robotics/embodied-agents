@@ -95,6 +95,20 @@ class TestTriggerPartitionTiming:
         assert "side_in" not in subscribed
         assert "trig_in" in subscribed
 
+    def test_declared_frames_are_wired_for_every_input(self, probe):
+        """transform_input_to only takes effect if the subscriber pass hands
+        each callback its transform resolver, plugin-fed inputs included."""
+        probe.init_variables()
+        probe.transform_input_to("side_in", "base_link", static_tf=True)
+        probe.transform_input_to("trig_in", "base_link")
+        probe._external_topics = {"side_in"}
+        probe._add_ros_subscriber = MagicMock()
+
+        probe.create_all_subscribers()
+
+        assert probe.callbacks["side_in"]._transform_provider is not None
+        assert probe.trig_callbacks["trig_in"]._transform_provider is not None
+
     def test_replacing_a_trigger_before_activation_renames_the_bookkeeping(
         self, probe
     ):
