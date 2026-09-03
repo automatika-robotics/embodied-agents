@@ -16,6 +16,7 @@ from ..ros import (
     Trackings,
     FixedInput,
     Image,
+    PointCloud2,
     RGBD,
     Topic,
     TrackingsMultiSource,
@@ -58,14 +59,16 @@ class Vision(DepthLiftMixin, ModelComponent):
     :param trigger: The trigger value or topic for the vision component.
         This can be a single Topic object, a list of Topic objects, or a float value for timed components.
     :type trigger: Union[Topic, list[Topic], float]
-    :param depth: Optional depth image topic, for a camera that publishes depth separately
-        rather than bundled in an RGBD message. The depth must be registered to the pictures
-        being detected on, which is what a stereo camera publishes as its aligned or
-        `depth_registered` stream. Only used when a Detections3D output is given, and it
-        must be accompanied by `camera_info`.
+    :param depth: Optional depth topic, for a camera that publishes depth separately
+        rather than bundled in an RGBD message. Either a depth Image registered to the
+        pictures being detected on, which is what a stereo camera publishes as its aligned
+        or `depth_registered` stream, or a PointCloud2, from the same camera or from another
+        sensor such as a LiDAR whose frame TF relates to the camera's. Only used when a
+        Detections3D output is given, and it must be accompanied by `camera_info`.
     :type depth: Optional[Topic]
-    :param camera_info: Optional CameraInfo topic describing the depth stream. Required
-        alongside `depth`, and usable on its own with an RGBD input to override the
+    :param camera_info: Optional CameraInfo topic with the calibration of the pictures being
+        detected on, which registered depth shares and a point cloud is projected with.
+        Required alongside `depth`, and usable on its own with an RGBD input to override the
         calibration that message carries. Like `depth`, it is passed here rather than
         listed in `inputs`, which is reserved for pictures to detect on.
     :type camera_info: Optional[Topic]
@@ -104,7 +107,10 @@ class Vision(DepthLiftMixin, ModelComponent):
         **kwargs,
     ):
         self.config: VisionConfig = config or VisionConfig()
-        self.allowed_inputs = {"Required": [[Image, RGBD]], "Optional": [CameraInfo]}
+        self.allowed_inputs = {
+            "Required": [[Image, RGBD]],
+            "Optional": [CameraInfo, PointCloud2],
+        }
         self.handled_outputs = [
             Detections,
             Trackings,

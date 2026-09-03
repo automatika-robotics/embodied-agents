@@ -264,6 +264,42 @@ class Test3DContract:
         assert component._spectators == []
         assert {"depth", "camera_info"} <= {t.name for t in component.in_topics}
 
+    def test_a_point_cloud_is_accepted_as_depth(self, rclpy_init, mock_model_client):
+        """A LiDAR, or a stereo camera that publishes points rather than a
+        depth image."""
+        component = self._build(
+            mock_model_client,
+            [Topic(name="image", msg_type="Image")],
+            depth=Topic(name="points", msg_type="PointCloud2"),
+            camera_info=Topic(name="camera_info", msg_type="CameraInfo"),
+        )
+        assert component._aux_inputs == {"points", "camera_info"}
+        assert component._inference_set == ["image"]
+
+    def test_a_point_cloud_needs_the_pictures_calibration(
+        self, rclpy_init, mock_model_client
+    ):
+        """Points can only be matched to a box through the camera that took
+        the picture."""
+        with pytest.raises(TypeError, match="camera_info"):
+            self._build(
+                mock_model_client,
+                [Topic(name="image", msg_type="Image")],
+                depth=Topic(name="points", msg_type="PointCloud2"),
+            )
+
+    def test_the_depth_topic_is_not_a_picture(self, rclpy_init, mock_model_client):
+        """Listing the depth stream as the only input leaves nothing to detect
+        on."""
+        depth = Topic(name="depth", msg_type="Image")
+        with pytest.raises(TypeError, match="no picture topic"):
+            self._build(
+                mock_model_client,
+                [depth],
+                depth=depth,
+                camera_info=Topic(name="camera_info", msg_type="CameraInfo"),
+            )
+
     def test_depth_is_required(self, rclpy_init, mock_model_client):
         """An image topic cannot be guessed to be depth."""
         with pytest.raises(TypeError, match="requires depth"):
@@ -652,6 +688,133 @@ class TestLiftingWithADepthTopic(_SyntheticCamera):
 
         assert vision_3d.publishers_dict["out"].publish.call_count == 0
         assert "has not been resolved" in _warnings(vision_3d)
+
+
+class TestLiftingWithAPointCloud(_SyntheticCamera):
+    """Depth as a point cloud, from the camera itself or a sensor beside it."""
+
+    @pytest.fixture
+    def vision_3d(self, rclpy_init, mock_model_client):
+        type(mock_model_client).model_type = PropertyMock(return_value="VisionModel")
+        component = Vision(
+            inputs=[Topic(name="image", msg_type="Image")],
+            outputs=[Topic(name="d3", msg_type="Detections3D")],
+            depth=Topic(name="points", msg_type="PointCloud2"),
+            camera_info=Topic(name="camera_info", msg_type="CameraInfo"),
+            model_client=mock_model_client,
+            config=VisionConfig(detections_frame="cam"),
+            component_name="test_lift_cloud",
+        )
+        return mock_component_internals(component)
+
+    @classmethod
+    def _cloud_scene(cls, frame_id="cam", sensor_at=(0.0, 0.0, 0.0), stamp=0.0):
+        """Every pixel of the depth scene as a point, measured from a sensor
+        sitting at `sensor_at` in the camera's frame."""
+        import numpy as np
+
+        from agents.ros import PointCloudData
+
+        z = np.full((cls.HEIGHT, cls.WIDTH), 3.0, dtype=np.float32)
+        x1, y1, x2, y2 = cls.PATCH
+        z[y1:y2, x1:x2] = cls.PATCH_DEPTH_M
+        v, u = np.mgrid[0 : cls.HEIGHT, 0 : cls.WIDTH]
+        cx, cy = cls.WIDTH / 2, cls.HEIGHT / 2
+        points = np.stack([(u - cx) * z / cls.FX, (v - cy) * z / cls.FY, z], axis=-1)
+        points = points.reshape(-1, 3) - np.asarray(sensor_at, dtype=np.float32)
+        records = np.zeros((len(points), 4), dtype=np.float32)
+        records[:, :3] = points
+        return PointCloudData(
+            data=np.frombuffer(records.tobytes(), dtype=np.uint8),
+            point_step=16,
+            row_step=16 * len(points),
+            height=1,
+            width=len(points),
+            x_offset=0,
+            y_offset=4,
+            z_offset=8,
+            x_field_datatype=7,  # sensor_msgs/PointField.FLOAT32
+            frame_id=frame_id,
+            timestamp=stamp,
+        )
+
+    def _wire(self, component, cloud):
+        component.callbacks = {
+            "image": _callback(
+                _image("cam", width=self.WIDTH, height=self.HEIGHT), [[0]], name="image"
+            ),
+            "points": _callback(output=cloud, msg_type="PointCloud2", name="points"),
+            "camera_info": _callback(
+                msg_type="CameraInfo", output=self._intrinsics(), name="camera_info"
+            ),
+        }
+        component.trig_callbacks = {}
+
+    def test_detections_are_lifted_from_the_cloud(self, vision_3d, mock_model_client):
+        mock_model_client.inference.return_value = self._detections()
+        self._wire(vision_3d, self._cloud_scene())
+
+        vision_3d._execution_step()
+
+        boxes, published = self._published(vision_3d)
+        assert published["labels"] == ["orange"] and published["frame_id"] == "cam"
+        (center, size), = boxes
+        assert center[2] == pytest.approx(self.PATCH_DEPTH_M, abs=0.02)
+        assert size[0] == pytest.approx(40 * self.PATCH_DEPTH_M / self.FX, abs=0.01)
+        # min_depth_validity does not filter cloud boxes
+        assert published["depth_validity"] == [1.0]
+
+    def test_a_stale_cloud_is_not_paired_with_the_picture(
+        self, vision_3d, mock_model_client
+    ):
+        mock_model_client.inference.return_value = self._detections()
+        self._wire(vision_3d, self._cloud_scene(stamp=99.0))
+
+        vision_3d._execution_step()
+
+        assert vision_3d.publishers_dict["out"].publish.call_count == 0
+        assert "max_depth_age" in _warnings(vision_3d)
+
+    def test_a_cloud_from_another_sensor_waits_for_its_transform(
+        self, vision_3d, mock_model_client
+    ):
+        """A LiDAR's points are in its own frame. Until TF says where it sits
+        relative to the camera they cannot be projected into the picture."""
+        mock_model_client.inference.return_value = self._detections()
+        self._wire(vision_3d, self._cloud_scene(frame_id="lidar_link"))
+        vision_3d.get_transform_listener = MagicMock(
+            return_value=MagicMock(got_transform=False)
+        )
+
+        vision_3d._execution_step()
+
+        assert vision_3d.publishers_dict["out"].publish.call_count == 0
+        assert "cloud frame 'lidar_link'" in _warnings(vision_3d)
+
+    def test_a_cloud_from_another_sensor_is_projected_from_where_it_sits(
+        self, vision_3d, mock_model_client
+    ):
+        mock_model_client.inference.return_value = self._detections()
+        sensor_at = (0.2, 0.0, 0.0)
+        self._wire(vision_3d, self._cloud_scene("lidar_link", sensor_at))
+        vision_3d.get_transform_listener = MagicMock(
+            return_value=MagicMock(
+                got_transform=True,
+                translation=list(sensor_at),
+                rotation=[0.0, 0.0, 0.0, 1.0],
+            )
+        )
+
+        vision_3d._execution_step()
+
+        boxes, published = self._published(vision_3d)
+        assert published["frame_id"] == "cam"
+        (center, _), = boxes
+        # the box lands where the camera sees it, not where the LiDAR does
+        assert center[0] == pytest.approx(
+            (120 - self.WIDTH / 2) * self.PATCH_DEPTH_M / self.FX, abs=0.02
+        )
+        assert center[2] == pytest.approx(self.PATCH_DEPTH_M, abs=0.02)
 
 
 class TestLiftingFromRGBD(_SyntheticCamera):

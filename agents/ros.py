@@ -58,7 +58,7 @@ from ros_sugar.base_clients import (
     ServiceClientConfig,
     ServiceClientHandler,
 )
-from ros_sugar.io.datatypes import read_camera_info
+from ros_sugar.io.datatypes import PointCloudData, read_camera_info
 
 from .launcher import Launcher
 
@@ -109,6 +109,7 @@ __all__ = [
     "OccupancyGrid",
     "Odometry",
     "PointCloud2",
+    "PointCloudData",
     "Pose",
     "PoseArray",
     "PoseStamped",

@@ -28,6 +28,34 @@ def scene(patch_depth=PATCH_DEPTH_M, background=BACKGROUND_DEPTH_M):
     return depth
 
 
+def cloud_scene(sensor_at=(0.0, 0.0, 0.0), frame_id="camera_optical", stamp=0.0):
+    """The same scene as a point cloud: every pixel deprojected into the
+    camera's optical frame, then measured from a sensor sitting at
+    `sensor_at` in that frame. Laid out as drivers do, float32 xyz plus
+    padding."""
+    from agents.ros import PointCloudData
+
+    z = scene()
+    v, u = np.mgrid[0:HEIGHT, 0:WIDTH]
+    points = np.stack([(u - CX) * z / FX, (v - CY) * z / FY, z], axis=-1)
+    points = points.reshape(-1, 3) - np.asarray(sensor_at, dtype=np.float32)
+    records = np.zeros((len(points), 4), dtype=np.float32)
+    records[:, :3] = points
+    return PointCloudData(
+        data=np.frombuffer(records.tobytes(), dtype=np.uint8),
+        point_step=16,
+        row_step=16 * len(points),
+        height=1,
+        width=len(points),
+        x_offset=0,
+        y_offset=4,
+        z_offset=8,
+        x_field_datatype=7,  # sensor_msgs/PointField.FLOAT32
+        frame_id=frame_id,
+        timestamp=stamp,
+    )
+
+
 class TestPrepareDepth:
     def test_float_meters_become_millimeters(self):
         depth = prepare_depth(np.full((4, 4), 1.5, dtype=np.float32))
@@ -299,3 +327,60 @@ class TestLifting:
         )
         # the 2D boxes have to become messages, not stay as pixel tuples
         assert message.boxes_2d[0].top_left_x == float(PATCH[0])
+
+
+class TestLiftingFromACloud:
+    """The same scene measured as points rather than pixels, as a LiDAR or a
+    stereo camera publishing a cloud gives it."""
+
+    @pytest.fixture(autouse=True)
+    def _needs_kompass_core(self):
+        pytest.importorskip("kompass_core.vision")
+
+    def _lift(self, cloud, sensor_at=None, sensor_rotation=None, **kwargs):
+        from agents.utils.perception3d import (
+            boxes_from_detections,
+            make_detector,
+            set_cloud_sensor,
+        )
+
+        detector = make_detector(TestLifting._intrinsics(), **kwargs)
+        set_cloud_sensor(detector, sensor_at, sensor_rotation, cloud.x_field_datatype)
+        return boxes_from_detections(
+            detector, cloud, [PATCH], image_size=(WIDTH, HEIGHT)
+        )
+
+    def test_patch_is_placed_at_its_distance_and_size(self):
+        (box,) = self._lift(cloud_scene())
+        assert box.center[2] == pytest.approx(PATCH_DEPTH_M, abs=0.02)
+        assert box.size[0] == pytest.approx(40 * PATCH_DEPTH_M / FX, abs=0.01)
+        assert box.size[1] == pytest.approx(20 * PATCH_DEPTH_M / FY, abs=0.01)
+        # there are no pixels to count, so a cloud box is always trusted
+        assert box.validity == 1.0
+
+    def test_points_are_projected_from_where_their_sensor_sits(self):
+        """A LiDAR beside the camera measures the same object from somewhere
+        else. Told where it sits, the detector must land the object where the
+        camera's own depth would have."""
+        sensor_at = (0.2, -0.1, 0.05)
+        (from_camera,) = self._lift(cloud_scene())
+        (from_lidar,) = self._lift(cloud_scene(sensor_at), sensor_at=sensor_at)
+        assert from_lidar.center == pytest.approx(from_camera.center, abs=0.01)
+        assert from_lidar.size == pytest.approx(from_camera.size, abs=0.01)
+
+    def test_the_cloud_sensor_pose_is_in_the_frame_the_camera_pose_is(self):
+        """With the camera posed in a body frame, a cloud from the camera
+        itself carries that same pose, and the box lands in the body frame
+        with the distance on x."""
+        optical_to_body = (-0.5, 0.5, -0.5, 0.5)
+        (box,) = self._lift(
+            cloud_scene(), sensor_rotation=optical_to_body, rotation=optical_to_body
+        )
+        assert box.center[0] == pytest.approx(PATCH_DEPTH_M, abs=0.02)
+
+    def test_a_cloud_needs_the_picture_size(self):
+        from agents.utils.perception3d import boxes_from_detections, make_detector
+
+        detector = make_detector(TestLifting._intrinsics())
+        with pytest.raises(TypeError, match="image_size"):
+            boxes_from_detections(detector, cloud_scene(), [PATCH])

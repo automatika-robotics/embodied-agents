@@ -1,13 +1,17 @@
 """Shared machinery for lifting 2D detections into metric 3D boxes.
 
-Components that publish Detections3D pair an rgb image with the depth registered to
-it, the calibration of that stream, and the transform into the configured
-`detections_frame`. This mixin holds that pairing and validation machinery.
+Components that publish Detections3D pair an rgb image with its depth, either
+an image registered to it or a point cloud, the calibration of the camera, and
+the transform into the configured `detections_frame`. This mixin holds that
+pairing and validation machinery.
 """
 
 from typing import Any, Optional
 
+from ..callbacks import image_pre_processing, process_encoding
+from ..ros import PointCloud2, PointCloudData, read_camera_info
 from ..utils import get_frame_id, get_stamp_secs
+from ..utils.perception3d import make_detector, prepare_depth, set_cloud_sensor
 
 
 class DepthLiftMixin:
@@ -31,11 +35,15 @@ class DepthLiftMixin:
         """Depth as it stands the instant its picture is taken.
 
         Read alongside the picture rather than at publish time.
-        Not needed for RGBD msgs
+        Not needed for RGBD msgs. A point cloud is taken as its kompass-core container.
         """
-        if self.depth_topic and (callback := self.callbacks.get(self.depth_topic.name)):
-            return callback.msg
-        return None
+        if not self.depth_topic or not (
+            callback := self.callbacks.get(self.depth_topic.name)
+        ):
+            return None
+        if issubclass(self.depth_topic.msg_type, PointCloud2):
+            return callback.get_output()
+        return callback.msg
 
     def _depth_for(self) -> Optional[Any]:
         """The depth image registered to the lifted picture, or None"""
@@ -70,9 +78,6 @@ class DepthLiftMixin:
         """Calibration of the stream the depth was measured on.
         A camera_info topic wins when one was given.
         """
-
-        from ..ros import read_camera_info
-
         if self.camera_info_topic and (
             info := self.callbacks.get(self.camera_info_topic.name)
         ):
@@ -104,16 +109,13 @@ class DepthLiftMixin:
     def _depth_detector(self):
         """The 3D detector for the lifted camera, and the depth to run it on.
 
-        :returns: (detector, depth in millimeters, camera position in the
-            detections frame), all None when this tick cannot be lifted. The
-            camera position is also None when the detections stay in the
-            camera's own frame, where the surface-bias correction it feeds
-            does not apply
+        :returns: (detector, depth, camera position in the detections frame),
+            all None when this tick cannot be lifted. The depth is an image in
+            millimeters or a point cloud, whichever the source is. The camera
+            position is also None when the detections stay in the camera's
+            own frame, where the surface-bias correction it feeds does not
+            apply
         """
-        from ..callbacks import image_pre_processing, process_encoding
-
-        from ..utils.perception3d import make_detector, prepare_depth
-
         depth_msg = self._depth_for()
         if depth_msg is None:
             return None, None, None
@@ -129,33 +131,28 @@ class DepthLiftMixin:
             )
             return None, None, None
 
-        # The intrinsics need to describe the depth image
-        if (intrinsics.width, intrinsics.height) != (depth_msg.width, depth_msg.height):
+        cloud = depth_msg if isinstance(depth_msg, PointCloudData) else None
+        # the color image, which an RGBD frame carries nested
+        color = getattr(self._lift_msg, "rgb", self._lift_msg)
+        # The intrinsics need to describe the depth image, or the picture a
+        # cloud is projected onto
+        measured = depth_msg if cloud is None else color
+        if (intrinsics.width, intrinsics.height) != (measured.width, measured.height):
             self._warn_once(
                 "intrinsics_resolution",
                 f"The camera reports intrinsics for {intrinsics.width}x"
-                f"{intrinsics.height} images but publishes depth at "
-                f"{depth_msg.width}x{depth_msg.height}. Detections cannot be "
+                f"{intrinsics.height} images but the "
+                f"{'depth' if cloud is None else 'pictures'} come at "
+                f"{measured.width}x{measured.height}. Detections cannot be "
                 "placed in metric space until the two agree.",
                 error=True,
             )
             return None, None, None
 
-        # Check if the streams encoding changed (unlikely)
-        if depth_msg.encoding != self._depth_encoding_key:
-            self._depth_encoding = process_encoding(depth_msg.encoding)
-            self._depth_encoding_key = depth_msg.encoding
-
-        depth_mm = prepare_depth(
-            image_pre_processing(depth_msg, *self._depth_encoding),
-            encoding=depth_msg.encoding,
-            scale=self.config.depth_scale,
-        )
-
         # Registered depth shares the color image's pixel grid preferrably
-        color_frame = get_frame_id(getattr(self._lift_msg, "rgb", self._lift_msg))
+        color_frame = get_frame_id(color)
         depth_frame = get_frame_id(depth_msg)
-        if color_frame and depth_frame and color_frame != depth_frame:
+        if cloud is None and color_frame and depth_frame and color_frame != depth_frame:
             self._warn_once(
                 "frame_mismatch",
                 f"The depth stream reports frame '{depth_frame}' while the "
@@ -166,20 +163,13 @@ class DepthLiftMixin:
             )
         camera_frame = color_frame or depth_frame
         target = self.config.detections_frame
-        translation = rotation = None
-        if target != camera_frame:
-            listener = self.get_transform_listener(
-                camera_frame, target, self.config.static_camera_tf
-            )
-            if not listener.got_transform:
-                self._warn_once(
-                    "camera_transform",
-                    f"The transform from camera frame '{camera_frame}' to "
-                    f"'{target}' has not been resolved yet, so detections are "
-                    "not being published in 3D.",
-                )
-                return None, None, None
-            translation, rotation = listener.translation, listener.rotation
+        pose = self._pose_in(camera_frame, target, "camera")
+        if pose is None:
+            return None, None, None
+        # the detector projects the cloud into the picture from where that sensor sits
+        mount = None if cloud is None else self._pose_in(depth_frame, target, "cloud")
+        if cloud is not None and mount is None:
+            return None, None, None
 
         # Rebuilding is cheap, so the detector is kept only until something it
         # was built from moves
@@ -189,18 +179,55 @@ class DepthLiftMixin:
             intrinsics.fy,
             intrinsics.cx,
             intrinsics.cy,
-            None if translation is None else tuple(translation),
-            None if rotation is None else tuple(rotation),
+            pose,
+            mount,
+            None if cloud is None else cloud.x_field_datatype,
         )
         if key != self._detector_key:
             self._detector = make_detector(
                 intrinsics,
-                translation=translation,
-                rotation=rotation,
+                translation=pose[0],
+                rotation=pose[1],
                 depth_range=(self.config.min_depth, self.config.max_depth),
             )
+            if cloud is not None:
+                set_cloud_sensor(self._detector, *mount, cloud.x_field_datatype)
             self._detector_key = key
-        return self._detector, depth_mm, translation
+        depth = cloud if cloud is not None else self._depth_image_mm(depth_msg)
+        return self._detector, depth, pose[0]
+
+    def _pose_in(self, frame: str, target: str, what: str):
+        """Pose of `frame` in `target` as (translation, rotation) tuples.
+
+        (None, None) when the two are the same frame, None while the
+        transform between them is unresolved.
+        """
+        if frame == target:
+            return None, None
+        listener = self.get_transform_listener(
+            frame, target, self.config.static_camera_tf
+        )
+        if not listener.got_transform:
+            self._warn_once(
+                f"{what}_transform",
+                f"The transform from {what} frame '{frame}' to '{target}' has "
+                "not been resolved yet, so detections are not being published "
+                "in 3D.",
+            )
+            return None
+        return tuple(listener.translation), tuple(listener.rotation)
+
+    def _depth_image_mm(self, depth_msg):
+        """A depth image decoded into millimeters"""
+        # Check if the streams encoding changed (unlikely)
+        if depth_msg.encoding != self._depth_encoding_key:
+            self._depth_encoding = process_encoding(depth_msg.encoding)
+            self._depth_encoding_key = depth_msg.encoding
+        return prepare_depth(
+            image_pre_processing(depth_msg, *self._depth_encoding),
+            encoding=depth_msg.encoding,
+            scale=self.config.depth_scale,
+        )
 
     # TODO: Upstream to sugarcoat component
     def _warn_once(self, key: str, message: str, error: bool = False) -> None:

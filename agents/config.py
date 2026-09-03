@@ -331,7 +331,7 @@ class MLLMConfig(LLMConfig):
     :type max_depth: float
     :param max_depth_age: How far apart in time the color and depth frames may be before the pair is treated as mismatched, in seconds. Default is 0.2.
     :type max_depth_age: float
-    :param min_depth_validity: Minimum fraction of usable depth pixels inside a detection's 2D box for its 3D box to be published, in [0, 1]. A box built from a handful of readings is not a shape, and a planner would take it for one. Default is 0.1.
+    :param min_depth_validity: Minimum fraction of usable depth pixels inside a detection's 2D box for its 3D box to be published, in [0, 1]. A box built from a handful of readings is not a shape, and a planner would take it for one. Not applied to point cloud depth. Default is 0.1.
     :type min_depth_validity: float
 
     Example of usage:
@@ -796,7 +796,7 @@ class VisionConfig(ModelComponentConfig):
        :type max_depth: float
        :param max_depth_age: How far apart in time the color and depth frames may be before the pair is treated as mismatched, in seconds. Only applies to depth arriving on its own topic, since an RGBD frame carries both halves together. Default is 0.2.
        :type max_depth_age: float
-       :param min_depth_validity: Minimum fraction of usable depth pixels inside a detection's 2D box for its 3D box to be published, in [0, 1]. A box built from a handful of readings is not a shape, and a planner would take it for one. Default is 0.1.
+       :param min_depth_validity: Minimum fraction of usable depth pixels inside a detection's 2D box for its 3D box to be published, in [0, 1]. A box built from a handful of readings is not a shape, and a planner would take it for one. Not applied to point cloud depth. Default is 0.1.
        :type min_depth_validity: float
 
        Example of usage:

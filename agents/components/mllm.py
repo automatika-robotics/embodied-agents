@@ -19,6 +19,7 @@ from ..ros import (
     Detections,
     Detections3D,
     RGBD,
+    PointCloud2,
     PointsOfInterest,
     ComponentRunType,
     ROSImage,
@@ -57,9 +58,9 @@ class MLLM(DepthLiftMixin, LLM):
     :param trigger: The trigger value or topic for the MLLM component.
         This can be a single Topic object, a list of Topic objects, or a float value for a timed component. Defaults to 1.
     :type trigger: Union[Topic, list[Topic], float]
-    :param depth: Depth image topic registered to the camera the VLM grounds on, used together with `camera_info` to lift grounded boxes into metric 3D boxes when a Detections3D output is given (requires the "grounding" or "affordance" task). The depth frame is latched when the picture is captured for inference, so the boxes measure the scene the VLM actually saw.
+    :param depth: Depth topic for the camera the VLM grounds on, either a depth Image registered to its pictures or a PointCloud2 from it or from another sensor whose frame TF relates to the camera's. Used together with `camera_info` to lift grounded boxes into metric 3D boxes when a Detections3D output is given (requires the "grounding" or "affordance" task). The depth is latched when the picture is captured for inference, so the boxes measure the scene the VLM actually saw.
     :type depth: Optional[Topic]
-    :param camera_info: Camera intrinsics topic of the stream `depth` was measured on. Required alongside `depth` for a Detections3D output.
+    :param camera_info: Camera intrinsics topic of the pictures the VLM grounds on, which registered depth shares and a point cloud is projected with. Required alongside `depth` for a Detections3D output.
     :type camera_info: Optional[Topic]
     :param component_name: The name of the MLLM component.
         This should be a string and defaults to "mllm_component".
@@ -115,6 +116,7 @@ class MLLM(DepthLiftMixin, LLM):
                 Detections,
                 Detections3D,
                 CameraInfo,
+                PointCloud2,
             ],
         }
 
