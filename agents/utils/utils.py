@@ -537,21 +537,24 @@ def load_model_repo(
 def get_frame_id(msg: Any) -> str:
     """Frame a ROS message was captured in, empty when it does not say.
 
-    :param msg: Any ROS message, with or without a header
+    :param msg: Any ROS message, with or without a header, or a decoded
+        container carrying its own `frame_id` such as PointCloudData
     :rtype: str
     """
-    return getattr(getattr(msg, "header", None), "frame_id", "") or ""
+    header = getattr(msg, "header", None)
+    return getattr(header, "frame_id", None) or getattr(msg, "frame_id", "") or ""
 
 
 def get_stamp_secs(msg: Any) -> float:
     """Capture time of a ROS message in seconds, 0 when it does not say.
 
-    :param msg: Any ROS message, with or without a header
+    :param msg: Any ROS message, with or without a header, or a decoded
+        container carrying its own `timestamp` such as PointCloudData
     :rtype: float
     """
     stamp = getattr(getattr(msg, "header", None), "stamp", None)
     if stamp is None:
-        return 0.0
+        return float(getattr(msg, "timestamp", 0.0))
     return stamp.sec + stamp.nanosec * 1e-9
 
 
