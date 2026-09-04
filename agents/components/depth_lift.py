@@ -53,10 +53,10 @@ class DepthLiftMixin:
         if (depth := self._lift_depth) is None:
             self.log_once(
                 "no_depth",
-                f"Nothing has been received on depth topic "
-                f"'{self.depth_topic.name if self.depth_topic else '<unknown>'}', so no detection "
-                "can be placed in space.",
-                level="error",
+                f"No depth has arrived yet on "
+                f"'{self.depth_topic.name if self.depth_topic else '<unknown>'}', "
+                "so 3D detections are held back until it does. If it never does, "
+                "check the topic name and that its publisher is running.",
             )
             return None
 
@@ -122,10 +122,9 @@ class DepthLiftMixin:
         if intrinsics is None:
             self.log_once(
                 "no_intrinsics",
-                "No camera calibration has been received, so depth cannot be "
-                "turned into distances. Pass the camera's `camera_info` topic, "
-                "or use an RGBD input, which carries its own.",
-                level="error",
+                "No camera calibration has arrived yet, so 3D detections are "
+                "held back until it does. If it never does, check the "
+                "`camera_info` topic, or use an RGBD input, which carries its own.",
             )
             return None, None, None
 
@@ -199,6 +198,19 @@ class DepthLiftMixin:
                 set_cloud_sensor(self._detector, *mount, cloud.x_field_datatype)
             self._detector_key = key
         return self._detector, depth, pose[0]
+
+    def _trusted(self, boxes):
+        """The lifted boxes resting on enough depth to be published"""
+        floor = self.config.min_depth_validity
+        kept = [box for box in boxes if box.validity >= floor]
+        if len(kept) < len(boxes):
+            self.get_logger().debug(
+                f"{len(boxes) - len(kept)} of {len(boxes)} lifted boxes fall below "
+                f"min_depth_validity ({floor}); the lowest reads "
+                f"{min(box.validity for box in boxes):.2f}. A sparse cloud such as "
+                "a LiDAR needs the floor lowered."
+            )
+        return kept
 
     def _pose_in(self, frame: str, target: str, what: str):
         """Pose of `frame` in `target` as (translation, rotation) tuples.

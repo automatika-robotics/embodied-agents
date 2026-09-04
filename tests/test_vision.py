@@ -591,6 +591,19 @@ class TestLiftingWithADepthTopic(_SyntheticCamera):
         boxes, _ = self._published(vision_3d)
         assert boxes == []
 
+    def test_depth_not_yet_arrived_is_a_warning(self, vision_3d, mock_model_client):
+        """The first picture usually beats the first depth frame; that is a
+        startup race, not a fault."""
+        mock_model_client.inference.return_value = self._detections()
+        self._wire(vision_3d)
+        vision_3d.callbacks["depth"].msg = None
+
+        vision_3d._execution_step()
+
+        assert vision_3d.publishers_dict["out"].publish.call_count == 0
+        assert "held back" in _warnings(vision_3d)
+        vision_3d.get_logger().error.assert_not_called()
+
     def test_depth_is_paired_when_the_picture_is_taken(
         self, vision_3d, mock_model_client
     ):
@@ -708,9 +721,11 @@ class TestLiftingWithAPointCloud(_SyntheticCamera):
         return mock_component_internals(component)
 
     @classmethod
-    def _cloud_scene(cls, frame_id="cam", sensor_at=(0.0, 0.0, 0.0), stamp=0.0):
-        """Every pixel of the depth scene as a point, measured from a sensor
-        sitting at `sensor_at` in the camera's frame."""
+    def _cloud_scene(
+        cls, frame_id="cam", sensor_at=(0.0, 0.0, 0.0), stamp=0.0, stride=1
+    ):
+        """Every `stride`-th pixel of the depth scene as a point, measured
+        from a sensor sitting at `sensor_at` in the camera's frame."""
         import numpy as np
 
         from agents.ros import PointCloudData
@@ -718,7 +733,8 @@ class TestLiftingWithAPointCloud(_SyntheticCamera):
         z = np.full((cls.HEIGHT, cls.WIDTH), 3.0, dtype=np.float32)
         x1, y1, x2, y2 = cls.PATCH
         z[y1:y2, x1:x2] = cls.PATCH_DEPTH_M
-        v, u = np.mgrid[0 : cls.HEIGHT, 0 : cls.WIDTH]
+        v, u = np.mgrid[0 : cls.HEIGHT : stride, 0 : cls.WIDTH : stride]
+        z = z[v, u]
         cx, cy = cls.WIDTH / 2, cls.HEIGHT / 2
         points = np.stack([(u - cx) * z / cls.FX, (v - cy) * z / cls.FY, z], axis=-1)
         points = points.reshape(-1, 3) - np.asarray(sensor_at, dtype=np.float32)
@@ -763,6 +779,24 @@ class TestLiftingWithAPointCloud(_SyntheticCamera):
         assert size[0] == pytest.approx(40 * self.PATCH_DEPTH_M / self.FX, abs=0.01)
         # one point per pixel backs the whole box
         assert published["depth_validity"] == [1.0]
+
+    def test_a_sparse_cloud_is_filtered_with_a_debug_trace(
+        self, vision_3d, mock_model_client
+    ):
+        """A LiDAR lands few points per pixel, so under the default floor its
+        boxes are dropped. That is silent on the topic, an empty message, so
+        the log has to say why."""
+        mock_model_client.inference.return_value = self._detections()
+        self._wire(vision_3d, self._cloud_scene(stride=4))
+
+        vision_3d._execution_step()
+
+        boxes, _ = self._published(vision_3d)
+        assert boxes == []
+        debug = " ".join(
+            str(c[0][0]) for c in vision_3d.get_logger().debug.call_args_list
+        )
+        assert "min_depth_validity" in debug
 
     def test_a_stale_cloud_is_not_paired_with_the_picture(
         self, vision_3d, mock_model_client

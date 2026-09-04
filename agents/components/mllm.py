@@ -703,18 +703,15 @@ class MLLM(DepthLiftMixin, LLM):
                 return None
             # the color image, which an RGBD frame carries nested
             color = getattr(self._lift_msg, "rgb", self._lift_msg)
-            lifted = [
-                box
-                for box in boxes_from_detections(
+            lifted = self._trusted(
+                boxes_from_detections(
                     detector,
                     depth,
                     pixels,
                     image_size=(color.width, color.height),
                     camera_position=camera_position,
                 )
-                # A box built from a handful of depth pixels is not trustworthy
-                if box.validity >= self.config.min_depth_validity
-            ]
+            )
             # Every grounded box answers the same query, thus the same name
             fields = detections_to_message_fields(
                 lifted,

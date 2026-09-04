@@ -895,18 +895,15 @@ class Vision(DepthLiftMixin, ModelComponent):
         if detector is None:
             return None
 
-        lifted = [
-            box
-            for box in boxes_from_detections(
+        lifted = self._trusted(
+            boxes_from_detections(
                 detector,
                 depth,
                 pixels,
                 image_size=(color.width, color.height),
                 camera_position=camera_position,
             )
-            # A box built from a handful of depth pixels is not trustworthy
-            if box.validity >= self.config.min_depth_validity
-        ]
+        )
         return detections_to_message_fields(
             lifted,
             labels=detections.get("labels"),
