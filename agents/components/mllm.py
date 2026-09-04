@@ -710,7 +710,6 @@ class MLLM(DepthLiftMixin, LLM):
                     depth_mm,
                     pixels,
                     image_size=(color.width, color.height),
-                    depth_range=(self.config.min_depth, self.config.max_depth),
                     camera_position=camera_position,
                 )
                 # A box built from a handful of depth pixels is not trustworthy

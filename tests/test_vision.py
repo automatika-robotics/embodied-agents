@@ -761,7 +761,7 @@ class TestLiftingWithAPointCloud(_SyntheticCamera):
         (center, size), = boxes
         assert center[2] == pytest.approx(self.PATCH_DEPTH_M, abs=0.02)
         assert size[0] == pytest.approx(40 * self.PATCH_DEPTH_M / self.FX, abs=0.01)
-        # min_depth_validity does not filter cloud boxes
+        # one point per pixel backs the whole box
         assert published["depth_validity"] == [1.0]
 
     def test_a_stale_cloud_is_not_paired_with_the_picture(

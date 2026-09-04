@@ -142,9 +142,10 @@ class Box3D:
         usable depth are dropped, so this is not the position in the output
     :param center: Center of the box in meters
     :param size: Full extents of the box in meters
-    :param validity: Fraction of the depth pixels inside the 2D box that were
-        usable, in [0, 1]. A point cloud has no pixels to count, so boxes
-        lifted from one carry 1.0
+    :param validity: Depth readings the box rests on per pixel of its 2D box,
+        clamped to [0, 1]. For a depth image that is the fraction of usable
+        pixels; for a point cloud it counts the points that landed in the
+        box, which is small for a sparse LiDAR
     """
 
     index: int = field()
@@ -193,34 +194,6 @@ def prepare_depth(
 
     depth = np.clip(depth * scale, 0, np.iinfo(np.uint16).max)
     return np.require(depth, dtype=np.uint16, requirements=["C"])
-
-
-def depth_validity(
-    depth_mm: np.ndarray,
-    box: Sequence[float],
-    depth_range: Tuple[float, float] = (0.1, 5.0),
-) -> float:
-    """Fraction of a 2D box's depth pixels that carry a usable reading.
-
-    A box built from a handful of pixels is geometrically meaningless, so
-    consumers use this to decide whether to trust the 3D box built from it.
-
-    :param depth_mm: Depth image in millimeters
-    :param box: 2D box as (x1, y1, x2, y2) in pixels
-    :param depth_range: Usable range of the sensor in meters
-    :returns: Fraction in [0, 1], 0 when the box is empty or off the image
-    """
-    height, width = depth_mm.shape[:2]
-    x1, y1, x2, y2 = (int(round(value)) for value in box)
-    x1, x2 = max(0, min(x1, x2)), min(width, max(x1, x2))
-    y1, y2 = max(0, min(y1, y2)), min(height, max(y1, y2))
-    if x2 <= x1 or y2 <= y1:
-        return 0.0
-
-    patch = depth_mm[y1:y2, x1:x2]
-    low, high = (limit * _METERS_TO_MM for limit in depth_range)
-    usable = np.count_nonzero((patch >= low) & (patch <= high))
-    return float(usable) / float(patch.size)
 
 
 def make_detector(
@@ -323,7 +296,6 @@ def boxes_from_detections(
     depth: Any,
     boxes_2d: Sequence[Sequence[float]],
     image_size: Optional[Tuple[int, int]] = None,
-    depth_range: Tuple[float, float] = (0.1, 5.0),
     camera_position: Optional[Sequence[float]] = None,
 ) -> List[Box3D]:
     """Lift 2D detections into metric boxes.
@@ -340,7 +312,6 @@ def boxes_from_detections(
     :param image_size: Size of the image the boxes were found in as
         (width, height), taken from the depth image if unset. Required with
         a point cloud, which has no pixel grid of its own
-    :param depth_range: Usable range of the sensor in meters
     :param camera_position: Position of the camera in the frame the boxes come
         back in, which must be gravity aligned (z up). When given, each box's
         center is pushed away from the camera along the view ray by half the
@@ -388,6 +359,8 @@ def boxes_from_detections(
     boxes = []
     for box in detected:
         index = box.source_index
+        x1, y1, x2, y2 = boxes_2d[index]
+        area = abs(x2 - x1) * abs(y2 - y1)
         center = np.asarray(box.center, dtype=np.float64)
         size = np.asarray(box.size, dtype=np.float64)
         if camera is not None:
@@ -403,9 +376,8 @@ def boxes_from_detections(
                 index=index,
                 center=(float(center[0]), float(center[1]), float(center[2])),
                 size=(float(size[0]), float(size[1]), float(size[2])),
-                validity=1.0
-                if cloud
-                else depth_validity(depth, boxes_2d[index], depth_range),
+                # the detector reads its limits inclusively, hence the clamp
+                validity=min(1.0, box.sample_count / area) if area else 0.0,
             )
         )
     return boxes

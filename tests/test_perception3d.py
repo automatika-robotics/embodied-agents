@@ -5,7 +5,6 @@ import pytest
 
 from agents.utils.perception3d import (
     Box3D,
-    depth_validity,
     detections_to_message_fields,
     ensure_kompass_core,
     prepare_depth,
@@ -28,15 +27,17 @@ def scene(patch_depth=PATCH_DEPTH_M, background=BACKGROUND_DEPTH_M):
     return depth
 
 
-def cloud_scene(sensor_at=(0.0, 0.0, 0.0), frame_id="camera_optical", stamp=0.0):
-    """The same scene as a point cloud: every pixel deprojected into the
-    camera's optical frame, then measured from a sensor sitting at
+def cloud_scene(
+    sensor_at=(0.0, 0.0, 0.0), frame_id="camera_optical", stamp=0.0, stride=1
+):
+    """The same scene as a point cloud: every `stride`-th pixel deprojected
+    into the camera's optical frame, then measured from a sensor sitting at
     `sensor_at` in that frame. Laid out as drivers do, float32 xyz plus
     padding."""
     from agents.ros import PointCloudData
 
-    z = scene()
-    v, u = np.mgrid[0:HEIGHT, 0:WIDTH]
+    v, u = np.mgrid[0:HEIGHT:stride, 0:WIDTH:stride]
+    z = scene()[v, u]
     points = np.stack([(u - CX) * z / FX, (v - CY) * z / FY, z], axis=-1)
     points = points.reshape(-1, 3) - np.asarray(sensor_at, dtype=np.float32)
     records = np.zeros((len(points), 4), dtype=np.float32)
@@ -98,32 +99,6 @@ class TestPrepareDepth:
     def test_values_beyond_the_range_are_capped(self):
         depth = prepare_depth(np.full((2, 2), 100.0, dtype=np.float32))
         assert depth[0, 0] == np.iinfo(np.uint16).max
-
-
-class TestDepthValidity:
-    def test_fully_covered_box(self):
-        assert depth_validity(prepare_depth(scene()), PATCH) == 1.0
-
-    def test_box_with_no_usable_depth(self):
-        depth = prepare_depth(np.zeros((HEIGHT, WIDTH), dtype=np.float32))
-        assert depth_validity(depth, PATCH) == 0.0
-
-    def test_out_of_range_depth_does_not_count(self):
-        depth = prepare_depth(scene(patch_depth=9.0, background=9.0))
-        assert depth_validity(depth, PATCH, depth_range=(0.1, 5.0)) == 0.0
-
-    def test_partially_valid_box(self):
-        depth = prepare_depth(scene())
-        # half the box sits on background at 2 m, still in range
-        assert depth_validity(depth, (100, 40, 140, 60), (0.1, 1.0)) == 1.0
-        assert depth_validity(depth, (100, 40, 140, 80), (0.1, 1.0)) == pytest.approx(0.5)
-
-    def test_box_off_the_image(self):
-        depth = prepare_depth(scene())
-        assert depth_validity(depth, (500, 500, 600, 600)) == 0.0
-
-    def test_empty_box(self):
-        assert depth_validity(prepare_depth(scene()), (10, 10, 10, 10)) == 0.0
 
 
 class TestMessageFields:
@@ -208,6 +183,15 @@ class TestLifting:
         assert box.size[0] == pytest.approx(40 * PATCH_DEPTH_M / FX, abs=0.01)
         assert box.size[1] == pytest.approx(20 * PATCH_DEPTH_M / FY, abs=0.01)
         assert box.validity == 1.0
+
+    def test_validity_is_the_share_of_the_box_with_depth(self):
+        """Half the patch loses its readings, so the box rests on half its
+        pixels. The detector reads its limits inclusively, which adds a
+        column and a row."""
+        depth = scene()
+        depth[40:60, 120:160] = 0.0
+        (box,) = self._lift([PATCH], depth=depth)
+        assert box.validity == pytest.approx(0.5, abs=0.06)
 
     def test_boxes_are_placed_along_the_optical_axes(self):
         """An object right of and below the principal point has to come back
@@ -356,8 +340,14 @@ class TestLiftingFromACloud:
         assert box.center[2] == pytest.approx(PATCH_DEPTH_M, abs=0.02)
         assert box.size[0] == pytest.approx(40 * PATCH_DEPTH_M / FX, abs=0.01)
         assert box.size[1] == pytest.approx(20 * PATCH_DEPTH_M / FY, abs=0.01)
-        # there are no pixels to count, so a cloud box is always trusted
+        # one point per pixel backs the whole box
         assert box.validity == 1.0
+
+    def test_a_sparse_cloud_backs_the_box_only_in_part(self):
+        """A LiDAR lands far fewer points in a box than a camera has pixels,
+        and the validity says so."""
+        (box,) = self._lift(cloud_scene(stride=2))
+        assert box.validity == pytest.approx(0.25, abs=0.05)
 
     def test_points_are_projected_from_where_their_sensor_sits(self):
         """A LiDAR beside the camera measures the same object from somewhere
