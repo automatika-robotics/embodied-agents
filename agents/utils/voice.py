@@ -75,8 +75,8 @@ class VADIterator:
 
         # Initialize the ONNX model
         sessionOptions = ort.SessionOptions()
-        sessionOptions.inter_op_num_threads = ncpu
         sessionOptions.intra_op_num_threads = ncpu
+        sessionOptions.inter_op_num_threads = 1
 
         providers = _get_onnx_providers(device, "VAD")
         self.model = ort.InferenceSession(

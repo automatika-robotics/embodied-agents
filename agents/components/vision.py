@@ -9,11 +9,14 @@ import cv2
 from ..clients.model_base import ModelClient
 from ..config import VisionConfig
 from ..ros import (
+    CameraInfo,
     DetectionsMultiSource,
     Detections,
+    Detections3D,
     Trackings,
     FixedInput,
     Image,
+    PointCloud2,
     RGBD,
     Topic,
     TrackingsMultiSource,
@@ -26,12 +29,15 @@ from ..utils import (
     load_model,
     draw_points_2d,
     draw_detection_bounding_boxes,
+    get_frame_id,
 )
+from ..utils.perception3d import resolve_lift_camera
+from .depth_lift import DepthLiftMixin
 from .model_component import ModelComponent
 from .component_base import ComponentRunType
 
 
-class Vision(ModelComponent):
+class Vision(DepthLiftMixin, ModelComponent):
     """
     This component performs object detection and tracking on input images and outputs a list of detected objects, along with their bounding boxes and confidence scores.
 
@@ -40,6 +46,9 @@ class Vision(ModelComponent):
     :type inputs: list[Union[Topic, FixedInput]]
     :param outputs: The output topics for the object detection.
         This should be a list of Topic objects, Detection and Tracking types are handled automatically.
+        A Detections3D output turns on the 3D lift: detections are placed in metric space using
+        depth (from an RGBD input or the `depth` topic) and published as boxes in the configured
+        `detections_frame`.
     :type outputs: list[Topic]
     :param model_client: Optional model client for the vision component to access remote vision models. If not provided, enable_local_classifier should be set to True in VisionConfig
         This should be an instance of ModelClient. Defaults to None.
@@ -50,6 +59,19 @@ class Vision(ModelComponent):
     :param trigger: The trigger value or topic for the vision component.
         This can be a single Topic object, a list of Topic objects, or a float value for timed components.
     :type trigger: Union[Topic, list[Topic], float]
+    :param depth: Optional depth topic, for a camera that publishes depth separately
+        rather than bundled in an RGBD message. Either a depth Image registered to the
+        pictures being detected on, which is what a stereo camera publishes as its aligned
+        or `depth_registered` stream, or a PointCloud2, from the same camera or from another
+        sensor such as a LiDAR whose frame TF relates to the camera's. Only used when a
+        Detections3D output is given, and it must be accompanied by `camera_info`.
+    :type depth: Optional[Topic]
+    :param camera_info: Optional CameraInfo topic with the calibration of the pictures being
+        detected on, which registered depth shares and a point cloud is projected with.
+        Required alongside `depth`, and usable on its own with an RGBD input to override the
+        calibration that message carries. Like `depth`, it is passed here rather than
+        listed in `inputs`, which is reserved for pictures to detect on.
+    :type camera_info: Optional[Topic]
     :param component_name: The name of the vision component.
         This should be a string and defaults to "vision_component".
     :type component_name: str
@@ -79,19 +101,78 @@ class Vision(ModelComponent):
         model_client: Optional[ModelClient] = None,
         config: Optional[VisionConfig] = None,
         trigger: Union[Topic, List[Topic], float] = 1.0,
+        depth: Optional[Topic] = None,
+        camera_info: Optional[Topic] = None,
         component_name: str,
         **kwargs,
     ):
         self.config: VisionConfig = config or VisionConfig()
-        self.allowed_inputs = {"Required": [[Image, RGBD]]}
+        self.allowed_inputs = {
+            "Required": [[Image, RGBD]],
+            "Optional": [CameraInfo, PointCloud2],
+        }
         self.handled_outputs = [
             Detections,
             Trackings,
             DetectionsMultiSource,
             TrackingsMultiSource,
+            Detections3D,
         ]
 
+        # Raw image captures
         self._images: List[Union[np.ndarray, ROSImage, ROSCompressedImage]] = []
+
+        depth = depth or self.config._depth_topic
+        camera_info = camera_info or self.config._camera_info_topic
+        self.config._depth_topic = depth
+        self.config._camera_info_topic = camera_info
+        self.depth_topic, self.camera_info_topic = depth, camera_info
+
+        # Reject camera info if present in inputs
+        stray_info = [
+            t.name
+            for t in inputs
+            if issubclass(t.msg_type, CameraInfo)
+            and (camera_info is None or t.name != camera_info.name)
+        ]
+        if stray_info:
+            raise TypeError(
+                f"Vision was given CameraInfo topic(s) {stray_info} among its "
+                "inputs. Intrinsics describe a camera rather than deliver "
+                "pictures to detect on, so they are passed as "
+                "`camera_info=Topic(...)`, as depth is passed as `depth=Topic(...)`."
+            )
+        self._aux_inputs = {t.name for t in (depth, camera_info) if t}
+
+        # Asking for a Detections3D output turns 3D lifting on
+        self._lift_to_3d = any(issubclass(t.msg_type, Detections3D) for t in outputs)
+        self._lift_camera = None
+        if self._lift_to_3d:
+            # The contract check names the picture stream the lift applies to
+            self._lift_camera = resolve_lift_camera(
+                inputs,
+                depth,
+                camera_info,
+                frame=self.config.detections_frame,
+                component="Vision",
+            )
+            # Intrinsics and depth only get subscribed to when they feed a lift
+            for topic in (depth, camera_info):
+                if topic and all(t.name != topic.name for t in inputs):
+                    inputs = [*inputs, topic]
+
+        # Sort which image inputs are actually run through the model, and which are
+        # only there to be captured by component actions
+        self._inference_set = self._resolve_detection_set(
+            inputs, outputs, trigger, self._aux_inputs, self._lift_camera
+        )
+        self._spectators = [
+            topic.name
+            for topic in inputs
+            if issubclass(topic.msg_type, (Image, RGBD))
+            and topic.name not in self._inference_set
+            and topic.name not in self._aux_inputs
+        ]
 
         super().__init__(
             inputs,
@@ -113,14 +194,115 @@ class Vision(ModelComponent):
                 hasattr(model_client, "_model")
                 and self.model_client._model.setup_trackers  # type: ignore
             ):
-                model_client._model._num_trackers = len(inputs)
+                # one tracker per camera inferenced on, not per input
+                model_client._model._num_trackers = len(self._inference_set)
         else:
             if not self.config.enable_local_classifier:
                 raise TypeError(
                     "Vision component either requires a model client or enable_local_classifier needs to be set True in the VisionConfig."
                 )
 
+        # Initialize detector for 3D lift and its parse calibration
+        self._init_lift_state()
+        # Where the lifted camera's picture sits in this tick's results
+        self._lift_index: Optional[int] = None
+
+        triggers = getattr(self, "_trigger_topic_names", [])
+        if any(name in triggers for name in self._aux_inputs):
+            raise TypeError(
+                "Vision depth and camera_info topics describe a camera rather "
+                "than deliver pictures to run inference on, so they cannot be used"
+                " as the component trigger."
+            )
+
+    @staticmethod
+    def _resolve_detection_set(
+        inputs: List[Union[Topic, FixedInput]],
+        outputs: List[Topic],
+        trigger: Union[Topic, List[Topic], float],
+        aux_inputs: Optional[set] = None,
+        lift_camera: Optional[str] = None,
+    ) -> List[str]:
+        """Decide which image inputs are run through the model each tick.
+
+        A component receives one picture per tick when it is triggered by a
+        topic (EVENT mode), and all of its images at once when it is timed (TIMED mode).
+
+        Single source outputs describe one camera, so they can only be used when
+        a tick produces one picture. Image inputs left out are still subscribed
+        and can be captured with component actions but they are not used for inference.
+
+        :returns: Names of the image topics to run detection on
+        """
+        aux_inputs = aux_inputs or set()
+        pictures = [
+            t
+            for t in inputs
+            if issubclass(t.msg_type, (Image, RGBD)) and t.name not in aux_inputs
+        ]
+        multi_source = any(
+            issubclass(t.msg_type, (DetectionsMultiSource, TrackingsMultiSource))
+            for t in outputs
+        )
+        single_source = any(
+            issubclass(t.msg_type, (Detections, Trackings)) for t in outputs
+        )
+
+        if isinstance(trigger, (int, float)):
+            # Timed: the whole detection set reaches the model together, so
+            # requires a multi message
+            single = [t for t in pictures if t.name == lift_camera] or pictures[:1]
+            inference_on = pictures if multi_source else single
+            per_tick = len(inference_on)
+        else:
+            # Triggered: only the topic that fired is read, so a tick carries
+            # one picture however many topics can trigger one
+            triggers = trigger if isinstance(trigger, List) else [trigger]
+            inference_on = [t for t in pictures if t.name in {t.name for t in triggers}]
+            per_tick = 1
+
+        if single_source and per_tick > 1:
+            raise TypeError(
+                f"{[t.name for t in inference_on]} are all used for inference in the "
+                "same pass, so their inference results cannot be published on a "
+                "Detections or Trackings topic, which describes one camera. "
+                "Use a DetectionsMultiSource or TrackingsMultiSource output, "
+                "or trigger the component on the cameras to take them one at "
+                "a time."
+            )
+        return [t.name for t in inference_on]
+
     def custom_on_configure(self):
+        # Warn which image inputs are never used for inference
+        if self._spectators:
+            self.get_logger().warning(
+                f"Not running inference on {self._spectators}: this component "
+                f"runs inference on {self._inference_set}. Those topics can still be "
+                "captured with a component action (like take_picture and record_video). "
+                "To run inference on all of them, give the component a "
+                "DetectionsMultiSource or TrackingsMultiSource output topic, "
+                "or make them all component triggers."
+            )
+
+        # Depth and intrinsics are only read to place detections in space
+        if not self._lift_to_3d and (unused := sorted(self._aux_inputs)):
+            self.get_logger().warning(
+                f"Ignoring {unused}: depth and intrinsics are only used to place "
+                "detections in metric space, and this component has no "
+                "Detections3D output topic to publish those on. The topics are "
+                "not being subscribed to."
+            )
+
+        # Only one camera's depth and calibration are given, an RGBD topic or
+        # the first Image topic will be used in case of more than one inputs
+        if self._lift_camera and len(self._inference_set) > 1:
+            self.get_logger().warning(
+                f"Lifting detections into 3D only from '{self._lift_camera}': "
+                f"the depth and calibration given describe that camera. "
+                f"Detections from {[n for n in self._inference_set if n != self._lift_camera]} "
+                "are only published in 2D."
+            )
+
         # deploy local model if enabled
         if not self.model_client and self.config.enable_local_classifier:
             self._deploy_local_model()
@@ -610,25 +792,132 @@ class Vision(ModelComponent):
         :rtype: dict[str, Any]
         """
         self._images = []
+        # Where the lifted camera's picture sits in this tick's results
+        self._lift_index: Optional[int] = None
+        # The 3D latched msg and depth
+        self._lift_msg = None
+        self._lift_depth = None
+
         # set one image topic as query for event based trigger
         if trigger := kwargs.get("topic"):
             if msg := self.trig_callbacks[trigger.name].msg:
                 self._images.append(msg)
+                if trigger.name == self._lift_camera:
+                    self._lift_index, self._lift_msg = 0, msg
+                    self._lift_depth = self._depth_snapshot()
             images = [self.trig_callbacks[trigger.name].get_output(clear_last=True)]
         else:
             images = []
 
-            for i in self.callbacks.values():
+            for name, i in self.callbacks.items():
+                # Inputs outside the inference set are ignored
+                if name not in self._inference_set:
+                    continue
                 msg = i.msg
                 if (item := i.get_output(clear_last=True)) is not None:
+                    if name == self._lift_camera and msg is not None:
+                        self._lift_index, self._lift_msg = len(images), msg
+                        self._lift_depth = self._depth_snapshot()
                     images.append(item)
-                    if msg:
+                    if msg is not None:
                         self._images.append(msg)
 
         if not images:
             return None
 
         return {"images": images, **self.inference_params}
+
+    def _publish(self, result, **kwargs) -> None:
+        """Publish the detections, giving each topic the shape it can carry.
+
+        Inference returns one set of detections per image. A single source
+        message describes one camera and takes that camera's set on its own,
+        while a multi source message takes the whole list.
+        """
+        output = result.pop("output")
+        images = kwargs.pop("images", None)
+        boxes = self._lift(output) if self._lift_to_3d else None
+
+        for publisher in self.publishers_dict.values():
+            msg_type = publisher.output_topic.msg_type
+            if issubclass(msg_type, Detections3D):
+                # NOTE: None means the camera could not be used this tick
+                # (3D lifting didn't work), and nothing goes out. A scene the camera
+                # did see as empty comes through as empty fields and is published
+                if boxes is not None:
+                    publisher.publish(
+                        boxes["output"],
+                        **{k: v for k, v in boxes.items() if k != "output"},
+                        frame_id=self.config.detections_frame,
+                        time_stamp=kwargs.get("time_stamp"),
+                    )
+            elif issubclass(msg_type, (Detections, Trackings)):
+                publisher.publish(
+                    output[0],
+                    images=images[0] if images else None,
+                    **result,
+                    **kwargs,
+                )
+            else:
+                publisher.publish(output, images=images, **result, **kwargs)
+
+    def _lift(self, output: List[Dict]) -> Optional[Dict[str, Any]]:
+        """Turn the lifted camera's detections into metric boxes.
+
+        :returns: Fields for the Detections3D converter, or None when the
+            camera could not be used this tick
+        """
+        from ..utils.perception3d import (
+            boxes_from_detections,
+            detections_to_message_fields,
+        )
+
+        if self._lift_index is None or self._lift_index >= len(output):
+            self.log_once(
+                "no_lift_frame",
+                f"No picture arrived on '{self._lift_camera}', so nothing can "
+                "be placed in space this tick.",
+            )
+            return None
+
+        detections = output[self._lift_index] or {}
+        pixels = detections.get("bboxes") or []
+        if not pixels:
+            # NOTE: The camera worked and saw nothing; unlike the None returns on
+            # this path, this is an observation, published as an empty message
+            # so consumers let go of objects that are no longer there
+            return detections_to_message_fields([])
+
+        # the color image, which an RGBD frame carries nested
+        color = getattr(self._lift_msg, "rgb", self._lift_msg)
+
+        detector, depth, camera_position = self._depth_detector()
+        if detector is None:
+            return None
+
+        lifted = self._trusted(
+            boxes_from_detections(
+                detector,
+                depth,
+                pixels,
+                image_size=(color.width, color.height),
+                camera_position=camera_position,
+            )
+        )
+        return detections_to_message_fields(
+            lifted,
+            labels=detections.get("labels"),
+            scores=detections.get("scores"),
+            boxes_2d=pixels,
+        )
+
+    def _source_frame(self) -> Optional[str]:
+        """Frame of the camera the detections were made in, None unless
+        exactly one camera contributed.
+        """
+        if len(self._images) != 1:
+            return None
+        return get_frame_id(getattr(self._images[0], "rgb", self._images[0])) or None
 
     def _execution_step(self, *args, **kwargs):
         """_execution_step.
@@ -661,11 +950,16 @@ class Vision(ModelComponent):
         self._publish(
             result,
             images=self._images,
+            frame_id=self._source_frame(),
             time_stamp=self.get_ros_time(),
         )
         if self.config.enable_visualization:
             result["images"] = inference_input["images"]
             self.queue.put_nowait(result)
+
+    def _handle_websocket_streaming(self):
+        """Not used -- Vision publishes detections per frame."""
+        pass
 
     def _warmup(self):
         """Warm up and stat check"""

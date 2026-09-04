@@ -8,18 +8,24 @@ from importlib.util import find_spec
 from rclpy.logging import get_logger
 
 from sensor_msgs.msg import JointState as JointStateROS
+from geometry_msgs.msg import Pose as ROSPose
+from geometry_msgs.msg import PoseStamped as ROSPoseStamped
+from shape_msgs.msg import SolidPrimitive
 
 # FROM SUGARCOAT
 from ros_sugar.supported_types import (
     SupportedType,
     Audio,
     Bool,
+    CameraInfo,
     Image,
     CompressedImage,
     OccupancyGrid,
     Odometry,
     PointCloud2,
+    Pose,
     PoseArray,
+    PoseStamped,
     String,
     ROSImage,
     ROSCompressedImage,
@@ -46,19 +52,29 @@ from ros_sugar.utils import (
 from ros_sugar.io.utils import run_external_processor
 from ros_sugar.core import Event, Action
 from ros_sugar import actions
-from ros_sugar.base_clients import ServiceClientHandler, ActionClientHandler
+from ros_sugar.base_clients import (
+    ActionClientConfig,
+    ActionClientHandler,
+    ServiceClientConfig,
+    ServiceClientHandler,
+)
+from ros_sugar.io.datatypes import PointCloudData, read_camera_info
 
 from .launcher import Launcher
 
 # SUGATCOAT INTERFACES
 from automatika_ros_sugar.srv import ExecuteMethod
+from rcl_interfaces.srv import GetParameters
+from std_srvs.srv import Empty
 
 # AGENTS TYPES
 from automatika_embodied_agents.msg import (
     Point2D,
     Bbox2D,
+    Bbox3D as ROSBbox3D,
     Detections2D,
     Detections2DMultiSource,
+    Detections3D as ROSDetections3D,
 )
 from automatika_embodied_agents.msg import (
     StreamingString as ROSStreamingString,
@@ -67,9 +83,10 @@ from automatika_embodied_agents.msg import (
     TrackingsMultiSource as ROSTrackingsMultiSource,
     PointsOfInterest as ROSPointsOfInterest,
 )
-from automatika_embodied_agents.action import VisionLanguageAction
+from automatika_embodied_agents.action import MoveManipulator, VisionLanguageAction
 from .callbacks import (
     DetectionsCallback,
+    Detections3DCallback,
     DetectionsMultiSourceCallback,
     PointsOfInterestCallback,
     RGBDCallback,
@@ -86,13 +103,18 @@ __all__ = [
     "Video",
     "Audio",
     "Bool",
+    "CameraInfo",
     "Image",
     "CompressedImage",
     "OccupancyGrid",
     "Odometry",
     "PointCloud2",
+    "PointCloudData",
+    "Pose",
     "PoseArray",
+    "PoseStamped",
     "Detections",
+    "Detections3D",
     "DetectionsMultiSource",
     "PointsOfInterest",
     "Trackings",
@@ -123,8 +145,17 @@ __all__ = [
     "component_fallback",
     "component_action",
     "VisionLanguageAction",
+    "MoveManipulator",
+    "GetParameters",
     "run_external_processor",
+    "read_camera_info",
+    "Empty",
+    "ROSPose",
+    "ROSPoseStamped",
+    "SolidPrimitive",
+    "ServiceClientConfig",
     "ServiceClientHandler",
+    "ActionClientConfig",
     "ActionClientHandler",
     "get_ros_msg_fields_dict",
     "ros_msg_to_str",
@@ -279,6 +310,42 @@ class Video(SupportedType):
         return msg
 
 
+def _to_bbox_2d(bbox: Any) -> Bbox2D:
+    """Build a Bbox2D message from an (x1, y1, x2, y2) box in pixels"""
+    box = Bbox2D()
+    box.top_left_x = float(bbox[0])
+    box.top_left_y = float(bbox[1])
+    box.bottom_right_x = float(bbox[2])
+    box.bottom_right_y = float(bbox[3])
+    return box
+
+
+def _attach_source_image(msg: Any, image: Any) -> None:
+    """Attach a source image (and its depth, if any) to a perception message.
+    Also copies the image's header onto the message, so the detections carry
+    the frame they were made in.
+
+    :param msg: Perception message with image/compressed_image/depth fields
+    :param image: Source ROS image message (Image, CompressedImage or RGBD)
+    """
+    if image is None:
+        return
+    if isinstance(image, ROSCompressedImage):
+        msg.compressed_image = CompressedImage.convert(image)
+        source = image
+    # Handle RealSense RGBD msgs
+    elif hasattr(image, "depth"):
+        msg.image = Image.convert(image.rgb)
+        msg.depth = Image.convert(image.depth)
+        source = image.rgb
+    else:
+        msg.image = Image.convert(image)
+        source = image
+
+    if hasattr(source, "header") and hasattr(msg, "header"):
+        msg.header = source.header
+
+
 class Detections(SupportedType):
     """
     Wraps the `automatika_embodied_agents.msg.Detections2D` message type.
@@ -296,47 +363,33 @@ class Detections(SupportedType):
     @classmethod
     def convert(
         cls,
-        output: Union[Dict, List[Dict]],
-        images: Union[
-            ROSImage,
-            ROSCompressedImage,
-            np.ndarray,
-            List[ROSImage],
-            List[ROSCompressedImage],
-            List[np.ndarray],
-        ],
+        output: Dict,
+        images: Union[ROSImage, ROSCompressedImage, np.ndarray, None] = None,
         **_,
     ) -> Detections2D:
         """
-        Takes object detection data and converts it into a ROS message
-        of type Detection2D
+        Takes one camera's object detection data and converts it into a ROS
+        message of type Detection2D
+
+        :param output: Detections found in a single image
+        :param images: The image they were found in
         :return: Detection2D
         """
         if isinstance(output, List):
-            output = output[0]
-            images = images[0] if images else []
+            raise TypeError(
+                "Detections2D describes a single camera and cannot carry "
+                "detections from several. Use a Detections2DMultiSource output "
+                "topic for a component that detects on more than one image."
+            )
         msg = Detections2D()
         msg.scores = output.get("scores") or []
         msg.labels = output.get("labels") or []
         boxes = []
         for bbox in output.get("bboxes") or []:
-            box = Bbox2D()
-            box.top_left_x = float(bbox[0])
-            box.top_left_y = float(bbox[1])
-            box.bottom_right_x = float(bbox[2])
-            box.bottom_right_y = float(bbox[3])
-            boxes.append(box)
+            boxes.append(_to_bbox_2d(bbox))
 
         msg.boxes = boxes
-        if images:
-            if isinstance(images, ROSCompressedImage):
-                msg.compressed_image = CompressedImage.convert(images)
-            # Handle RealSense RGBD msgs
-            elif hasattr(images, "depth"):
-                msg.image = Image.convert(images.rgb)
-                msg.depth = Image.convert(images.depth)
-            else:
-                msg.image = Image.convert(images)
+        _attach_source_image(msg, images)
         return msg
 
 
@@ -366,6 +419,64 @@ class DetectionsMultiSource(SupportedType):
         for img, detection in zip(images, output):
             detections.append(Detections.convert(detection, img))
         msg.detections = detections
+        return msg
+
+
+class Detections3D(SupportedType):
+    """
+    Wraps the `automatika_embodied_agents.msg.Detections3D` message type.
+
+    This type represents detected objects in metric space, each with a
+    labelled 3D bounding box in a named frame rather than in image space.
+
+    **ROS2 Message Type**: `automatika_embodied_agents/msg/Detections3D`
+    """
+
+    _ros_type = ROSDetections3D
+    callback = Detections3DCallback
+
+    @classmethod
+    def convert(
+        cls,
+        output: List,
+        labels: Optional[List[str]] = None,
+        scores: Optional[List[float]] = None,
+        depth_validity: Optional[List[float]] = None,
+        boxes_2d: Optional[List] = None,
+        source_frame: str = "",
+        **_,
+    ) -> ROSDetections3D:
+        """
+        Takes 3D object detections and converts them into a ROS message
+        of type Detections3D
+
+        :param output: Boxes as (center, size) pairs, each in meters
+        :return: Detections3D
+        """
+        msg = ROSDetections3D()
+        boxes = []
+        for center, size in output:
+            box = ROSBbox3D()
+            box.center.position.x = float(center[0])
+            box.center.position.y = float(center[1])
+            box.center.position.z = float(center[2])
+            # Boxes are axis aligned in the frame they are given in
+            box.center.orientation.w = 1.0
+            box.size.x = float(size[0])
+            box.size.y = float(size[1])
+            box.size.z = float(size[2])
+            boxes.append(box)
+
+        msg.boxes = boxes
+        msg.labels = labels or []
+        msg.scores = [float(score) for score in scores or []]
+        msg.depth_validity = [float(value) for value in depth_validity or []]
+        # The 2D boxes come through as plain pixel tuples from the detector
+        msg.boxes_2d = [
+            box if isinstance(box, Bbox2D) else _to_bbox_2d(box)
+            for box in boxes_2d or []
+        ]
+        msg.source_frame = source_frame
         return msg
 
 
@@ -404,14 +515,7 @@ class PointsOfInterest(SupportedType):
             points.append(point)
         msg.points = points
 
-        if isinstance(image, ROSCompressedImage):
-            msg.compressed_image = CompressedImage.convert(image)
-        # Handle RealSense RGBD msgs
-        elif hasattr(image, "depth"):
-            msg.image = Image.convert(image.rgb)
-            msg.depth = Image.convert(image.depth)
-        else:
-            msg.image = Image.convert(image)
+        _attach_source_image(msg, image)
         return msg
 
 
@@ -431,26 +535,24 @@ class Trackings(SupportedType):
     @classmethod
     def convert(
         cls,
-        output: Union[Dict, List[Dict]],
-        images: Union[
-            ROSImage,
-            ROSCompressedImage,
-            np.ndarray,
-            List[ROSImage],
-            List[ROSCompressedImage],
-            List[np.ndarray],
-        ],
+        output: Dict,
+        images: Union[ROSImage, ROSCompressedImage, np.ndarray, None] = None,
         **_,
     ) -> ROSTrackings:
         """
-        Takes tracking data and converts it into a ROS message
+        Takes one camera's tracking data and converts it into a ROS message
         of type Tracking
+
+        :param output: Tracks found in a single image
+        :param images: The image they were found in
         :return: ROSTracking
         """
-        # Only consider the first datapoint if a list is sent
         if isinstance(output, List):
-            output = output[0]
-            images = images[0]
+            raise TypeError(
+                "Trackings describes a single camera and cannot carry tracks "
+                "from several. Use a TrackingsMultiSource output topic for a "
+                "component that tracks in more than one image."
+            )
         msg = ROSTrackings()
         msg.ids = output.get("ids") or []
         msg.labels = output.get("tracked_labels") or []
@@ -476,24 +578,12 @@ class Trackings(SupportedType):
         # tracked_bboxes: list of [x1, y1, x2, y2] bounding boxes
         if o_tracked_bboxes := output.get("tracked_bboxes"):
             for bbox in o_tracked_bboxes:
-                box = Bbox2D()
-                box.top_left_x = float(bbox[0])
-                box.top_left_y = float(bbox[1])
-                box.bottom_right_x = float(bbox[2])
-                box.bottom_right_y = float(bbox[3])
-                tracked_boxes.append(box)
+                tracked_boxes.append(_to_bbox_2d(bbox))
 
         msg.boxes = tracked_boxes
         msg.centroids = centroids
         msg.estimated_velocities = estimated_velocities
-        if isinstance(images, ROSCompressedImage):
-            msg.compressed_image = CompressedImage.convert(images)
-        # Handle RealSense RGBD msgs
-        elif hasattr(images, "depth"):
-            msg.image = Image.convert(images.rgb)
-            msg.depth = Image.convert(images.depth)
-        else:
-            msg.image = Image.convert(images)
+        _attach_source_image(msg, images)
         return msg
 
 
@@ -739,6 +829,7 @@ agent_types = [
     StreamingString,
     Video,
     Detections,
+    Detections3D,
     DetectionsMultiSource,
     Trackings,
     TrackingsMultiSource,

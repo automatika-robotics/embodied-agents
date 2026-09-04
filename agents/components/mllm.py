@@ -1,12 +1,14 @@
-import time
 import json
-from typing import Any, Union, Optional, List, Dict, Literal, MutableMapping
+import threading
+import time
+from typing import Any, Union, Optional, List, Dict, Literal, MutableMapping, Tuple
 
 import numpy as np
 from ..clients.db_base import DBClient
 from ..clients.model_base import ModelClient
 from ..config import MLLMConfig
 from ..ros import (
+    CameraInfo,
     FixedInput,
     Event,
     Image,
@@ -15,7 +17,9 @@ from ..ros import (
     Topic,
     DetectionsMultiSource,
     Detections,
+    Detections3D,
     RGBD,
+    PointCloud2,
     PointsOfInterest,
     ComponentRunType,
     ROSImage,
@@ -23,10 +27,12 @@ from ..ros import (
     component_action,
 )
 from ..utils import validate_func_args
+from ..utils.perception3d import resolve_lift_camera
+from .depth_lift import DepthLiftMixin
 from .llm import LLM
 
 
-class MLLM(LLM):
+class MLLM(DepthLiftMixin, LLM):
     """
     This component utilizes multi-modal large language models (e.g. Llava) that can be used to process text and image data.
 
@@ -35,6 +41,13 @@ class MLLM(LLM):
     :type inputs: list[Topic | FixedInput]
     :param outputs: The output topics for the MLLM component.
         This should be a list of Topic objects. String, Detections2D and PointsOfInterest2D types is handled automatically.
+        With the "grounding" or "affordance" task, a Detections3D output additionally lifts the
+        grounded boxes into metric space (see the `depth` and `camera_info` parameters), labeled
+        with the query that grounded them.
+        Two component actions serve callers such as the Cortex planner: `describe` answers a
+        question about a camera frame with text, and `run_task` runs the configured task once
+        on a frame and publishes the result on the output topics above (available only when
+        `task` is set in the config).
     :type outputs: list[Topic]
     :param model_client: The model client for the MLLM component.
         This should be an instance of ModelClient. Optional if ``enable_local_model`` is set to True in the config.
@@ -45,6 +58,10 @@ class MLLM(LLM):
     :param trigger: The trigger value or topic for the MLLM component.
         This can be a single Topic object, a list of Topic objects, or a float value for a timed component. Defaults to 1.
     :type trigger: Union[Topic, list[Topic], float]
+    :param depth: Depth topic for the camera the VLM grounds on, either a depth Image registered to its pictures or a PointCloud2 from it or from another sensor whose frame TF relates to the camera's. Used together with `camera_info` to lift grounded boxes into metric 3D boxes when a Detections3D output is given (requires the "grounding" or "affordance" task). The depth is latched when the picture is captured for inference, so the boxes measure the scene the VLM actually saw.
+    :type depth: Optional[Topic]
+    :param camera_info: Camera intrinsics topic of the pictures the VLM grounds on, which registered depth shares and a point cloud is projected with. Required alongside `depth` for a Detections3D output.
+    :type camera_info: Optional[Topic]
     :param component_name: The name of the MLLM component.
         This should be a string and defaults to "mllm_component".
     :type component_name: str
@@ -87,12 +104,20 @@ class MLLM(LLM):
         config: Optional[MLLMConfig] = None,
         db_client: Optional[DBClient] = None,
         trigger: Union[Topic, List[Topic], float, Event] = 1.0,
+        depth: Optional[Topic] = None,
+        camera_info: Optional[Topic] = None,
         component_name: str,
         **kwargs,
     ):
         self.allowed_inputs = {
             "Required": [String, [Image, RGBD]],
-            "Optional": [DetectionsMultiSource, Detections],
+            "Optional": [
+                DetectionsMultiSource,
+                Detections,
+                Detections3D,
+                CameraInfo,
+                PointCloud2,
+            ],
         }
 
         config = config or MLLMConfig()
@@ -101,6 +126,52 @@ class MLLM(LLM):
             raise RuntimeError(
                 "MLLM/VLM component requires a model_client or enable_local_model=True in MLLMConfig."
             )
+
+        depth = depth or config._depth_topic
+        camera_info = camera_info or config._camera_info_topic
+        config._depth_topic = depth
+        config._camera_info_topic = camera_info
+        self.depth_topic, self.camera_info_topic = depth, camera_info
+
+        # Reject camera info if present in inputs
+        stray_info = [
+            t.name
+            for t in inputs
+            if issubclass(t.msg_type, CameraInfo)
+            and (camera_info is None or t.name != camera_info.name)
+        ]
+        if stray_info:
+            raise TypeError(
+                f"MLLM was given CameraInfo topic(s) {stray_info} among its "
+                "inputs. Intrinsics describe a camera rather than deliver "
+                "pictures to reason on, so they are passed as "
+                "`camera_info=Topic(...)`, as depth is passed as `depth=Topic(...)`."
+            )
+        self._aux_inputs = {t.name for t in (depth, camera_info) if t}
+
+        # Asking for a Detections3D output turns 3D lifting on
+        self._lift_to_3d = any(issubclass(t.msg_type, Detections3D) for t in outputs)
+        self._lift_camera = None
+        if self._lift_to_3d:
+            # Lifting to 3d only works for bounding box outputs
+            if config.task not in ("grounding", "affordance"):
+                raise TypeError(
+                    "MLLM was given a Detections3D output, which only the "
+                    "'grounding' and 'affordance' tasks can produce boxes for. "
+                    f"Set `task` in the MLLMConfig (currently {config.task!r})."
+                )
+            # The contract check names the picture stream the lift applies to
+            self._lift_camera = resolve_lift_camera(
+                inputs,
+                depth,
+                camera_info,
+                frame=config.detections_frame,
+                component="MLLM",
+            )
+            # Intrinsics and depth only get subscribed to when they feed a lift
+            for topic in (depth, camera_info):
+                if topic and all(t.name != topic.name for t in inputs):
+                    inputs = [*inputs, topic]
 
         super().__init__(
             inputs=inputs,
@@ -120,8 +191,17 @@ class MLLM(LLM):
             Detections,
             DetectionsMultiSource,
             PointsOfInterest,
+            Detections3D,
         ]
         self._images: List[Union[np.ndarray, ROSImage, ROSCompressedImage]] = []
+
+        # Initialize detector for 3D lift and its parse calibration
+        self._init_lift_state()
+        # For capturing grounding query to name 3D boxes
+        self._lift_label: str = ""
+        # component actions and the execution step share the latched frame and
+        # the model client's request/response pair
+        self._inference_lock = threading.Lock()
 
     def custom_on_configure(self):
         # deploy local VLM if enabled
@@ -138,6 +218,7 @@ class MLLM(LLM):
             self._string_publishers: List = []
             self._poi_publishers: List = []
             self._detections_publishers: List = []
+            self._detections3d_publishers: List = []
 
             # Loop through the list of topics and categorize them
             for topic in self.out_topics:
@@ -147,6 +228,8 @@ class MLLM(LLM):
                     self._poi_publishers.append(topic.name)
                 elif topic.msg_type in [Detections, DetectionsMultiSource]:
                     self._detections_publishers.append(topic.name)
+                elif topic.msg_type is Detections3D:
+                    self._detections3d_publishers.append(topic.name)
                 else:
                     pass
 
@@ -171,6 +254,9 @@ class MLLM(LLM):
         """
         self._images = []  # image msgs for publishing
         images = []  # image msg outputs as np arrays
+        # The 3D latched msg and depth
+        self._lift_msg = None
+        self._lift_depth = None
 
         # context dict to gather all String inputs for use in system prompt
         context = {}
@@ -180,27 +266,36 @@ class MLLM(LLM):
             self.messages = []
             return None
 
-        # aggregate all inputs that are available
+        # aggregate all inputs that are available. Depth and camera_info
+        # only feed the 3D lift, not the model
         for i in self.callbacks.values():
-            msg = i.msg
-            if (item := i.get_output()) is None:
+            if (
+                i.input_topic.name in self._aux_inputs
+                or (item := i.get_output()) is None
+            ):
                 continue
+            msg = i.msg
             msg_type = i.input_topic.msg_type
             # set trigger equal to a topic with type String if trigger not found
             if msg_type == String:
-                if not query:
-                    query = item
+                query = query or item
                 context[i.input_topic.name] = item
-            elif msg_type in [DetectionsMultiSource, Detections]:
+            elif msg_type in [DetectionsMultiSource, Detections, Detections3D]:
                 context[i.input_topic.name] = item
             # get images from image topics
             if issubclass(msg_type, (Image, RGBD)):
                 images.append(item)
-                if msg:
+                if msg is not None:
                     self._images.append(msg)  # Collect all images for publishing
+                    if i.input_topic.name == self._lift_camera:
+                        self._lift_msg = msg
+                        self._lift_depth = self._depth_snapshot()
 
         if not query or not images:
             return None
+
+        # the query as given, before templates and RAG dress it up
+        self._lift_label = query
 
         # get RAG results if enabled in config and if docs retrieved
         rag_result = self._handle_rag_query(query) if self.config.enable_rag else None
@@ -307,20 +402,24 @@ class MLLM(LLM):
         :rtype: bool
         """
         try:
-            image = self._grab_frame(topic_name, timeout)
-            if image is None:
-                self.get_logger().error(
-                    "Describe: could not get image from image topic."
-                )
-                raise Exception("Could not get image from image topic.")
+            # a description is general VQA whatever task the component is
+            # configured for
+            params = self.config._get_inference_params()
+            params.pop("task", None)
+            with self._inference_lock:
+                image, _ = self._grab_frame(topic_name, timeout)
+                if image is None:
+                    self.get_logger().error(
+                        "Describe: could not get image from image topic."
+                    )
+                    raise Exception("Could not get image from image topic.")
 
-            inference_input = {
-                "query": [{"role": "user", "content": query}],
-                "images": [image],
-                **self.config._get_inference_params(),
-            }
-
-            result = self._call_inference(inference_input)
+                inference_input = {
+                    "query": [{"role": "user", "content": query}],
+                    "images": [image],
+                    **params,
+                }
+                result = self._call_inference(inference_input)
             if not result or not (output := result.get("output")):
                 self.get_logger().error("Describe: inference returned no output.")
                 raise Exception("Inference failed and returned no output.")
@@ -332,12 +431,153 @@ class MLLM(LLM):
             self.get_logger().error(f"Failed to describe: {e}")
             raise
 
-    def _grab_frame(self, topic_name: str, timeout: float) -> Optional[np.ndarray]:
+    @component_action(
+        description={
+            "type": "function",
+            "function": {
+                "name": "run_task",
+                "description": (
+                    "Run this component's configured vision task (grounding, "
+                    "pointing, affordance or trajectory) on a camera frame with a "
+                    "query, and publish the result on the component's output "
+                    "topics for downstream components: 2D boxes or points, and "
+                    "3D boxes in the detections frame when a Detections3D output "
+                    "is configured. ONLY usable when the component's `task` "
+                    "parameter is configured: call inspect_component on this "
+                    "component first to read `task` and its output topics. "
+                    "Returns a summary of what was published and, for 3D boxes, "
+                    "the located objects with metric centers, which can be passed "
+                    "on to manipulation or navigation actions."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": (
+                                "What to find or do in the image, e.g. 'the "
+                                "orange on the table'. Names the published boxes."
+                            ),
+                        },
+                        "topic_name": {
+                            "type": "string",
+                            "description": (
+                                "Image input topic to capture from. Defaults to "
+                                "the camera the 3D lift is configured on, else the "
+                                "component's first image input."
+                            ),
+                        },
+                    },
+                    "required": ["query"],
+                },
+            },
+        },
+        active=True,
+    )
+    def run_task(
+        self, query: str, topic_name: Optional[str] = None, timeout: float = 0.5
+    ) -> Dict:
+        """Run the configured task once and publish the result.
+
+        The on-demand counterpart of the streaming task mode: one frame, one
+        inference with the caller's query, published on every output topic
+        the task's result type matches, exactly as the regular execution path does.
+        Only available when `task` is configured.
+
+        :param query: What to find or do in the image; it names the results
+        :param topic_name: Image input topic to capture from. Defaults to the
+            lift camera, else the first image input
+        :param timeout: Seconds to wait for a frame. Defaults to 0.5
+        :return: Summary: task, query, the topics published on, the number of
+            results, and the located objects (label, metric center, size,
+            frame) when the 3D lift ran
+        :raises ValueError: Without a configured task, or without an output
+            of the task's result type to publish on
+        :raises RuntimeError: When no frame or no model output is available
+        """
+        task = self._task
+        if not task or task == "general":
+            raise ValueError(
+                "run_task needs a structured task configured on this component: "
+                "set `task` in MLLMConfig to one of pointing, affordance, "
+                "trajectory or grounding"
+                + (". For descriptions use `describe`" if task == "general" else "")
+            )
+        boxes = task in ("grounding", "affordance")
+        publishers = (
+            self._detections_publishers + self._detections3d_publishers
+            if boxes
+            else self._poi_publishers
+        )
+        if not publishers:
+            raise ValueError(
+                f"The '{task}' task publishes on "
+                f"{'Detections, DetectionsMultiSource or Detections3D' if boxes else 'PointsOfInterest'}"
+                " outputs and this component has none, so there is nothing to "
+                "publish on. Add one to the component's outputs."
+            )
+        topic_name = (
+            topic_name
+            or self._lift_camera
+            or next(
+                t.name
+                for t in self.in_topics
+                if issubclass(t.msg_type, (Image, RGBD))
+                and t.name not in self._aux_inputs
+            )
+        )
+
+        with self._inference_lock:
+            image, msg = self._grab_frame(topic_name, timeout)
+            if image is None:
+                raise RuntimeError(f"Could not get an image from '{topic_name}'")
+            # get the frame for downstream lifting if needed
+            self._images = [msg]
+            self._lift_msg = msg if topic_name == self._lift_camera else None
+            self._lift_depth = (
+                self._depth_snapshot() if self._lift_msg is not None else None
+            )
+            self._lift_label = query
+
+            result = self._call_inference(
+                {
+                    "query": [{"role": "user", "content": query}],
+                    "images": [image],
+                    **self.config._get_inference_params(),
+                },
+                unpack=True,
+            )
+            if not result or result.get("output") is None:
+                raise RuntimeError("Inference returned no output")
+            published, fields = self._publish_task_specific_outputs(result)
+
+        summary: Dict[str, Any] = {
+            "task": task,
+            "query": query,
+            "published": published,
+            "count": len(result["output"]),
+        }
+        if fields is not None:
+            summary["objects"] = [
+                {
+                    "label": label,
+                    "center": list(center),
+                    "size": list(size),
+                    "frame": self.config.detections_frame,
+                }
+                for label, (center, size) in zip(fields["labels"], fields["output"])
+            ]
+        return summary
+
+    def _grab_frame(
+        self, topic_name: str, timeout: float
+    ) -> Tuple[Optional[np.ndarray], Optional[Any]]:
         """Grab a single frame from an image callback.
 
         :param topic_name: Name of the image input topic
         :param timeout: Seconds to wait for a frame
-        :returns: Image as numpy array, or None on failure
+        :returns: (image as numpy array, the message it came in), both None on
+            failure. The message is what publishers and the 3D lift read
         """
         trig_dict = getattr(self, "trig_callbacks", {})
         target_callback = trig_dict.get(topic_name) or self.callbacks.get(topic_name)
@@ -345,12 +585,12 @@ class MLLM(LLM):
             self.get_logger().error(
                 f"Topic '{topic_name}' is not one of the component inputs."
             )
-            return None
+            return None, None
 
         # Check that this is an image topic
         if not issubclass(target_callback.input_topic.msg_type, (Image, RGBD)):
             self.get_logger().error(f"Topic '{topic_name}' is not an image topic.")
-            return None
+            return None, None
 
         # Save and swap callback to intercept a frame
         original_callback = target_callback._extra_callback
@@ -359,7 +599,7 @@ class MLLM(LLM):
 
         def frame_interceptor(msg, topic, output=None):
             if output is not None and not frames:
-                frames.append(output.copy())
+                frames.append((output.copy(), msg))
 
         try:
             target_callback.on_callback_execute(frame_interceptor, get_processed=True)
@@ -376,14 +616,22 @@ class MLLM(LLM):
 
         if not frames:
             self.get_logger().warning(
-                f"Describe: timeout waiting for image on '{topic_name}'."
+                f"Timeout waiting for an image on '{topic_name}'."
             )
-            return None
+            return None, None
 
         return frames[0]
 
-    def _publish_task_specific_outputs(self, result: MutableMapping) -> None:
-        """Publish outputs based on task type"""
+    def _publish_task_specific_outputs(
+        self, result: MutableMapping
+    ) -> Tuple[List[str], Optional[Dict]]:
+        """Publish outputs based on task type.
+
+        :returns: (names of the topics published on, the lifted 3D fields
+            when the 3D lift ran, else None)
+        """
+        published: List[str] = []
+        fields = None
         if self._task == "general":
             result["output"] = self._strip_think_tokens(result["output"])
             self.messages.append({"role": "assistant", "content": result["output"]})
@@ -391,36 +639,94 @@ class MLLM(LLM):
                 self.publishers_dict[pub_name].publish(
                     **result, time_stamp=self.get_ros_time()
                 )
-        elif self._task == "pointing":
+                published.append(pub_name)
+        elif self._task in ("pointing", "trajectory"):
             for pub_name in self._poi_publishers:
                 self.publishers_dict[pub_name].publish(
                     **result,
                     image=self._images[0],  # POI msg takes only one image
                     time_stamp=self.get_ros_time(),
                 )
-        elif self._task == "grounding":
-            result["output"] = [
-                {"bboxes": result["output"], "labels": [], "scores": []}
-            ]
+                published.append(pub_name)
+        elif self._task in ("grounding", "affordance"):
+            # use the query to label the boxes
+            boxes = {
+                "bboxes": result["output"],
+                "labels": [self._lift_label] * len(result["output"]),
+                "scores": [],
+            }
             for pub_name in self._detections_publishers:
-                self.publishers_dict[pub_name].publish(
-                    **result, images=self._images, time_stamp=self.get_ros_time()
+                publisher = self.publishers_dict[pub_name]
+                # NOTE: The model grounds against the image set as a whole, so there
+                # is one set of boxes: a multi source topic takes it as a list
+                # of one, a single source topic takes it on its own
+                multi = issubclass(
+                    publisher.output_topic.msg_type, DetectionsMultiSource
                 )
-        elif self._task == "affordance":
-            result["output"] = [
-                {"bboxes": result["output"], "labels": [], "scores": []}
-            ]
-            for pub_name in self._detections_publishers:
-                self.publishers_dict[pub_name].publish(
-                    **result, images=self._images, time_stamp=self.get_ros_time()
-                )
-        elif self._task == "trajectory":
-            for pub_name in self._poi_publishers:
-                self.publishers_dict[pub_name].publish(
-                    **result,
-                    image=self._images[0],  # POI msg takes only one image
+                publisher.publish(
+                    [boxes] if multi else boxes,
+                    images=self._images if multi else next(iter(self._images), None),
                     time_stamp=self.get_ros_time(),
                 )
+                published.append(pub_name)
+            fields = self._publish_grounded_3d(result["output"])
+            if fields is not None:
+                published.extend(self._detections3d_publishers)
+        return published, fields
+
+    def _publish_grounded_3d(self, pixels: List) -> Optional[Dict]:
+        """Lift the grounded boxes into metric space and publish Detections3D.
+
+        :returns: The published message fields (centers, sizes, labels ...),
+            or None when nothing could be published
+        """
+        if not self._detections3d_publishers:
+            return None
+        from ..utils.perception3d import (
+            boxes_from_detections,
+            detections_to_message_fields,
+        )
+
+        if self._lift_msg is None:
+            self.log_once(
+                "no_lift_frame",
+                f"No picture was captured on '{self._lift_camera}', so the "
+                "grounded boxes cannot be placed in space.",
+            )
+            return None
+
+        if not pixels:
+            fields = detections_to_message_fields([])
+        else:
+            detector, depth, camera_position = self._depth_detector()
+            if detector is None:
+                return None
+            # the color image, which an RGBD frame carries nested
+            color = getattr(self._lift_msg, "rgb", self._lift_msg)
+            lifted = self._trusted(
+                boxes_from_detections(
+                    detector,
+                    depth,
+                    pixels,
+                    image_size=(color.width, color.height),
+                    camera_position=camera_position,
+                )
+            )
+            # Every grounded box answers the same query, thus the same name
+            fields = detections_to_message_fields(
+                lifted,
+                labels=[self._lift_label] * len(pixels),
+                boxes_2d=pixels,
+            )
+
+        for pub_name in self._detections3d_publishers:
+            self.publishers_dict[pub_name].publish(
+                fields["output"],
+                **{k: v for k, v in fields.items() if k != "output"},
+                frame_id=self.config.detections_frame,
+                time_stamp=self.get_ros_time(),
+            )
+        return fields
 
     def _execution_step(self, *args, **kwargs):
         """_execution_step.
@@ -441,22 +747,25 @@ class MLLM(LLM):
             time_stamp = self.get_ros_time().sec
             self.get_logger().debug(f"Sending at {time_stamp}")
 
-        # create inference input
-        inference_input = self._create_input(*args, **kwargs)
-        # call model inference
-        if not inference_input:
-            self.get_logger().warning("Input not received, not calling model inference")
-            return
+        with self._inference_lock:
+            # create inference input
+            inference_input = self._create_input(*args, **kwargs)
+            # call model inference
+            if not inference_input:
+                self.get_logger().warning(
+                    "Input not received, not calling model inference"
+                )
+                return
 
-        # conduct inference
-        unpack = True if self._task != "general" else False
-        result = self._call_inference(inference_input, unpack=unpack)
+            # conduct inference
+            unpack = True if self._task != "general" else False
+            result = self._call_inference(inference_input, unpack=unpack)
 
-        # Publish results to output topics in accordance with the tasks
-        if result:
-            self._publish_task_specific_outputs(result)
-            if result.get("thinking"):
-                self.get_logger().info(f"<think>{result['thinking']}</think>")
+            # Publish results to output topics in accordance with the tasks
+            if result:
+                self._publish_task_specific_outputs(result)
+                if result.get("thinking"):
+                    self.get_logger().info(f"<think>{result['thinking']}</think>")
 
     def _warmup(self):
         """Warm up and stat check"""

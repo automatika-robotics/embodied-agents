@@ -85,6 +85,28 @@ class Component(BaseComponent):
         if self.run_type is ComponentRunType.EVENT:
             self.activate_all_triggers()
 
+    def init_variables(self):
+        """
+        Partition trigger inputs out of the callbacks dict, at activation.
+
+        This runs AFTER a robot plugin adapted the callbacks, so the
+        objects moved into trig_callbacks are the adapted ones. Idempotent
+        across reactivations.
+        """
+        super().init_variables()
+        trigger_names = getattr(self, "_trigger_topic_names", None)
+        if not trigger_names:
+            return
+        self.trig_callbacks = getattr(self, "trig_callbacks", {})
+        for name in trigger_names:
+            if name in self.callbacks:
+                self.trig_callbacks[name] = self.callbacks.pop(name)
+            elif name not in self.trig_callbacks:
+                self.get_logger().error(
+                    f"Trigger input '{name}' is no longer among this "
+                    "component's callbacks, so it will never fire."
+                )
+
     def create_all_subscribers(self):
         """
         Override to handle trigger topics and fixed inputs.
@@ -99,8 +121,17 @@ class Component(BaseComponent):
             )  # second condition is necessary if being triggered by events
             else self.callbacks.values()
         )
+        # NOTE: Skip creating subscribers for plugin topics (external), similar
+        # to upstream
+        external = getattr(self, "_external_topics", set())
         for callback in all_callbacks:
+            # Attach transform provider similar to upstream
+            self._attach_transform_provider(callback.input_topic.name, callback)
+            if callback.input_topic.name in external:
+                # fed by the robot plugin bus, not by ROS
+                continue
             callback.set_node_name(self.node_name)
+            # Skip creating subscribers for fixed topics
             if not hasattr(callback.input_topic, "fixed"):
                 callback.set_subscriber(self._add_ros_subscriber(callback))
 
@@ -121,7 +152,8 @@ class Component(BaseComponent):
         """
         self.get_logger().info("DESTROYING ALL SUBSCRIBERS")
         all_callbacks = (
-            list(self.callbacks.values()) + list(self.trig_callbacks.values())
+            list(self.callbacks.values())
+            + list(getattr(self, "trig_callbacks", {}).values())
             if self.run_type is ComponentRunType.EVENT
             else self.callbacks.values()
         )
@@ -131,19 +163,18 @@ class Component(BaseComponent):
 
     def _trigger(self, trigger: Union[Topic, List[Topic], float, Event, None]) -> None:
         """
-        Set component trigger
+        Set component triggers. Trigger inputs are only RECORDED here and the partition
+        into trig_callbacks happens at activation, AFTER a robot plugin had its
+        chance to adapt the callbacks.
         """
         if isinstance(trigger, list):
             self.run_type = ComponentRunType.EVENT
-            self.trig_callbacks = {}
             for t in trigger:
                 if t.name not in self.callbacks:
                     raise TypeError(
                         f"Invalid configuration for component trigger {t.name} - A trigger needs to be one of the inputs already defined in component inputs."
                     )
-                self.trig_callbacks[t.name] = self.callbacks[t.name]
-                # remove trigger inputs from self.callbacks
-                del self.callbacks[t.name]
+            self._trigger_topic_names = [t.name for t in trigger]
 
         elif isinstance(trigger, Topic):
             if trigger.name not in self.callbacks:
@@ -151,8 +182,7 @@ class Component(BaseComponent):
                     f"Invalid configuration for component trigger {trigger.name} - A trigger needs to be one of the inputs already defined in component inputs."
                 )
             self.run_type = ComponentRunType.EVENT
-            self.trig_callbacks = {trigger.name: self.callbacks[trigger.name]}
-            del self.callbacks[trigger.name]
+            self._trigger_topic_names = [trigger.name]
 
         elif isinstance(trigger, Event):
             self.run_type = ComponentRunType.EVENT
@@ -302,6 +332,17 @@ class Component(BaseComponent):
         """
         error_msg = super()._replace_input_topic(topic_name, new_name, msg_type)
         if not error_msg:
+            # replace in the trig topic name if called before activation and topic
+            # is a trigger
+            names = getattr(self, "_trigger_topic_names", None)
+            normalized_old = (
+                topic_name[1:] if topic_name.startswith("/") else topic_name
+            )
+            if names and normalized_old in names:
+                normalized_new = (
+                    new_name[1:] if new_name.startswith("/") else new_name
+                )
+                names[names.index(normalized_old)] = normalized_new
             return
 
         # topic to be replaced is not found in callbacks -> check in trigger callbacks
@@ -309,11 +350,13 @@ class Component(BaseComponent):
             topic_name[1:] if topic_name.startswith("/") else topic_name
         )
 
-        if topic_name not in self.trig_callbacks:
+        # trig_callbacks only exists once init_variables ran at activation
+        trig_callbacks = getattr(self, "trig_callbacks", None)
+        if not trig_callbacks or normalized_topic_name not in trig_callbacks:
             error_msg = f"Topic {topic_name} is not found in Component inputs"
             return error_msg
 
-        old_callback = self.trig_callbacks[normalized_topic_name]
+        old_callback = trig_callbacks[normalized_topic_name]
 
         # Create New Topic/Callback
         try:
@@ -336,7 +379,7 @@ class Component(BaseComponent):
 
         # Update callbacks dictionary
         self.trig_callbacks.pop(normalized_topic_name)
-        self.trig_callbacks[new_name] = new_callback
+        self.trig_callbacks[new_topic.name] = new_callback
 
         # update the internal lists
         old_topic = old_callback.input_topic

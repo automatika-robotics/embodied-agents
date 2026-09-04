@@ -11,6 +11,7 @@ from ..ros import (
     Event,
     Topic,
     Detections,
+    Detections3D,
     DetectionsMultiSource,
     MemLayer,
     ActionPhase,
@@ -67,6 +68,7 @@ class Memory(Component):
         ``is_internal_state=True`` are written via ``add_body_state`` and
         retrieved through the ``body_status`` tool; all other layers are
         perception layers retrieved through ``semantic_search`` and friends.
+        A layer subscribed to a Detections3D topic is stored per OBJECT.
     :type layers: list[MemLayer]
     :param position: Odometry topic providing the robot's current position.
     :type position: Topic
@@ -131,7 +133,13 @@ class Memory(Component):
         self.config: MemoryConfig = config or MemoryConfig()
         self.allowed_inputs = {
             "Required": [Odometry],
-            "Optional": [String, StreamingString, Detections, DetectionsMultiSource],
+            "Optional": [
+                String,
+                StreamingString,
+                Detections,
+                Detections3D,
+                DetectionsMultiSource,
+            ],
         }
         self.model_client = model_client
         self.embedding_client = embedding_client
@@ -366,6 +374,11 @@ class Memory(Component):
         ts = float(time_stamp)
 
         for name, layer in self.layers_dict.items():
+            if not layer.is_internal_state and issubclass(
+                layer.subscribes_to.msg_type, Detections3D
+            ):
+                self._store_detections_3d(name, ts)
+                continue
             raw = self.callbacks[name].get_output()
             if raw is None:
                 continue
@@ -391,6 +404,41 @@ class Memory(Component):
                     layer_name=name,
                     timestamp=ts,
                 )
+
+    def _store_detections_3d(self, name: str, timestamp: float) -> None:
+        """Store one observation per 3D box, at the OBJECT's position.
+
+        3D boxes carry metric centers, so each observation is placed where
+        the object is rather than where the robot stood. The layer's boxes must
+        be published in the same world frame as the position topic by setting the
+        3D lift's ``detections_frame`` config param.
+        """
+        msg = self.callbacks[name].get_output(get_msg=True)
+        if msg is None or not msg.boxes:
+            # absence is not an observation worth an embedding
+            return
+        for index, box in enumerate(msg.boxes):
+            center = box.center.position
+            self.memory.add(
+                text=msg.labels[index] if index < len(msg.labels) else "object",
+                x=float(center.x),
+                y=float(center.y),
+                z=float(center.z),
+                layer_name=name,
+                timestamp=timestamp,
+                source_type="detection_3d",
+                confidence=(
+                    float(msg.scores[index]) if index < len(msg.scores) else 1.0
+                ),
+                metadata={
+                    "size": [
+                        float(box.size.x),
+                        float(box.size.y),
+                        float(box.size.z),
+                    ],
+                    "frame": msg.header.frame_id,
+                },
+            )
 
     def _execution_step(self, **kwargs):
         """Periodic execution: read position and store layer data."""

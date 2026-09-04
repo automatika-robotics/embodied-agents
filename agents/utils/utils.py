@@ -8,6 +8,7 @@ from enum import Enum
 from io import BytesIO
 from pathlib import Path
 from typing import (
+    Any,
     List,
     Dict,
     Literal,
@@ -27,7 +28,6 @@ from attrs import Attribute
 from rclpy.logging import get_logger
 from jinja2 import Environment, FileSystemLoader
 from jinja2.environment import Template
-from .pluralize import pluralize
 
 
 def build_url(
@@ -127,29 +127,6 @@ def draw_points_2d(img: np.ndarray, points: np.ndarray, radius: int = 3) -> np.n
         cv2.circle(img, (int(x), int(y)), radius, (255, 0, 0), -1)  # red filled circle
 
     return img
-
-
-def create_detection_context(obj_list: Optional[List]) -> str:
-    """
-    Creates a context prompt based on detections.
-    :param      detections:  The detections
-    :type       detections:  str
-    :returns:   Context string
-    :rtype:     str
-    """
-    if not obj_list:
-        return ""
-    context_list = []
-    for obj_class in set(obj_list):
-        obj_count = obj_list.count(obj_class)
-        if obj_count > 1:
-            context_list.append(f"{str(obj_count)} {pluralize(obj_class)}")
-        else:
-            context_list.append(f"{str(obj_count)} {obj_class}")
-
-    if len(obj_list) > 1:
-        return f"{', '.join(context_list)}"
-    return f"{context_list[0]}"
 
 
 def get_prompt_template(template: Union[str, Path]) -> Template:
@@ -555,6 +532,30 @@ def load_model_repo(
         raise
 
     return str(model_dir)
+
+
+def get_frame_id(msg: Any) -> str:
+    """Frame a ROS message was captured in, empty when it does not say.
+
+    :param msg: Any ROS message, with or without a header, or a decoded
+        container carrying its own `frame_id` such as PointCloudData
+    :rtype: str
+    """
+    header = getattr(msg, "header", None)
+    return getattr(header, "frame_id", None) or getattr(msg, "frame_id", "") or ""
+
+
+def get_stamp_secs(msg: Any) -> float:
+    """Capture time of a ROS message in seconds, 0 when it does not say.
+
+    :param msg: Any ROS message, with or without a header, or a decoded
+        container carrying its own `timestamp` such as PointCloudData
+    :rtype: float
+    """
+    stamp = getattr(getattr(msg, "header", None), "stamp", None)
+    if stamp is None:
+        return float(getattr(msg, "timestamp", 0.0))
+    return stamp.sec + stamp.nanosec * 1e-9
 
 
 def flatten(xs):
