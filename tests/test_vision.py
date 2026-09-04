@@ -851,6 +851,105 @@ class TestLiftingWithAPointCloud(_SyntheticCamera):
         assert center[2] == pytest.approx(self.PATCH_DEPTH_M, abs=0.02)
 
 
+class TestLiftingThroughAPluginRemap(_SyntheticCamera):
+    """The M20 shape: the depth is a LiDAR cloud a robot plugin serves over a
+    ROS topic of its own, declared in the recipe under the plugin's key."""
+
+    def test_the_cloud_reaches_the_lift_under_the_recipe_name(
+        self, rclpy_init, mock_model_client
+    ):
+        import time
+
+        import rclpy
+        from ros_sugar.robot import (
+            Feedback,
+            PluginMetadata,
+            RobotPlugin,
+            RosTopicTransport,
+        )
+        from sensor_msgs.msg import CameraInfo as ROSCameraInfo
+        from sensor_msgs.msg import PointCloud2 as ROSPointCloud2
+        from sensor_msgs.msg import PointField
+
+        from agents.ros import PointCloud2
+
+        class _LidarPlugin(RobotPlugin):
+            def __init__(self):
+                self.metadata = PluginMetadata(name="LidarBot", vendor="test")
+                transport = RosTopicTransport(
+                    "lidar_front", topic_name="rs/front/points", msg_type=PointCloud2
+                )
+                self.transports = {"lidar_front": transport}
+                self.feedbacks = {
+                    "lidar_front": Feedback(
+                        key="lidar_front", msg_type=PointCloud2, transport=transport
+                    )
+                }
+
+        type(mock_model_client).model_type = PropertyMock(return_value="VisionModel")
+        vision = Vision(
+            inputs=[Topic(name="image", msg_type="Image")],
+            outputs=[Topic(name="d3", msg_type="Detections3D")],
+            depth=Topic(name="lidar_front", msg_type="PointCloud2", use_plugin=True),
+            camera_info=Topic(name="camera_info", msg_type="CameraInfo"),
+            model_client=mock_model_client,
+            config=VisionConfig(detections_frame="cam"),
+            component_name="test_lift_plugin",
+        )
+        vision.rclpy_init_node()
+        mock_component_internals(vision)
+        vision._robot_plugin = _LidarPlugin()
+        try:
+            # what on_configure does, in its order
+            vision._use_robot_plugin()
+            vision.init_variables()
+            vision.create_all_subscribers()
+            subscriber = vision.callbacks["lidar_front"]._subscriber
+            assert subscriber.topic_name == "/rs/front/points"
+
+            # the plugin's driver publishes the cloud on its own topic
+            cloud = TestLiftingWithAPointCloud._cloud_scene()
+            msg = ROSPointCloud2()
+            msg.header.frame_id = "cam"
+            msg.height, msg.width = 1, cloud.width
+            msg.fields = [
+                PointField(name=n, offset=o, datatype=PointField.FLOAT32, count=1)
+                for n, o in (("x", 0), ("y", 4), ("z", 8))
+            ]
+            msg.point_step, msg.row_step = 16, 16 * cloud.width
+            msg.data = cloud.data.tobytes()
+            msg.is_dense = True
+            publisher = vision.create_publisher(ROSPointCloud2, "rs/front/points", 10)
+            deadline = time.time() + 3.0
+            while vision.callbacks["lidar_front"].msg is None and time.time() < deadline:
+                publisher.publish(msg)
+                rclpy.spin_once(vision, timeout_sec=0.05)
+            assert vision.callbacks["lidar_front"].msg is not None
+
+            # the picture and its calibration, as the camera delivers them
+            vision.callbacks["image"].callback(
+                _image("cam", width=self.WIDTH, height=self.HEIGHT)
+            )
+            info = ROSCameraInfo()
+            info.header.frame_id = "cam"
+            info.width, info.height = self.WIDTH, self.HEIGHT
+            cx, cy = self.WIDTH / 2, self.HEIGHT / 2
+            info.k = [self.FX, 0.0, cx, 0.0, self.FY, cy, 0.0, 0.0, 1.0]
+            info.p = [self.FX, 0.0, cx, 0.0, 0.0, self.FY, cy, 0.0, 0.0, 0.0, 1.0, 0.0]
+            vision.callbacks["camera_info"].callback(info)
+            mock_model_client.inference.return_value = self._detections()
+
+            vision._execution_step()
+
+            boxes, published = self._published(vision)
+            assert published["labels"] == ["orange"] and published["frame_id"] == "cam"
+            (center, size), = boxes
+            assert center[2] == pytest.approx(self.PATCH_DEPTH_M, abs=0.02)
+            assert size[0] == pytest.approx(40 * self.PATCH_DEPTH_M / self.FX, abs=0.01)
+        finally:
+            vision.destroy_node()
+
+
 class TestLiftingFromRGBD(_SyntheticCamera):
     """A RealSense publishes everything lifting needs in one message."""
 

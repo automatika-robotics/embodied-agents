@@ -60,15 +60,18 @@ class DepthLiftMixin:
             )
             return None
 
-        # For Image. Captured at the same instant, check for age nonetheless
-        age = abs(get_stamp_secs(self._lift_msg) - get_stamp_secs(depth))
+        # Captured at the same instant, check for age nonetheless
+        picture_stamp = get_stamp_secs(self._lift_msg)
+        depth_stamp = get_stamp_secs(depth)
+        age = abs(picture_stamp - depth_stamp)
         if age > self.config.max_depth_age:
-            self.log_once(
-                "depth_age",
+            older = "depth" if depth_stamp < picture_stamp else "picture"
+            self.get_logger().warning(
                 f"Depth on '{self.depth_topic.name}' is {age:.2f}s away from the "
-                f"picture it would be paired with, more than max_depth_age "
-                f"({self.config.max_depth_age}s), so these detections are not "
-                "being published.",
+                f"picture it would be paired with (picture stamped "
+                f"{picture_stamp:.3f}, depth {depth_stamp:.3f}, the {older} is "
+                f"older), more than max_depth_age ({self.config.max_depth_age}s), "
+                "so these detections are not being published."
             )
             return None
         return depth
