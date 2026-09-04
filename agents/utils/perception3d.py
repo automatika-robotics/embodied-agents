@@ -170,7 +170,8 @@ def prepare_depth(
         millimeters from float meters when the dtype alone is ambiguous
     :param scale: Multiplier from the image's units to millimeters,
         overriding what the encoding and dtype imply
-    :returns: Depth in millimeters as a column major uint16 array
+    :returns: Depth in millimeters as a C-contiguous uint16 array, the
+        layout kompass-core reads without a copy
     """
     depth = np.asarray(depth)
     if depth.ndim == 3 and depth.shape[2] == 1:
@@ -191,7 +192,7 @@ def prepare_depth(
         depth = np.nan_to_num(depth, nan=0.0, posinf=0.0, neginf=0.0)
 
     depth = np.clip(depth * scale, 0, np.iinfo(np.uint16).max)
-    return np.require(depth, dtype=np.uint16, requirements=["F"])
+    return np.require(depth, dtype=np.uint16, requirements=["C"])
 
 
 def depth_validity(
@@ -303,21 +304,15 @@ def set_cloud_sensor(
 def _pixel_boxes(
     boxes_2d: Sequence[Sequence[float]], image_size: Tuple[int, int]
 ) -> List[Any]:
-    """The 2D boxes as detector inputs, each labelled with its index."""
+    """The 2D boxes as detector inputs."""
     from kompass_cpp.types import Bbox2D
 
     inputs = []
-    for index, box in enumerate(boxes_2d):
+    for box in boxes_2d:
         x1, y1, x2, y2 = (float(value) for value in box)
         corner = np.array([min(x1, x2), min(y1, y2)], dtype=np.int32)
         extent = np.array([abs(x2 - x1), abs(y2 - y1)], dtype=np.int32)
-        # The detector carries the label through untouched
-        detection = Bbox2D(
-            top_left_corner=corner,
-            size=extent,
-            timestamp=0.0,
-            label=str(index),
-        )
+        detection = Bbox2D(top_left_corner=corner, size=extent, timestamp=0.0)
         detection.set_img_size(np.array(image_size, dtype=np.int32))
         inputs.append(detection)
     return inputs
@@ -335,7 +330,7 @@ def boxes_from_detections(
 
     Detections whose pixels carry no usable depth cannot be placed in space
     and are left out, so each returned box records which detection it came
-    from rather than relying on position.
+    from (the detector's ``source_index``).
 
     :param detector: Detector from `make_detector`
     :param depth: Depth image from `prepare_depth`, or a point cloud as
@@ -392,12 +387,7 @@ def boxes_from_detections(
     )
     boxes = []
     for box in detected:
-        try:
-            index = int(box.label)
-        except (TypeError, ValueError):
-            continue
-        if not 0 <= index < len(boxes_2d):
-            continue
+        index = box.source_index
         center = np.asarray(box.center, dtype=np.float64)
         size = np.asarray(box.size, dtype=np.float64)
         if camera is not None:

@@ -81,10 +81,11 @@ class TestPrepareDepth:
         assert depth[0, 0] == 0 and depth[0, 1] == 0 and depth[1, 0] == 0
         assert depth[1, 1] == 1000
 
-    def test_layout_is_column_major(self):
-        """Row major gives the same answer but is copied element by element."""
-        depth = prepare_depth(np.ascontiguousarray(scene()))
-        assert depth.flags["F_CONTIGUOUS"]
+    def test_layout_is_row_major(self):
+        """kompass-core takes a C-contiguous view without copying and refuses
+        any other layout rather than converting it."""
+        depth = prepare_depth(np.asfortranarray(scene()))
+        assert depth.flags["C_CONTIGUOUS"]
 
     def test_single_channel_image_is_accepted(self):
         depth = prepare_depth(np.full((4, 4, 1), 1.0, dtype=np.float32))
