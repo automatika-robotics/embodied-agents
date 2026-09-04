@@ -58,47 +58,55 @@ def cloud_scene(
 
 
 class TestPrepareDepth:
-    def test_float_meters_become_millimeters(self):
-        depth = prepare_depth(np.full((4, 4), 1.5, dtype=np.float32))
-        assert depth.dtype == np.uint16
-        assert depth[0, 0] == 1500
+    def test_float_meters_pass_through(self):
+        raw = np.full((4, 4), 1.5, dtype=np.float32)
+        depth, factor = prepare_depth(raw)
+        assert np.shares_memory(depth, raw) and depth.dtype == np.float32
+        assert factor == 1.0
 
-    def test_integer_millimeters_are_kept(self):
-        depth = prepare_depth(np.full((4, 4), 1500, dtype=np.uint16), encoding="16UC1")
-        assert depth[0, 0] == 1500
+    def test_integer_millimeters_pass_through(self):
+        raw = np.full((4, 4), 1500, dtype=np.uint16)
+        depth, factor = prepare_depth(raw, encoding="16UC1")
+        assert np.shares_memory(depth, raw) and depth.dtype == np.uint16
+        assert factor == 1e-3
 
     def test_encoding_wins_over_dtype(self):
-        """A float image already in millimeters must not be scaled again."""
-        depth = prepare_depth(np.full((4, 4), 1500.0, dtype=np.float32), encoding="mono16")
-        assert depth[0, 0] == 1500
+        """kompass-core reads float pixels as meters, so a float image in
+        millimeters is the one case converted on our side."""
+        depth, factor = prepare_depth(
+            np.full((4, 4), 1500.0, dtype=np.float32), encoding="mono16"
+        )
+        assert depth[0, 0] == pytest.approx(1.5) and factor == 1.0
 
-    def test_explicit_scale_overrides_everything(self):
-        depth = prepare_depth(np.full((4, 4), 15, dtype=np.uint16), scale=100.0)
-        assert depth[0, 0] == 1500
+    def test_explicit_scale_sets_the_factor(self):
+        """A ToF camera publishing tenths of a millimeter."""
+        raw = np.full((4, 4), 15000, dtype=np.uint16)
+        depth, factor = prepare_depth(raw, scale=0.1)
+        assert np.shares_memory(depth, raw)
+        assert 15000 * factor == pytest.approx(1.5)
 
-    def test_invalid_pixels_become_no_reading(self):
+    def test_invalid_pixels_are_left_for_the_detector(self):
         raw = np.array([[np.nan, np.inf], [-np.inf, 1.0]], dtype=np.float32)
-        depth = prepare_depth(raw)
-        assert depth[0, 0] == 0 and depth[0, 1] == 0 and depth[1, 0] == 0
-        assert depth[1, 1] == 1000
+        depth, _ = prepare_depth(raw)
+        assert np.isnan(depth[0, 0]) and np.isinf(depth[0, 1])
 
     def test_layout_is_row_major(self):
         """kompass-core takes a C-contiguous view without copying and refuses
         any other layout rather than converting it."""
-        depth = prepare_depth(np.asfortranarray(scene()))
+        depth, _ = prepare_depth(np.asfortranarray(scene()))
         assert depth.flags["C_CONTIGUOUS"]
 
+    def test_wider_floats_narrow_to_what_the_detector_takes(self):
+        depth, _ = prepare_depth(np.full((4, 4), 1.5, dtype=np.float64))
+        assert depth.dtype == np.float32
+
     def test_single_channel_image_is_accepted(self):
-        depth = prepare_depth(np.full((4, 4, 1), 1.0, dtype=np.float32))
+        depth, _ = prepare_depth(np.full((4, 4, 1), 1.0, dtype=np.float32))
         assert depth.shape == (4, 4)
 
     def test_non_2d_image_raises(self):
         with pytest.raises(ValueError, match="2D"):
             prepare_depth(np.zeros((4, 4, 3), dtype=np.float32))
-
-    def test_values_beyond_the_range_are_capped(self):
-        depth = prepare_depth(np.full((2, 2), 100.0, dtype=np.float32))
-        assert depth[0, 0] == np.iinfo(np.uint16).max
 
 
 class TestMessageFields:
@@ -166,10 +174,10 @@ class TestLifting:
     def _lift(self, boxes_2d, depth=None, camera_position=None, **kwargs):
         from agents.utils.perception3d import boxes_from_detections, make_detector
 
-        detector = make_detector(self._intrinsics(), **kwargs)
-        depth_mm = prepare_depth(scene() if depth is None else depth)
+        depth, factor = prepare_depth(scene() if depth is None else depth)
+        detector = make_detector(self._intrinsics(), depth_factor=factor, **kwargs)
         return boxes_from_detections(
-            detector, depth_mm, boxes_2d, camera_position=camera_position
+            detector, depth, boxes_2d, camera_position=camera_position
         )
 
     def test_patch_is_placed_at_its_distance_and_size(self):
@@ -183,6 +191,16 @@ class TestLifting:
         assert box.size[0] == pytest.approx(40 * PATCH_DEPTH_M / FX, abs=0.01)
         assert box.size[1] == pytest.approx(20 * PATCH_DEPTH_M / FY, abs=0.01)
         assert box.validity == 1.0
+
+    def test_pixels_without_a_reading_do_not_reach_the_detector(self):
+        """Drivers mark no-return pixels as NaN or infinity; both must fall
+        out of the detector's range check rather than poison the median."""
+        depth = scene()
+        depth[40:50, 100:140] = np.nan
+        depth[50:52, 100:140] = np.inf
+        (box,) = self._lift([PATCH], depth=depth)
+        assert box.center[2] == pytest.approx(PATCH_DEPTH_M, abs=0.02)
+        assert box.validity == pytest.approx(0.4, abs=0.1)
 
     def test_validity_is_the_share_of_the_box_with_depth(self):
         """Half the patch loses its readings, so the box rests on half its

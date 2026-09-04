@@ -109,11 +109,10 @@ class DepthLiftMixin:
         """The 3D detector for the lifted camera, and the depth to run it on.
 
         :returns: (detector, depth, camera position in the detections frame),
-            all None when this tick cannot be lifted. The depth is an image in
-            millimeters or a point cloud, whichever the source is. The camera
-            position is also None when the detections stay in the camera's
-            own frame, where the surface-bias correction it feeds does not
-            apply
+            all None when this tick cannot be lifted. The depth is an image as
+            the detector reads it or a point cloud, whichever the source is.
+            The camera position is also None when the detections stay in the
+            camera's own frame.
         """
         depth_msg = self._depth_for()
         if depth_msg is None:
@@ -170,6 +169,11 @@ class DepthLiftMixin:
         if cloud is not None and mount is None:
             return None, None, None
 
+        # Cloud's points are meters. An image's units come from its encoding
+        depth, factor = (
+            (cloud, None) if cloud is not None else self._depth_image(depth_msg)
+        )
+
         # Rebuilding is cheap, so the detector is kept only until something it
         # was built from moves
         key = (
@@ -181,6 +185,7 @@ class DepthLiftMixin:
             pose,
             mount,
             None if cloud is None else cloud.x_field_datatype,
+            factor,
         )
         if key != self._detector_key:
             self._detector = make_detector(
@@ -188,11 +193,11 @@ class DepthLiftMixin:
                 translation=pose[0],
                 rotation=pose[1],
                 depth_range=(self.config.min_depth, self.config.max_depth),
+                depth_factor=factor,
             )
             if cloud is not None:
                 set_cloud_sensor(self._detector, *mount, cloud.x_field_datatype)
             self._detector_key = key
-        depth = cloud if cloud is not None else self._depth_image_mm(depth_msg)
         return self._detector, depth, pose[0]
 
     def _pose_in(self, frame: str, target: str, what: str):
@@ -216,8 +221,8 @@ class DepthLiftMixin:
             return None
         return tuple(listener.translation), tuple(listener.rotation)
 
-    def _depth_image_mm(self, depth_msg):
-        """A depth image decoded into millimeters"""
+    def _depth_image(self, depth_msg):
+        """A depth image as the detector reads it, and its meters per unit"""
         # Check if the streams encoding changed (unlikely)
         if depth_msg.encoding != self._depth_encoding_key:
             self._depth_encoding = process_encoding(depth_msg.encoding)

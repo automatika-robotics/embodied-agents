@@ -29,8 +29,6 @@ _KOMPASS_INSTALL_HINT = (
 
 # Depth encodings carrying integer millimeters rather than float meters
 _MILLIMETER_ENCODINGS = {"16uc1", "mono16"}
-
-# kompass-core works in millimeters
 _METERS_TO_MM = 1000.0
 
 
@@ -158,21 +156,22 @@ def prepare_depth(
     depth: np.ndarray,
     encoding: Optional[str] = None,
     scale: Optional[float] = None,
-) -> np.ndarray:
-    """Put a depth image in the layout kompass-core reads.
+) -> Tuple[np.ndarray, float]:
+    """Put a depth image in the form kompass-core reads without copying.
 
-    Depth arrives either as float meters or as integer millimeters depending
-    on the camera, and invalid pixels are marked as 0, NaN or infinity
-    depending on the driver. All of them become a plain 0, which is what
-    kompass-core treats as no reading.
+    kompass-core takes uint16 pixels scaled to meters by a factor, or float32
+    pixels that are meters already, from a C-contiguous 2D array. Integer
+    millimeters and float meters, what cameras publish, pass through
+    untouched. Invalid pixels, 0, NaN or infinity depending on the driver,
+    fall out of the detector's depth range check, so they are left alone.
 
     :param depth: Depth image as (H, W) or (H, W, 1)
     :param encoding: ROS encoding of the depth image, used to tell integer
         millimeters from float meters when the dtype alone is ambiguous
     :param scale: Multiplier from the image's units to millimeters,
         overriding what the encoding and dtype imply
-    :returns: Depth in millimeters as a C-contiguous uint16 array, the
-        layout kompass-core reads without a copy
+    :returns: The image for the detector, and its meters per unit for
+        :func:`make_detector`
     """
     depth = np.asarray(depth)
     if depth.ndim == 3 and depth.shape[2] == 1:
@@ -180,20 +179,24 @@ def prepare_depth(
     if depth.ndim != 2:
         raise ValueError(f"Depth image must be 2D, got shape {depth.shape}")
 
+    floating = np.issubdtype(depth.dtype, np.floating)
     if scale is None:
-        if encoding and encoding.lower() in _MILLIMETER_ENCODINGS:
-            scale = 1.0
-        elif np.issubdtype(depth.dtype, np.floating):
-            scale = _METERS_TO_MM
-        else:
-            scale = 1.0
+        in_millimeters = (encoding and encoding.lower() in _MILLIMETER_ENCODINGS) or (
+            not floating
+        )
+        scale = 1.0 if in_millimeters else _METERS_TO_MM
+    factor = scale / _METERS_TO_MM
 
-    if np.issubdtype(depth.dtype, np.floating):
-        # NaN for no return, infinity for out of range: both mean no reading
-        depth = np.nan_to_num(depth, nan=0.0, posinf=0.0, neginf=0.0)
-
-    depth = np.clip(depth * scale, 0, np.iinfo(np.uint16).max)
-    return np.require(depth, dtype=np.uint16, requirements=["C"])
+    if floating:
+        # kompass-core reads float pixels as meters, so a float image in other
+        # units gets converted
+        if factor != 1.0:
+            depth = depth * np.float32(factor)
+            factor = 1.0
+        return np.require(depth, dtype=np.float32, requirements=["C"]), factor
+    if depth.dtype != np.uint16:
+        depth = np.clip(depth, 0, np.iinfo(np.uint16).max)
+    return np.require(depth, dtype=np.uint16, requirements=["C"]), factor
 
 
 def make_detector(
@@ -201,6 +204,7 @@ def make_detector(
     translation: Optional[Sequence[float]] = None,
     rotation: Optional[Sequence[float]] = None,
     depth_range: Tuple[float, float] = (0.1, 5.0),
+    depth_factor: Optional[float] = None,
 ) -> Any:
     """Build a depth detector for one camera.
 
@@ -214,6 +218,9 @@ def make_detector(
     :param rotation: Camera orientation in the target frame as (x, y, z, w),
         identity if unset
     :param depth_range: Usable range of the sensor in meters
+    :param depth_factor: Meters per unit of the depth images handed over, from
+        `prepare_depth`; millimeters if unset. Point clouds carry meters
+        and ignore it
     :returns: kompass_core DepthDetector
     """
     ensure_kompass_core()
@@ -232,7 +239,7 @@ def make_detector(
         np.asarray(rotation, dtype=np.float32),
         np.asarray([intrinsics.fx, intrinsics.fy], dtype=np.float32),
         np.asarray([intrinsics.cx, intrinsics.cy], dtype=np.float32),
-        1e-3,  # the depth images handed over are in millimeters
+        1e-3 if depth_factor is None else float(depth_factor),
         convention=CameraFrameConvention.OPTICAL,
     )
 

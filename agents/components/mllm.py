@@ -698,7 +698,7 @@ class MLLM(DepthLiftMixin, LLM):
         if not pixels:
             fields = detections_to_message_fields([])
         else:
-            detector, depth_mm, camera_position = self._depth_detector()
+            detector, depth, camera_position = self._depth_detector()
             if detector is None:
                 return None
             # the color image, which an RGBD frame carries nested
@@ -707,7 +707,7 @@ class MLLM(DepthLiftMixin, LLM):
                 box
                 for box in boxes_from_detections(
                     detector,
-                    depth_mm,
+                    depth,
                     pixels,
                     image_size=(color.width, color.height),
                     camera_position=camera_position,
