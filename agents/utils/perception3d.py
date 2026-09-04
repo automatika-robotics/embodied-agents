@@ -13,8 +13,6 @@ frame the camera's pose was given in, or in the camera's own optical frame when 
 pose is given.
 """
 
-# TODO: See if any of these utilities need to be upstreamed
-
 from importlib.util import find_spec
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
