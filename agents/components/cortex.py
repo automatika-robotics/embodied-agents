@@ -8,6 +8,7 @@ from ..clients.model_base import ModelClient
 from ..clients.db_base import DBClient
 from ..config import CortexConfig
 from ..ros import (
+    SystemActionRegistry,
     String,
     StreamingString,
     Topic,
@@ -253,9 +254,10 @@ class Cortex(ModelComponent, Monitor):
         activate_on_start: Optional[List[str]] = None,
         activation_timeout: Optional[float] = None,
         activation_attempt_time: float = 1.0,
+        action_registry: Optional[SystemActionRegistry] = None,
         **_,
     ):
-        """Initialize Monitor capabilities. Called by the Launcher."""
+        """Initialize Monitor capabilities. Called by the Launcher. """
         # Store component references for introspection by inspect_component
         self._managed_components: Dict[str, BaseComponent] = {}
         if components:
@@ -275,6 +277,7 @@ class Cortex(ModelComponent, Monitor):
             activate_on_start=activate_on_start,
             activation_timeout=activation_timeout,
             activation_attempt_time=activation_attempt_time,
+            action_registry=action_registry,
         )
         self.config = _config
         self._setup_internal_action_events(self._behavioral_actions)
@@ -1319,7 +1322,7 @@ class Cortex(ModelComponent, Monitor):
         :return: Result string for the execution log
         :rtype: str
         """
-        action_client = self._get_action_client(action_name, action_type)
+        action_client = self.get_action_client(action_name, action_type)
         try:
             sent = action_client.send_request_from_dict(goal_fields)
             if not sent:
@@ -1400,17 +1403,9 @@ class Cortex(ModelComponent, Monitor):
     def _call_component_action(self, tool_name: str, args: Dict) -> str:
         """Call a component action method via its ExecuteMethod service.
 
-        Returns the method's output as a string, suitable to feed back to
-        an LLM as a tool result:
-
-        - On failure (``response.success == False``) returns
-          ``"Error: ..."`` built from ``response.error_msg``.
-        - On success with no return value (method returned ``None`` or
-          ``True``) returns a short confirmation string.
-        - On success with a return value, decodes ``response.response_json``.
-          Plain strings are returned as-is (preserving multi-line
-          formatting from retrieval tools); structured values are
-          re-serialized to JSON.
+        Returns the action's message as a string, suitable to feed back to
+        an LLM as a tool result, prefixed with ``"Error: ..."`` when the
+        action failed.
         """
         self.get_logger().info(
             f"Calling component action {tool_name} with args: {args}"

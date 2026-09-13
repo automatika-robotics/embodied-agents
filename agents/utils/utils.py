@@ -298,31 +298,21 @@ def strip_think_tokens(text: str) -> str:
 
 
 def execute_method_response_to_str(tool_name: str, response) -> str:
-    """Convert an ``ExecuteMethod`` service response into a string suitable
-    as an LLM tool-call result.
+    """Turn an ``ExecuteMethod`` service response into an LLM tool-call result.
 
-    - On failure (``response.success == False``): ``"Error: <tool_name>
-      failed with error: <error_msg>"``.
-    - On success with no return value (method returned ``None`` or ``True``,
-      or the server omitted ``response_json``): a short confirmation string.
-    - On success with a return value: decode ``response.response_json``;
-      plain strings pass through unmolested (preserving multi-line
-      formatting); structured values are re-serialized to JSON.
+    Under the action contract a successful call carries the action's message
+    as a JSON string in ``response_json`` and a failed one carries it in
+    ``error_msg``.
+
+    :param tool_name: The tool the call was made for, named in the result
+    :param response: The service response
+    :return: The action's message, an error line on failure, or a
+        confirmation when the message is empty
     """
     if not response.success:
         return f"Error: {tool_name} failed with error: {response.error_msg}"
-    raw = getattr(response, "response_json", "") or ""
-    if not raw:
-        return f"{tool_name} executed successfully"
-    try:
-        result = json.loads(raw)
-    except (json.JSONDecodeError, TypeError):
-        return raw
-    if result is True or result is None:
-        return f"{tool_name} executed successfully"
-    if isinstance(result, str):
-        return result
-    return json.dumps(result)
+    message = json.loads(response.response_json) if response.response_json else ""
+    return message or f"{tool_name} executed successfully"
 
 
 class VADStatus(Enum):

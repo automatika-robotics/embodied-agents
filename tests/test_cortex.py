@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import MagicMock
 
 from agents.config import CortexConfig
-from agents.ros import Topic, Action, ComponentRunType
+from agents.ros import Topic, Action, ComponentRunType, SystemActionRegistry
 from agents.components.cortex import Cortex
 from tests.conftest import mock_component_internals
 
@@ -699,3 +699,19 @@ class TestCortexRobotDescription:
         assert comp._PLANNING_PROMPT in prompt
         assert "Robot Identity" in prompt
         assert "Memory Guidance" in prompt
+
+
+class TestStandingInForTheMonitor:
+    def test_the_launchers_action_registry_is_kept(self, rclpy_init, mock_model_client):
+        """The Launcher builds the registry of what the stack can be asked to
+        do and hands it to whichever node monitors the stack. Standing in for
+        the Monitor, Cortex must keep that one rather than the empty registry
+        a Monitor builds for itself when given none."""
+        registry = SystemActionRegistry.from_components([])
+        comp = _make_cortex(
+            [_make_mock_action()], mock_model_client, "test_cortex_registry"
+        )
+
+        comp._init_internal_monitor(components_names=[], action_registry=registry)
+
+        assert comp._action_registry is registry
