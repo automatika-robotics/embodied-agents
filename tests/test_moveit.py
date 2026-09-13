@@ -152,7 +152,8 @@ class TestComponentNamedTargets:
         # must be a dict, callers index into it
         assert component._named_target_states() == {}
         assert component.get_named_targets.__wrapped__(component) == (
-            "No named targets are defined for this robot"
+            True,
+            "No named targets are defined for this robot",
         )
 
 
@@ -1078,12 +1079,12 @@ class TestGripperActions:
         comp = move_group_component
         comp._gripper_client = TestGoalExecution._client()
 
-        message = comp.open_gripper.__wrapped__(comp)
+        ok, message = comp.open_gripper.__wrapped__(comp)
 
         sent = comp._gripper_client.send_request.call_args[0][0]
         assert sent.request.group_name == "hand"
         assert sent.request.goal_constraints[0].joint_constraints[0].position == 0.035
-        assert "open" in message
+        assert ok and "open" in message
 
     def test_close_gripper_uses_controller_position(self, controller_component):
         comp = controller_component
@@ -1099,9 +1100,9 @@ class TestGripperActions:
         comp = move_group_component
         comp._gripper_client = TestGoalExecution._client()
 
-        message = comp.set_gripper.__wrapped__(comp, 0.02)
+        ok, message = comp.set_gripper.__wrapped__(comp, 0.02)
 
-        assert "gripper_command" in message
+        assert not ok and "gripper_command" in message
         comp._gripper_client.send_request.assert_not_called()
 
     def test_set_gripper_sends_position(self, controller_component):
@@ -1122,11 +1123,11 @@ class TestGripperActions:
         comp._exec_client.goal_accepted = False
         comp._gripper_client = None
 
-        message = comp.stop_motion.__wrapped__(comp)
+        ok, message = comp.stop_motion.__wrapped__(comp)
 
         comp._move_client.cancel_request.assert_called_once()
         comp._exec_client.cancel_request.assert_not_called()
-        assert "arm" in message
+        assert ok and "arm" in message
 
     def test_stop_motion_without_active_goals(self, move_group_component):
         comp = move_group_component
@@ -1135,7 +1136,8 @@ class TestGripperActions:
         comp._exec_client = None
         comp._gripper_client = None
 
-        assert "No motion" in comp.stop_motion.__wrapped__(comp)
+        ok, message = comp.stop_motion.__wrapped__(comp)
+        assert ok and "No motion" in message
 
 
 class TestSceneBuilders:
@@ -1636,7 +1638,7 @@ class TestSceneActions:
     def test_add_sends_one_diff_and_tracks_the_object(self, component):
         from moveit_msgs.msg import CollisionObject
 
-        message = component.add_collision_object.__wrapped__(
+        ok, message = component.add_collision_object.__wrapped__(
             component, "crate", [0.4, 0.0, 0.1], [0.2, 0.3, 0.2]
         )
 
@@ -1648,7 +1650,7 @@ class TestSceneActions:
         assert obj.header.frame_id == "base_link"
         assert list(obj.primitives[0].dimensions) == [0.2, 0.3, 0.2]
         assert component._scene_objects["crate"]["source"] == "manual"
-        assert "Added" in message
+        assert ok and "Added" in message
 
     def test_add_applies_the_thickness_floor(self, component):
         component.config.min_object_thickness = 0.05
@@ -1662,40 +1664,40 @@ class TestSceneActions:
         component._apply_scene_client.send_request.return_value = SimpleNamespace(
             success=False
         )
-        message = component.add_collision_object.__wrapped__(
+        ok, message = component.add_collision_object.__wrapped__(
             component, "crate", [0, 0, 0], [0.1, 0.1, 0.1]
         )
-        assert "Could not" in message
+        assert not ok and "Could not" in message
         assert "crate" not in component._scene_objects
 
     def test_add_rejects_malformed_geometry(self, component):
-        with pytest.raises(ValueError, match="3 values"):
-            component.add_collision_object.__wrapped__(
-                component, "crate", [0, 0], [0.1, 0.1, 0.1]
-            )
+        ok, why = component.add_collision_object.__wrapped__(
+            component, "crate", [0, 0], [0.1, 0.1, 0.1]
+        )
+        assert not ok and "3 values" in why
 
     def test_remove_sends_remove_and_forgets_the_object(self, component):
         from moveit_msgs.msg import CollisionObject
 
         component._scene_objects["crate"] = {"source": "manual", "last_seen": 0.0}
-        message = component.remove_collision_object.__wrapped__(component, "crate")
+        ok, message = component.remove_collision_object.__wrapped__(component, "crate")
 
         (obj,) = self._applied_scene(component).world.collision_objects
         assert obj.id == "crate" and obj.operation == CollisionObject.REMOVE
         assert "crate" not in component._scene_objects
-        assert "Removed" in message
+        assert ok and "Removed" in message
 
     def test_clear_removes_tracked_objects_in_one_diff(self, component):
         component._scene_objects = {
             "crate": {"source": "manual", "last_seen": 0.0},
             "det__orange_0": {"source": "detection", "last_seen": 0.0},
         }
-        message = component.clear_collision_objects.__wrapped__(component)
+        ok, message = component.clear_collision_objects.__wrapped__(component)
 
         removed = {o.id for o in self._applied_scene(component).world.collision_objects}
         assert removed == {"crate", "det__orange_0"}
         assert component._scene_objects == {}
-        assert "2" in message
+        assert ok and "2" in message
 
     def test_clear_detections_only_keeps_manual_objects(self, component):
         component._scene_objects = {
@@ -1709,9 +1711,9 @@ class TestSceneActions:
         assert set(component._scene_objects) == {"crate"}
 
     def test_clear_with_nothing_tracked_sends_nothing(self, component):
-        message = component.clear_collision_objects.__wrapped__(component)
+        ok, message = component.clear_collision_objects.__wrapped__(component)
         component._apply_scene_client.send_request.assert_not_called()
-        assert "no objects" in message
+        assert ok and "no objects" in message
 
     def test_list_reads_the_scene_back_from_move_group(self, component):
         """move_group is authoritative: it also shows objects other tools
@@ -1727,35 +1729,35 @@ class TestSceneActions:
                 )
             )
         )
-        message = component.list_collision_objects.__wrapped__(component)
-        assert "det__orange_0, table" in message
+        ok, message = component.list_collision_objects.__wrapped__(component)
+        assert ok and "det__orange_0, table" in message
 
     def test_list_falls_back_to_tracked_objects(self, component):
         component._get_scene_client = MagicMock()
         component._get_scene_client.send_request.return_value = None
         component._scene_objects = {"crate": {"source": "manual", "last_seen": 0.0}}
-        message = component.list_collision_objects.__wrapped__(component)
-        assert "did not answer" in message and "crate" in message
+        ok, message = component.list_collision_objects.__wrapped__(component)
+        assert ok and "did not answer" in message and "crate" in message
 
     def test_clear_octomap(self, component):
         from std_srvs.srv import Empty
 
         component._clear_octomap_client = MagicMock()
         component._clear_octomap_client.send_request.return_value = Empty.Response()
-        message = component.clear_octomap.__wrapped__(component)
+        ok, message = component.clear_octomap.__wrapped__(component)
         assert isinstance(
             component._clear_octomap_client.send_request.call_args[0][0],
             Empty.Request,
         )
-        assert "Cleared" in message
+        assert ok and "Cleared" in message
 
     def test_scene_failure_degrades_without_raising(self, component):
         """A scene problem must never take the component down."""
         component._apply_scene_client = None
-        message = component.add_collision_object.__wrapped__(
+        ok, message = component.add_collision_object.__wrapped__(
             component, "crate", [0, 0, 0], [0.1, 0.1, 0.1]
         )
-        assert "Could not" in message
+        assert not ok and "Could not" in message
 
 
 class TestAttachDetach:
@@ -1812,7 +1814,7 @@ class TestAttachDetach:
             "source": "detection",
             "last_seen": 0.0,
         }
-        message = component.attach_object.__wrapped__(component, "det__orange_0")
+        ok, message = component.attach_object.__wrapped__(component, "det__orange_0")
 
         (scene,) = self._applied_scenes(component)
         (attached,) = scene.robot_state.attached_collision_objects
@@ -1821,7 +1823,7 @@ class TestAttachDetach:
         assert attached.object.operation == CollisionObject.ADD
         assert list(attached.touch_links) == ["hand", "left_finger", "right_finger"]
         assert component._scene_objects["det__orange_0"]["attached"] == "hand"
-        assert "Attached" in message
+        assert ok and "Attached" in message
 
     def test_explicit_touch_links_win_over_config_and_srdf(self, component):
         component.config.touch_links = ["from_config"]
@@ -1856,8 +1858,8 @@ class TestAttachDetach:
 
     def test_attach_without_any_link_reports_it(self, component):
         component.config.end_effector_link = ""
-        message = component.attach_object.__wrapped__(component, "o")
-        assert "No link" in message
+        ok, message = component.attach_object.__wrapped__(component, "o")
+        assert not ok and "No link" in message
         component._apply_scene_client.send_request.assert_not_called()
 
     def test_attach_failure_marks_nothing(self, component):
@@ -1865,8 +1867,8 @@ class TestAttachDetach:
             success=False
         )
         component._scene_objects["o"] = {"source": "manual", "last_seen": 0.0}
-        message = component.attach_object.__wrapped__(component, "o")
-        assert "Could not" in message
+        ok, message = component.attach_object.__wrapped__(component, "o")
+        assert not ok and "Could not" in message
         assert "attached" not in component._scene_objects["o"]
 
     def test_detach_returns_the_object_to_the_scene(self, component):
@@ -1877,7 +1879,7 @@ class TestAttachDetach:
             "last_seen": 0.0,
             "attached": "hand",
         }
-        message = component.detach_object.__wrapped__(component, "o")
+        ok, message = component.detach_object.__wrapped__(component, "o")
 
         (scene,) = self._applied_scenes(component)
         (attached,) = scene.robot_state.attached_collision_objects
@@ -1885,7 +1887,7 @@ class TestAttachDetach:
         # empty link searches every link for the object
         assert attached.link_name == ""
         assert "attached" not in component._scene_objects["o"]
-        assert "remains in the scene" in message
+        assert ok and "remains in the scene" in message
 
     def test_detach_with_remove_deletes_in_a_second_change(self, component):
         component._scene_objects["o"] = {
@@ -1893,22 +1895,22 @@ class TestAttachDetach:
             "last_seen": 0.0,
             "attached": "hand",
         }
-        message = component.detach_object.__wrapped__(component, "o", remove=True)
+        ok, message = component.detach_object.__wrapped__(component, "o", remove=True)
 
         detach_scene, remove_scene = self._applied_scenes(component)
         assert detach_scene.robot_state.attached_collision_objects
         (removed,) = remove_scene.world.collision_objects
         assert removed.id == "o"
         assert "o" not in component._scene_objects
-        assert "removed" in message
+        assert ok and "removed" in message
 
     def test_detach_remove_reports_a_partial_failure(self, component):
         component._apply_scene_client.send_request.side_effect = [
             SimpleNamespace(success=True),
             SimpleNamespace(success=False),
         ]
-        message = component.detach_object.__wrapped__(component, "o", remove=True)
-        assert "Detached" in message and "could not remove" in message
+        ok, message = component.detach_object.__wrapped__(component, "o", remove=True)
+        assert not ok and "Detached" in message and "could not remove" in message
 
 
 class TestSceneRefresh:
@@ -1962,7 +1964,7 @@ class TestSceneRefresh:
                 ("bowl", 0.7, (0.5, 0.1, 0.05), (0.2, 0.2, 0.1)),
             ]),
         )
-        message = component.update_planning_scene.__wrapped__(component)
+        ok, message = component.update_planning_scene.__wrapped__(component)
 
         # the message is requested, not the callback's prompt-context default
         assert callback.get_output.call_args.kwargs.get("get_msg") is True
@@ -1973,7 +1975,7 @@ class TestSceneRefresh:
             o.operation == CollisionObject.ADD for o in by_id.values()
         )
         assert component._scene_objects["det__orange_0"]["source"] == "detection"
-        assert "2 detected object(s)" in message
+        assert ok and "2 detected object(s)" in message
 
     def test_refresh_records_extents_with_and_without_padding(self, component):
         """The scene box carries planning padding, but attachment needs the
@@ -2035,13 +2037,13 @@ class TestSceneRefresh:
             config=MoveItConfig(arm_group_name="arm"),
             component_name="m_refresh_none",
         )
-        assert "No detections input" in comp.update_planning_scene.__wrapped__(comp)
+        ok, why = comp.update_planning_scene.__wrapped__(comp)
+        assert not ok and "No detections input" in why
 
     def test_before_any_message_it_says_so(self, component):
         self._wire(component, None)
-        assert "No detections have been received" in (
-            component.update_planning_scene.__wrapped__(component)
-        )
+        ok, why = component.update_planning_scene.__wrapped__(component)
+        assert not ok and "No detections have been received" in why
 
     def test_stale_objects_are_removed_in_the_same_diff(self, component):
         from moveit_msgs.msg import CollisionObject
@@ -2056,14 +2058,14 @@ class TestSceneRefresh:
             component,
             self._detections([("orange", 0.9, (0.3, 0, 0), (0.06, 0.06, 0.06))]),
         )
-        message = component.update_planning_scene.__wrapped__(component)
+        ok, message = component.update_planning_scene.__wrapped__(component)
 
         scene = self._applied_scene(component)
         ops = {o.id: o.operation for o in scene.world.collision_objects}
         assert ops["det__orange_0"] == CollisionObject.ADD
         assert ops["det__cup_0"] == CollisionObject.REMOVE
         assert "det__cup_0" not in component._scene_objects
-        assert "removed 1 stale" in message
+        assert ok and "removed 1 stale" in message
 
     def test_recently_seen_objects_survive_a_dropout(self, component):
         component._scene_objects["det__cup_0"] = {
@@ -2115,9 +2117,9 @@ class TestSceneRefresh:
                 ("orange", 0.7, (0.2, 0.3, 0.2), (0.06, 0.06, 0.06)),
             ]),
         )
-        message = component.update_planning_scene.__wrapped__(component)
+        ok, message = component.update_planning_scene.__wrapped__(component)
 
-        assert "held" in message
+        assert ok and "held" in message
         component._apply_scene_client.send_request.assert_not_called()
         assert component._scene_objects["det__orange_0"]["attached"] == "hand"
 
@@ -2128,7 +2130,8 @@ class TestSceneRefresh:
         explicit update_planning_scene call is the operator reconciling the
         scene deliberately — it clears the freeze and refreshes."""
         component._contact_freeze = "det__orange_0"
-        assert "skipped" in component._refresh_scene_from_detections()
+        ok, why = component._refresh_scene_from_detections()
+        assert ok and "skipped" in why
 
         self._wire(
             component,
@@ -2136,10 +2139,10 @@ class TestSceneRefresh:
                 ("orange", 0.9, (0.3, 0.0, 0.05), (0.06, 0.06, 0.06)),
             ]),
         )
-        message = component.update_planning_scene.__wrapped__(component)
+        ok, message = component.update_planning_scene.__wrapped__(component)
 
         assert component._contact_freeze is None
-        assert "1 detected object(s)" in message
+        assert ok and "1 detected object(s)" in message
 
     def test_the_first_refresh_after_release_reconciles(self, component):
         entry = {
@@ -2186,9 +2189,9 @@ class TestSceneRefresh:
 
     def test_nothing_seen_and_nothing_stale_is_a_no_op(self, component):
         self._wire(component, self._detections([]))
-        message = component.update_planning_scene.__wrapped__(component)
+        ok, message = component.update_planning_scene.__wrapped__(component)
         component._apply_scene_client.send_request.assert_not_called()
-        assert "already up to date" in message
+        assert ok and "already up to date" in message
 
     def test_apply_failure_leaves_bookkeeping_untouched(self, component):
         component._apply_scene_client.send_request.return_value = SimpleNamespace(
@@ -2198,8 +2201,8 @@ class TestSceneRefresh:
             component,
             self._detections([("orange", 0.9, (0.3, 0, 0), (0.06, 0.06, 0.06))]),
         )
-        message = component.update_planning_scene.__wrapped__(component)
-        assert "Could not" in message
+        ok, message = component.update_planning_scene.__wrapped__(component)
+        assert not ok and "Could not" in message
         assert component._scene_objects == {}
 
 
@@ -2228,7 +2231,7 @@ class TestSceneUpdateModes:
     def test_on_goal_refreshes_before_planning(self, component):
         component.config.scene_update_mode = "on_goal"
         component._refresh_scene_from_detections = MagicMock(
-            return_value="Planning scene updated with 1 detected object(s)"
+            return_value=(True, "Planning scene updated with 1 detected object(s)")
         )
         component._move_client = TestGoalExecution._client()
         handle = TestGoalExecution._goal_handle(TestGoalExecution._joint_goal())
@@ -2244,7 +2247,7 @@ class TestSceneUpdateModes:
     def test_on_goal_scene_failure_never_aborts_the_motion(self, component):
         component.config.scene_update_mode = "on_goal"
         component._refresh_scene_from_detections = MagicMock(
-            return_value="Could not update the planning scene"
+            return_value=(False, "Could not update the planning scene")
         )
         component._move_client = TestGoalExecution._client()
         handle = TestGoalExecution._goal_handle(TestGoalExecution._joint_goal())
@@ -2327,7 +2330,7 @@ class TestSceneUpdateModes:
         component.callbacks = {"d3": callback}
 
     def test_tick_refreshes_on_a_new_message(self, component):
-        component._refresh_scene_from_detections = MagicMock(return_value="ok")
+        component._refresh_scene_from_detections = MagicMock(return_value=(True, "ok"))
         self._wire_message(component, object())
 
         component._scene_refresh_tick()
@@ -2335,7 +2338,7 @@ class TestSceneUpdateModes:
         component._refresh_scene_from_detections.assert_called_once()
 
     def test_tick_skips_an_already_applied_message(self, component):
-        component._refresh_scene_from_detections = MagicMock(return_value="ok")
+        component._refresh_scene_from_detections = MagicMock(return_value=(True, "ok"))
         message = object()
         self._wire_message(component, message)
 
@@ -2349,7 +2352,7 @@ class TestSceneUpdateModes:
     ):
         """Objects due for eviction get their removal without waiting for the
         detector to publish again."""
-        component._refresh_scene_from_detections = MagicMock(return_value="ok")
+        component._refresh_scene_from_detections = MagicMock(return_value=(True, "ok"))
         message = object()
         self._wire_message(component, message)
         component._scene_refresh_tick()
@@ -2825,7 +2828,8 @@ class TestPickSequence:
         scenes = self._acm_scenes(component)
         assert len(scenes) == 1  # the allowance was never retired
         assert self._contact(scenes[0], "hand", "det__mug_0") == (True, True)
-        assert "skipped" in component._refresh_scene_from_detections()
+        ok, why = component._refresh_scene_from_detections()
+        assert ok and "skipped" in why
 
     def test_a_successful_motion_lifts_the_freeze_and_retires_the_allowance(
         self, component
@@ -3060,4 +3064,5 @@ class TestPlaceSequence:
             True,
             True,
         )
-        assert "skipped" in component._refresh_scene_from_detections()
+        ok, why = component._refresh_scene_from_detections()
+        assert ok and "skipped" in why

@@ -1,5 +1,7 @@
 """Tests for MLLM/VLM component — requires rclpy."""
 
+import json
+
 import pytest
 import numpy as np
 from unittest.mock import MagicMock
@@ -449,7 +451,9 @@ class TestRunTask(_GrounderSetup):
         self._wire(grounder)
         msg = self._frame(grounder)
 
-        summary = grounder.run_task.__wrapped__(grounder, query="the orange")
+        ok, message = grounder.run_task.__wrapped__(grounder, query="the orange")
+        assert ok
+        summary = json.loads(message)
 
         # the frame came from the lift camera, and the depth was latched with it
         grounder._grab_frame.assert_called_once_with("img_in", 0.5)
@@ -470,24 +474,24 @@ class TestRunTask(_GrounderSetup):
 
     def test_run_task_needs_a_configured_task(self, mllm):
         mllm._task = None
-        with pytest.raises(ValueError, match="set `task`"):
-            mllm.run_task.__wrapped__(mllm, query="anything")
+        ok, why = mllm.run_task.__wrapped__(mllm, query="anything")
+        assert not ok and "set `task`" in why
 
     def test_run_task_sends_general_to_describe(self, mllm):
         mllm._task = "general"
-        with pytest.raises(ValueError, match="describe"):
-            mllm.run_task.__wrapped__(mllm, query="anything")
+        ok, why = mllm.run_task.__wrapped__(mllm, query="anything")
+        assert not ok and "describe" in why
 
     def test_run_task_needs_an_output_of_the_tasks_type(self, grounder):
         grounder._detections_publishers = []
         grounder._detections3d_publishers = []
-        with pytest.raises(ValueError, match="nothing to publish"):
-            grounder.run_task.__wrapped__(grounder, query="the orange")
+        ok, why = grounder.run_task.__wrapped__(grounder, query="the orange")
+        assert not ok and "nothing to publish" in why
 
-    def test_run_task_without_a_frame_fails_loudly(self, grounder):
+    def test_run_task_without_a_frame_reports_it(self, grounder):
         grounder._grab_frame = MagicMock(return_value=(None, None))
-        with pytest.raises(RuntimeError, match="image"):
-            grounder.run_task.__wrapped__(grounder, query="the orange")
+        ok, why = grounder.run_task.__wrapped__(grounder, query="the orange")
+        assert not ok and "image" in why
 
     def test_run_task_off_the_lift_camera_publishes_2d_only(
         self, grounder, mock_model_client
@@ -499,11 +503,12 @@ class TestRunTask(_GrounderSetup):
         grounder.callbacks["other"] = _callback(name="other")
         self._frame(grounder)
 
-        summary = grounder.run_task.__wrapped__(
+        ok, message = grounder.run_task.__wrapped__(
             grounder, query="the orange", topic_name="other"
         )
+        summary = json.loads(message)
 
-        assert summary["published"] == ["d2"] and "objects" not in summary
+        assert ok and summary["published"] == ["d2"] and "objects" not in summary
         grounder.publishers_dict["d3"].publish.assert_not_called()
 
 
@@ -523,5 +528,5 @@ class TestDescribe(_GrounderSetup):
             grounder, topic_name="img_in", query="what is on the table?"
         )
 
-        assert answer == '"a table with fruit"'
+        assert answer == (True, "a table with fruit")
         assert "task" not in mock_model_client.inference.call_args[0][0]
