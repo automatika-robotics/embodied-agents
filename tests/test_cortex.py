@@ -715,3 +715,81 @@ class TestStandingInForTheMonitor:
         comp._init_internal_monitor(components_names=[], action_registry=registry)
 
         assert comp._action_registry is registry
+
+
+class TestDispatchingAGoal:
+    """A component's action server runs one goal at a time and rejects a new
+    one while it does, so Cortex replaces a goal it has running on that
+    server before sending another"""
+
+    TOOL = "send_goal_to_vla_run"
+
+    def _dispatch(self, comp, client):
+        mock_component_internals(comp)
+        comp.get_action_client = MagicMock(return_value=client)
+        return comp._send_action_goal_from_dict(
+            self.TOOL, "vla", "vla/run", MagicMock(), {"task": "go to the kitchen"}
+        )
+
+    def _client(self, running, sent=True, canceled=(True, "ok")):
+        client = MagicMock()
+        client.goal_accepted = running
+        client.action_returned = not running
+        client.goal_rejected = False
+        client.cancel_request.return_value = canceled
+        client.send_request_from_dict.return_value = sent
+        return client
+
+    def test_an_idle_server_gets_the_goal_straight_away(
+        self, rclpy_init, mock_model_client
+    ):
+        comp = _make_cortex([], mock_model_client, "test_cortex_dispatch_idle")
+        client = self._client(running=False)
+
+        result = self._dispatch(comp, client)
+
+        client.cancel_request.assert_not_called()
+        assert "dispatched" in result
+        assert comp._active_action_clients[self.TOOL] is client
+
+    def test_a_running_goal_is_canceled_before_the_new_one_is_sent(
+        self, rclpy_init, mock_model_client
+    ):
+        comp = _make_cortex([], mock_model_client, "test_cortex_dispatch_replace")
+        client = self._client(running=True)
+        comp._active_action_clients[self.TOOL] = client
+        order = MagicMock()
+        order.attach_mock(client.cancel_request, "cancel")
+        order.attach_mock(client.send_request_from_dict, "send")
+
+        result = self._dispatch(comp, client)
+
+        assert [c[0] for c in order.mock_calls] == ["cancel", "send"]
+        assert "dispatched" in result
+        assert comp._active_action_clients[self.TOOL] is client
+
+    def test_a_goal_that_will_not_cancel_blocks_the_new_one(
+        self, rclpy_init, mock_model_client
+    ):
+        comp = _make_cortex([], mock_model_client, "test_cortex_dispatch_stuck")
+        client = self._client(running=True, canceled=(False, "Failed to cancel goal"))
+        comp._active_action_clients[self.TOOL] = client
+
+        result = self._dispatch(comp, client)
+
+        client.send_request_from_dict.assert_not_called()
+        assert result.startswith("Error:")
+        assert "could not be canceled" in result
+        # the running goal is still tracked
+        assert comp._active_action_clients[self.TOOL] is client
+
+    def test_a_rejection_is_reported_as_one(self, rclpy_init, mock_model_client):
+        comp = _make_cortex([], mock_model_client, "test_cortex_dispatch_rejected")
+        client = self._client(running=False, sent=False)
+        client.goal_rejected = True
+
+        result = self._dispatch(comp, client)
+
+        assert result.startswith("Error:")
+        assert "rejected" in result and "busy" in result
+        assert self.TOOL not in comp._active_action_clients

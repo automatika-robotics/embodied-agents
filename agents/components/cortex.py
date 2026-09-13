@@ -1311,6 +1311,10 @@ class Cortex(ModelComponent, Monitor):
         """Construct a Goal message from a dict and send it to a component's
         action server.
 
+        A server runs one goal at a time and rejects a new one while it does,
+        so a goal this tool already has running is replaced: canceled, and
+        waited on, before the new one is sent.
+
         :param component_name: Target component name
         :type component_name: str
         :param action_name: Target action server name
@@ -1324,19 +1328,33 @@ class Cortex(ModelComponent, Monitor):
         """
         action_client = self.get_action_client(action_name, action_type)
         try:
-            sent = action_client.send_request_from_dict(goal_fields)
-            if not sent:
-                return (
-                    f"Error: Failed to construct or send action goal to "
-                    f"'{component_name}' from fields: {goal_fields}"
+            if action_client.goal_accepted and not action_client.action_returned:
+                canceled, why = action_client.cancel_request()
+                if not canceled:
+                    return (
+                        f"Error: '{tool_name}' still has a goal running and it "
+                        f"could not be canceled to make room for the new one: {why}"
+                    )
+                self._active_action_clients.pop(tool_name, None)
+                self.get_logger().info(
+                    f"Canceled the running goal of '{tool_name}' to send a new one"
                 )
+            sent = action_client.send_request_from_dict(goal_fields)
             if sent:
                 self._active_action_clients[tool_name] = action_client
                 return (
                     f"Action '{tool_name}' has been dispatched to '{component_name}' "
                     f"and is now running asynchronously."
                 )
-            return f"Error: Action goal was rejected by '{component_name}'."
+            if action_client.goal_rejected:
+                return (
+                    f"Error: '{component_name}' rejected the goal because it is "
+                    "busy with another one. Cancel that one first."
+                )
+            return (
+                f"Error: Failed to construct or send action goal to "
+                f"'{component_name}' from fields: {goal_fields}"
+            )
         except Exception as e:
             return f"Error sending action goal to '{component_name}': {e}"
 
