@@ -45,6 +45,7 @@ from ros_sugar.core import BaseComponent, Monitor
 from ros_sugar.core.component import MutuallyExclusiveCallbackGroup
 from ros_sugar import UI_EXTENSIONS
 from ros_sugar.utils import (
+    ActionReturnType,
     component_action as _sugar_component_action,
     component_fallback,
     get_methods_with_decorator,
@@ -144,6 +145,7 @@ __all__ = [
     "Action",
     "component_fallback",
     "component_action",
+    "ActionReturnType",
     "VisionLanguageAction",
     "MoveManipulator",
     "GetParameters",
@@ -206,10 +208,13 @@ def component_action(
     — a hint to Cortex about whether the tool is a planning tool,
     an execution tool, or both.
 
-    Can be used the same way as sugarcoat's decorator:
+    Can be used the same way as sugarcoat's decorator. An action must be
+    annotated to return ``ActionReturnType`` and return ``(success, message)``,
+    where the message carries the result or the error:
 
         @component_action(description={...}, phase=ActionPhase.BOTH)
-        def c(self) -> str: ...
+        def c(self) -> ActionReturnType:
+            return True, "done"
 
     If ``phase`` is not specified the action defaults to
     ``ActionPhase.EXECUTION``, preserving the previous behavior.

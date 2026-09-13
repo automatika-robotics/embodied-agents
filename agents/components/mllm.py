@@ -8,6 +8,7 @@ from ..clients.db_base import DBClient
 from ..clients.model_base import ModelClient
 from ..config import MLLMConfig
 from ..ros import (
+    ActionReturnType,
     CameraInfo,
     FixedInput,
     Event,
@@ -385,7 +386,7 @@ class MLLM(DepthLiftMixin, LLM):
         topic_name: str,
         query: str = "Describe what you see in the image.",
         timeout: float = 0.5,
-    ) -> str:
+    ) -> ActionReturnType:
         """Capture a frame from an image topic and describe it.
 
         Grabs the latest frame from the specified image input topic,
@@ -398,38 +399,30 @@ class MLLM(DepthLiftMixin, LLM):
         :type query: str
         :param timeout: Seconds to wait for a frame. Defaults to 0.5.
         :type timeout: float
-        :return: True if successful, False otherwise.
-        :rtype: bool
+        :return: Whether a description was produced, with the description or
+            why not
+        :rtype: ActionReturnType
         """
-        try:
-            # a description is general VQA whatever task the component is
-            # configured for
-            params = self.config._get_inference_params()
-            params.pop("task", None)
-            with self._inference_lock:
-                image, _ = self._grab_frame(topic_name, timeout)
-                if image is None:
-                    self.get_logger().error(
-                        "Describe: could not get image from image topic."
-                    )
-                    raise Exception("Could not get image from image topic.")
+        # a description is general VQA whatever task the component is
+        # configured for
+        params = self.config._get_inference_params()
+        params.pop("task", None)
+        with self._inference_lock:
+            image, _ = self._grab_frame(topic_name, timeout)
+            if image is None:
+                return False, f"Could not get an image from '{topic_name}'"
 
-                inference_input = {
-                    "query": [{"role": "user", "content": query}],
-                    "images": [image],
-                    **params,
-                }
-                result = self._call_inference(inference_input)
-            if not result or not (output := result.get("output")):
-                self.get_logger().error("Describe: inference returned no output.")
-                raise Exception("Inference failed and returned no output.")
+            inference_input = {
+                "query": [{"role": "user", "content": query}],
+                "images": [image],
+                **params,
+            }
+            result = self._call_inference(inference_input)
+        if not result or not (output := result.get("output")):
+            return False, "Inference returned no output"
 
-            # return text output to caller
-            return json.dumps(output)
-
-        except Exception as e:
-            self.get_logger().error(f"Failed to describe: {e}")
-            raise
+        # text goes to the caller as is, anything structured serialized
+        return True, output if isinstance(output, str) else json.dumps(output)
 
     @component_action(
         description={
@@ -476,7 +469,7 @@ class MLLM(DepthLiftMixin, LLM):
     )
     def run_task(
         self, query: str, topic_name: Optional[str] = None, timeout: float = 0.5
-    ) -> Dict:
+    ) -> ActionReturnType:
         """Run the configured task once and publish the result.
 
         The on-demand counterpart of the streaming task mode: one frame, one
@@ -488,16 +481,16 @@ class MLLM(DepthLiftMixin, LLM):
         :param topic_name: Image input topic to capture from. Defaults to the
             lift camera, else the first image input
         :param timeout: Seconds to wait for a frame. Defaults to 0.5
-        :return: Summary: task, query, the topics published on, the number of
-            results, and the located objects (label, metric center, size,
-            frame) when the 3D lift ran
-        :raises ValueError: Without a configured task, or without an output
-            of the task's result type to publish on
-        :raises RuntimeError: When no frame or no model output is available
+        :return: Whether the task ran, with a JSON summary: task, query, the
+            topics published on, the number of results, and the located
+            objects (label, metric center, size, frame) when the 3D lift ran.
+            Fails without a configured task, without an output of the task's
+            result type to publish on, and when no frame or no model output
+            is available
         """
         task = self._task
         if not task or task == "general":
-            raise ValueError(
+            return False, (
                 "run_task needs a structured task configured on this component: "
                 "set `task` in MLLMConfig to one of pointing, affordance, "
                 "trajectory or grounding"
@@ -510,7 +503,7 @@ class MLLM(DepthLiftMixin, LLM):
             else self._poi_publishers
         )
         if not publishers:
-            raise ValueError(
+            return False, (
                 f"The '{task}' task publishes on "
                 f"{'Detections, DetectionsMultiSource or Detections3D' if boxes else 'PointsOfInterest'}"
                 " outputs and this component has none, so there is nothing to "
@@ -530,7 +523,7 @@ class MLLM(DepthLiftMixin, LLM):
         with self._inference_lock:
             image, msg = self._grab_frame(topic_name, timeout)
             if image is None:
-                raise RuntimeError(f"Could not get an image from '{topic_name}'")
+                return False, f"Could not get an image from '{topic_name}'"
             # get the frame for downstream lifting if needed
             self._images = [msg]
             self._lift_msg = msg if topic_name == self._lift_camera else None
@@ -548,7 +541,7 @@ class MLLM(DepthLiftMixin, LLM):
                 unpack=True,
             )
             if not result or result.get("output") is None:
-                raise RuntimeError("Inference returned no output")
+                return False, "Inference returned no output"
             published, fields = self._publish_task_specific_outputs(result)
 
         summary: Dict[str, Any] = {
@@ -567,7 +560,7 @@ class MLLM(DepthLiftMixin, LLM):
                 }
                 for label, (center, size) in zip(fields["labels"], fields["output"])
             ]
-        return summary
+        return True, json.dumps(summary)
 
     def _grab_frame(
         self, topic_name: str, timeout: float

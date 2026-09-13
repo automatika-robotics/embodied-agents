@@ -5,6 +5,7 @@ import json
 from ..clients.model_base import ModelClient
 from ..config import MemoryConfig
 from ..ros import (
+    ActionReturnType,
     Odometry,
     String,
     StreamingString,
@@ -483,13 +484,14 @@ class Memory(Component):
             },
         }
     )
-    def store(self) -> None:
+    def store(self) -> ActionReturnType:
         """Explicitly trigger storage of current layer data."""
         position = self.callbacks[self.position.name].get_output()
         if position is None:
-            return
+            return False, "No odometry position is available, so nothing was stored"
         time_stamp = self.get_ros_time().sec
         self._store_layers(position[:3], time_stamp)
+        return True, "Stored the current layer data"
 
     @component_action(
         description={
@@ -564,7 +566,7 @@ class Memory(Component):
         x: Optional[float] = None,
         y: Optional[float] = None,
         z: Optional[float] = None,
-    ) -> bool:
+    ) -> ActionReturnType:
         """Store an arbitrary piece of text at a given (or current) position.
 
         :param content: Text to record.
@@ -572,7 +574,8 @@ class Memory(Component):
         :param x: Optional X in world-frame meters. If omitted, current odometry is used.
         :param y: Optional Y in world-frame meters. If omitted, current odometry is used.
         :param z: Optional Z in meters. If omitted, current odometry is used.
-        :returns: True if the note was stored, False if position was unavailable.
+        :returns: Whether the note was stored, and why not when no position
+            was available.
         """
         if x is None or y is None:
             position = self.callbacks[self.position.name].get_output()
@@ -581,7 +584,10 @@ class Memory(Component):
                     "store_note: no coordinates given and no odometry "
                     "available, note not stored."
                 )
-                return False
+                return False, (
+                    "No coordinates were given and no odometry is available, "
+                    "so the note was not stored"
+                )
             px = float(position[0])
             py = float(position[1])
             pz = float(position[2]) if len(position) > 2 else 0.0
@@ -598,7 +604,9 @@ class Memory(Component):
             layer_name=layer_name,
             timestamp=float(self.get_ros_time().sec),
         )
-        return True
+        return True, (
+            f"Stored the note in layer '{layer_name}' at ({px:.2f}, {py:.2f}, {pz:.2f})"
+        )
 
     @component_action(
         description={
@@ -629,9 +637,10 @@ class Memory(Component):
             },
         }
     )
-    def start_episode(self, name: str) -> str:
+    def start_episode(self, name: str) -> ActionReturnType:
         """Start a named episode."""
-        return self.memory.start_episode(name)
+        episode_id = self.memory.start_episode(name)
+        return True, f"Started episode '{name}' with id {episode_id}"
 
     @component_action(
         description={
@@ -649,63 +658,66 @@ class Memory(Component):
             },
         }
     )
-    def end_episode(self) -> str:
+    def end_episode(self) -> ActionReturnType:
         """End the active episode and trigger consolidation."""
-        return self.memory.end_episode() or "No active episode"
+        episode_id = self.memory.end_episode()
+        if episode_id is None:
+            return False, "No active episode to end"
+        return True, f"Ended episode {episode_id}"
 
     ### Retrieval actions ###
 
     @component_action(description=_tool("semantic_search"), phase=ActionPhase.PLANNING)
-    def semantic_search(self, **kwargs) -> str:
+    def semantic_search(self, **kwargs) -> ActionReturnType:
         """Search memory by meaning."""
-        return self.memory.dispatch_tool_call("semantic_search", kwargs)
+        return True, self.memory.dispatch_tool_call("semantic_search", kwargs)
 
     @component_action(description=_tool("spatial_query"), phase=ActionPhase.PLANNING)
-    def spatial_query(self, **kwargs) -> str:
+    def spatial_query(self, **kwargs) -> ActionReturnType:
         """Find observations within a radius of a point."""
-        return self.memory.dispatch_tool_call("spatial_query", kwargs)
+        return True, self.memory.dispatch_tool_call("spatial_query", kwargs)
 
     @component_action(description=_tool("temporal_query"), phase=ActionPhase.PLANNING)
-    def temporal_query(self, **kwargs) -> str:
+    def temporal_query(self, **kwargs) -> ActionReturnType:
         """Find observations in a time range."""
-        return self.memory.dispatch_tool_call("temporal_query", kwargs)
+        return True, self.memory.dispatch_tool_call("temporal_query", kwargs)
 
     @component_action(description=_tool("episode_summary"), phase=ActionPhase.PLANNING)
-    def episode_summary(self, **kwargs) -> str:
+    def episode_summary(self, **kwargs) -> ActionReturnType:
         """Get summary of one or more episodes."""
-        return self.memory.dispatch_tool_call("episode_summary", kwargs)
+        return True, self.memory.dispatch_tool_call("episode_summary", kwargs)
 
     @component_action(
         description=_tool("get_current_context"), phase=ActionPhase.PLANNING
     )
-    def get_current_context(self, **kwargs) -> str:
+    def get_current_context(self, **kwargs) -> ActionReturnType:
         """Get situational awareness."""
-        return self.memory.dispatch_tool_call("get_current_context", kwargs)
+        return True, self.memory.dispatch_tool_call("get_current_context", kwargs)
 
     @component_action(description=_tool("search_gists"), phase=ActionPhase.PLANNING)
-    def search_gists(self, **kwargs) -> str:
+    def search_gists(self, **kwargs) -> ActionReturnType:
         """Search consolidated memory summaries."""
-        return self.memory.dispatch_tool_call("search_gists", kwargs)
+        return True, self.memory.dispatch_tool_call("search_gists", kwargs)
 
     @component_action(description=_tool("entity_query"), phase=ActionPhase.PLANNING)
-    def entity_query(self, **kwargs) -> str:
+    def entity_query(self, **kwargs) -> ActionReturnType:
         """Find known entities."""
-        return self.memory.dispatch_tool_call("entity_query", kwargs)
+        return True, self.memory.dispatch_tool_call("entity_query", kwargs)
 
     @component_action(description=_tool("locate"), phase=ActionPhase.PLANNING)
-    def locate(self, **kwargs) -> str:
+    def locate(self, **kwargs) -> ActionReturnType:
         """Find the spatial location of a concept."""
-        return self.memory.dispatch_tool_call("locate", kwargs)
+        return True, self.memory.dispatch_tool_call("locate", kwargs)
 
     @component_action(description=_tool("recall"), phase=ActionPhase.PLANNING)
-    def recall(self, **kwargs) -> str:
+    def recall(self, **kwargs) -> ActionReturnType:
         """Recall everything known about a concept."""
-        return self.memory.dispatch_tool_call("recall", kwargs)
+        return True, self.memory.dispatch_tool_call("recall", kwargs)
 
     @component_action(description=_tool("body_status"), phase=ActionPhase.BOTH)
-    def body_status(self, **kwargs) -> str:
+    def body_status(self, **kwargs) -> ActionReturnType:
         """Get latest body/internal state readings."""
-        return self.memory.dispatch_tool_call("body_status", kwargs)
+        return True, self.memory.dispatch_tool_call("body_status", kwargs)
 
     ###  LLM tool registration ###
 

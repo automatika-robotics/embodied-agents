@@ -6,6 +6,7 @@ import numpy as np
 from ..clients.db_base import DBClient
 from ..config import MapConfig
 from ..ros import (
+    ActionReturnType,
     OccupancyGrid,
     Odometry,
     String,
@@ -327,7 +328,7 @@ class MapEncoding(Component):
             },
         }
     )
-    def add_point(self, layer: MapLayer, point: PriorMemory) -> None:
+    def add_point(self, layer: MapLayer, point: PriorMemory) -> ActionReturnType:
         """Component action to add a user defined point to the map collection.
         This action can be executed on an event.
 
@@ -335,9 +336,11 @@ class MapEncoding(Component):
         :type layer: MapLayer
         :param point: A pre-defined observation carrying text and an optional position
         :type point: PriorMemory
-        :rtype: None
+        :return: Whether the point was added, with a confirmation message
+        :rtype: ActionReturnType
         """
         self._fill_out_prior_memories(layer, point)
+        return True, f"Added the point to layer '{layer.subscribes_to.name}'"
 
     def _update_cmd_args_list(self):
         """

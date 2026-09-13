@@ -8,6 +8,7 @@ from ..ros import (
     ActionClientConfig,
     ActionClientHandler,
     ActionPhase,
+    ActionReturnType,
     ComponentRunType,
     Detections3D,
     Empty,
@@ -1042,7 +1043,9 @@ class MoveIt(Component):
             self._scene_objects.pop(object_id, None)
         return True, f"Detached '{object_id}' and removed it from the scene"
 
-    def _refresh_scene_from_detections(self, message: Optional[Any] = None) -> str:
+    def _refresh_scene_from_detections(
+        self, message: Optional[Any] = None
+    ) -> Tuple[bool, str]:
         """Push detections into the planning scene as one diff.
 
         Objects the detector stopped reporting are kept for
@@ -1055,7 +1058,8 @@ class MoveIt(Component):
 
         :param message: Detections to refresh from, when the caller has
             already read them. Default reads the latest received message
-        :returns: What happened, for the caller and for tool use
+        :returns: Whether the scene is as up to date as it can be, and what
+            happened. A refresh skipped by design is not a failure
         """
         from ..utils.moveit import (
             build_remove_object,
@@ -1065,7 +1069,7 @@ class MoveIt(Component):
         with self._scene_lock:
             held = any(entry.get("attached") for entry in self._scene_objects.values())
         if held or self._contact_freeze:
-            return (
+            return True, (
                 (
                     "Scene refresh skipped while an object is held: the scene "
                     "stays as captured before the grasp, until release"
@@ -1083,7 +1087,7 @@ class MoveIt(Component):
 
         if message is None:
             if not self._detections_topic:
-                return (
+                return False, (
                     "No detections input is connected to this component, so "
                     "there is nothing to update the planning scene from"
                 )
@@ -1092,7 +1096,7 @@ class MoveIt(Component):
             # the message itself for the boxes
             message = callback.get_output(get_msg=True) if callback else None
             if message is None:
-                return "No detections have been received yet"
+                return False, "No detections have been received yet"
 
         now = time.time()
         objects, stale = self._partition_scene_changes(
@@ -1107,9 +1111,9 @@ class MoveIt(Component):
 
         changes = objects + [build_remove_object(object_id) for object_id in stale]
         if not changes:
-            return "The planning scene is already up to date"
+            return True, "The planning scene is already up to date"
         if not self._apply_scene(changes):
-            return "Could not update the planning scene"
+            return False, "Could not update the planning scene"
 
         added = []
         with self._scene_lock:
@@ -1142,7 +1146,7 @@ class MoveIt(Component):
             summary += f": {', '.join(added)}"
         if stale:
             summary += f"; removed {len(stale)} stale object(s)"
-        return summary
+        return True, summary
 
     def _partition_scene_changes(
         self, objects: List[Any], now: float
@@ -1195,7 +1199,7 @@ class MoveIt(Component):
             return
 
         self._last_scene_message = message
-        result = self._refresh_scene_from_detections(message)
+        _, result = self._refresh_scene_from_detections(message)
         self.get_logger().debug(result)
 
     def _has_stale_objects(self, now: float) -> bool:
@@ -1217,7 +1221,7 @@ class MoveIt(Component):
         if self.config.scene_update_mode != "on_goal" or not self._detections_topic:
             return
         self._publish_state(goal_handle, "UPDATING_SCENE")
-        scene_status = self._refresh_scene_from_detections()
+        _, scene_status = self._refresh_scene_from_detections()
         self.get_logger().info(scene_status)
 
     # =========================================================================
@@ -1722,14 +1726,13 @@ class MoveIt(Component):
         active=True,
         phase=ActionPhase.EXECUTION,
     )
-    def open_gripper(self) -> str:
+    def open_gripper(self) -> ActionReturnType:
         """Open the gripper"""
-        _, message = self._command_gripper(
+        return self._command_gripper(
             named_target=self.config.gripper_open_target,
             position=self.config.gripper_open_position,
             description="open",
         )
-        return message
 
     @component_action(
         description={
@@ -1743,14 +1746,13 @@ class MoveIt(Component):
         active=True,
         phase=ActionPhase.EXECUTION,
     )
-    def close_gripper(self) -> str:
+    def close_gripper(self) -> ActionReturnType:
         """Close the gripper"""
-        _, message = self._command_gripper(
+        return self._command_gripper(
             named_target=self.config.gripper_close_target,
             position=self.config.gripper_close_position,
             description="close",
         )
-        return message
 
     @component_action(
         description={
@@ -1773,17 +1775,16 @@ class MoveIt(Component):
         active=True,
         phase=ActionPhase.EXECUTION,
     )
-    def set_gripper(self, position: float) -> str:
+    def set_gripper(self, position: float) -> ActionReturnType:
         """Move the gripper to a given position"""
         if self.config.gripper_mode != "gripper_command":
-            return (
+            return False, (
                 "Setting a specific gripper position requires gripper_mode to be "
                 "'gripper_command'. Use open_gripper or close_gripper instead."
             )
-        _, message = self._command_gripper(
+        return self._command_gripper(
             named_target=None, position=float(position), description=str(position)
         )
-        return message
 
     @component_action(
         description={
@@ -1797,7 +1798,7 @@ class MoveIt(Component):
         active=True,
         phase=ActionPhase.EXECUTION,
     )
-    def stop_motion(self) -> str:
+    def stop_motion(self) -> ActionReturnType:
         """Cancel any motion in progress"""
         stopped = []
         for name, handler in (
@@ -1810,9 +1811,9 @@ class MoveIt(Component):
                 if success:
                     stopped.append(name)
         if not stopped:
-            return "No motion is currently being executed"
+            return True, "No motion is currently being executed"
         self.get_logger().warning(f"Stopped motion: {', '.join(stopped)}")
-        return f"Stopped motion: {', '.join(stopped)}"
+        return True, f"Stopped motion: {', '.join(stopped)}"
 
     @component_action(
         description={
@@ -1825,12 +1826,12 @@ class MoveIt(Component):
         },
         phase=ActionPhase.BOTH,
     )
-    def get_named_targets(self) -> str:
+    def get_named_targets(self) -> ActionReturnType:
         """List the named targets available per planning group"""
         states = self._named_target_states()
         if not states:
-            return "No named targets are defined for this robot"
-        return "; ".join(
+            return True, "No named targets are defined for this robot"
+        return True, "; ".join(
             f"{group}: {', '.join(sorted(group_states))}"
             for group, group_states in states.items()
             if group_states
@@ -1877,7 +1878,7 @@ class MoveIt(Component):
         center: List[float],
         size: List[float],
         frame_id: str = "",
-    ) -> str:
+    ) -> ActionReturnType:
         """Add a box-shaped collision object to the planning scene.
 
         :param object_id: Scene-wide name; re-using one moves the object
@@ -1886,12 +1887,13 @@ class MoveIt(Component):
         :param frame_id: Frame the center is given in. Empty falls back to the
             configured `pose_reference_frame`, and an empty frame is read by
             move_group as its planning frame
-        :returns: What happened, for the caller and for tool use
+        :returns: Whether it succeeded and what happened, for the caller and
+            for tool use
         """
         from ..utils.moveit import build_collision_object
 
         if len(center) != 3 or len(size) != 3:
-            raise ValueError(
+            return False, (
                 "center and size must each have 3 values (x, y, z), got "
                 f"{len(center)} and {len(size)}"
             )
@@ -1904,7 +1906,7 @@ class MoveIt(Component):
             min_thickness=self.config.min_object_thickness,
         )
         if not self._apply_scene([obj]):
-            return f"Could not add '{object_id}' to the planning scene"
+            return False, f"Could not add '{object_id}' to the planning scene"
 
         with self._scene_lock:
             # geometry as applied (thickness floor included)
@@ -1916,7 +1918,7 @@ class MoveIt(Component):
                 "center": (position.x, position.y, position.z),
                 "size": (dimensions[0], dimensions[1], dimensions[2]),
             }
-        return f"Added '{object_id}' to the planning scene"
+        return True, f"Added '{object_id}' to the planning scene"
 
     @component_action(
         description={
@@ -1939,20 +1941,21 @@ class MoveIt(Component):
         active=True,
         phase=ActionPhase.EXECUTION,
     )
-    def remove_collision_object(self, object_id: str) -> str:
+    def remove_collision_object(self, object_id: str) -> ActionReturnType:
         """Remove one collision object from the planning scene.
 
         :param object_id: Id the object was added under
-        :returns: What happened, for the caller and for tool use
+        :returns: Whether it succeeded and what happened, for the caller and
+            for tool use
         """
         from ..utils.moveit import build_remove_object
 
         if not self._apply_scene([build_remove_object(object_id)]):
-            return f"Could not remove '{object_id}' from the planning scene"
+            return False, f"Could not remove '{object_id}' from the planning scene"
 
         with self._scene_lock:
             self._scene_objects.pop(object_id, None)
-        return f"Removed '{object_id}' from the planning scene"
+        return True, f"Removed '{object_id}' from the planning scene"
 
     @component_action(
         description={
@@ -1975,7 +1978,9 @@ class MoveIt(Component):
         active=True,
         phase=ActionPhase.EXECUTION,
     )
-    def clear_collision_objects(self, detections_only: bool = False) -> str:
+    def clear_collision_objects(
+        self, detections_only: bool = False
+    ) -> ActionReturnType:
         """Remove the collision objects this component put in the scene.
 
         Only objects this component knows it added are touched, so obstacles
@@ -1983,7 +1988,8 @@ class MoveIt(Component):
 
         :param detections_only: Only remove detection-sourced objects,
             keeping manually added ones
-        :returns: What happened, for the caller and for tool use
+        :returns: Whether it succeeded and what happened, for the caller and
+            for tool use
         """
         from ..utils.moveit import build_remove_object
 
@@ -1994,15 +2000,15 @@ class MoveIt(Component):
                 if not detections_only or entry["source"] == "detection"
             ]
         if not ids:
-            return "The planning scene holds no objects added by this component"
+            return True, "The planning scene holds no objects added by this component"
 
         if not self._apply_scene([build_remove_object(i) for i in ids]):
-            return "Could not clear the planning scene objects"
+            return False, "Could not clear the planning scene objects"
 
         with self._scene_lock:
             for object_id in ids:
                 self._scene_objects.pop(object_id, None)
-        return f"Removed {len(ids)} object(s) from the planning scene"
+        return True, f"Removed {len(ids)} object(s) from the planning scene"
 
     @component_action(
         description={
@@ -2016,14 +2022,14 @@ class MoveIt(Component):
         active=True,
         phase=ActionPhase.BOTH,
     )
-    def list_collision_objects(self) -> str:
+    def list_collision_objects(self) -> ActionReturnType:
         """List the collision objects in the planning scene.
 
         The scene is read back from move_group, which is authoritative: it
         also shows objects placed there by other tools. When move_group does
         not answer, the objects this component itself added are listed.
 
-        :returns: The object names, for the caller and for tool use
+        :returns: Success, with the object names for the caller and for tool use
         """
         from moveit_msgs.msg import PlanningSceneComponents
         from moveit_msgs.srv import GetPlanningScene
@@ -2035,14 +2041,16 @@ class MoveIt(Component):
             if response is not None:
                 names = sorted(o.id for o in response.scene.world.collision_objects)
                 if not names:
-                    return "The planning scene contains no collision objects"
-                return f"Collision objects in the planning scene: {', '.join(names)}"
+                    return True, "The planning scene contains no collision objects"
+                return True, (
+                    f"Collision objects in the planning scene: {', '.join(names)}"
+                )
 
         with self._scene_lock:
             names = sorted(self._scene_objects)
         if not names:
-            return "The planning scene contains no collision objects"
-        return (
+            return True, "The planning scene contains no collision objects"
+        return True, (
             "move_group did not answer; objects added by this component: "
             f"{', '.join(names)}"
         )
@@ -2059,18 +2067,21 @@ class MoveIt(Component):
         active=True,
         phase=ActionPhase.EXECUTION,
     )
-    def clear_octomap(self) -> str:
+    def clear_octomap(self) -> ActionReturnType:
         """Clear the octomap accumulated in the planning scene.
 
-        :returns: What happened, for the caller and for tool use
+        :returns: Whether it succeeded and what happened, for the caller and
+            for tool use
         """
         if not self._clear_octomap_client:
-            return "The octomap client is not available, is the component active?"
+            return False, (
+                "The octomap client is not available, is the component active?"
+            )
 
         response = self._clear_octomap_client.send_request(Empty.Request())
         if response is None:
-            return "move_group did not answer the octomap clear request"
-        return "Cleared the planning scene octomap"
+            return False, "move_group did not answer the octomap clear request"
+        return True, "Cleared the planning scene octomap"
 
     @component_action(
         description={
@@ -2102,7 +2113,7 @@ class MoveIt(Component):
         object_id: str,
         link_name: str = "",
         touch_links: Optional[List[str]] = None,
-    ) -> str:
+    ) -> ActionReturnType:
         """Attach a scene object to a robot link, as on a grasp.
 
         move_group removes the object from the world and carries it with the
@@ -2113,10 +2124,10 @@ class MoveIt(Component):
             the configured end effector link
         :param touch_links: Links allowed to stay in contact with the object.
             Default resolves them from the config or the robot SRDF
-        :returns: What happened, for the caller and for tool use
+        :returns: Whether it succeeded and what happened, for the caller and
+            for tool use
         """
-        _, message = self._do_attach(object_id, link_name, touch_links)
-        return message
+        return self._do_attach(object_id, link_name, touch_links)
 
     @component_action(
         description={
@@ -2143,17 +2154,17 @@ class MoveIt(Component):
         active=True,
         phase=ActionPhase.EXECUTION,
     )
-    def detach_object(self, object_id: str, remove: bool = False) -> str:
+    def detach_object(self, object_id: str, remove: bool = False) -> ActionReturnType:
         """Detach an attached object, returning it to the world.
 
         :param object_id: Name the object was attached under
         :param remove: Also remove the object from the scene entirely. The
             default keeps it where it was released, which matches what
             physically happened
-        :returns: What happened, for the caller and for tool use
+        :returns: Whether it succeeded and what happened, for the caller and
+            for tool use
         """
-        _, message = self._do_detach(object_id, remove)
-        return message
+        return self._do_detach(object_id, remove)
 
     @component_action(
         description={
@@ -2167,13 +2178,14 @@ class MoveIt(Component):
         active=True,
         phase=ActionPhase.EXECUTION,
     )
-    def update_planning_scene(self) -> str:
+    def update_planning_scene(self) -> ActionReturnType:
         """Update the planning scene from the latest received detections.
 
         Calling this explicitly overrides the automatic freeze left by an
         interrupted pick or place. The freeze while an object is held stands.
 
-        :returns: What happened, for the caller and for tool use
+        :returns: Whether it succeeded and what happened, for the caller and
+            for tool use
         """
         if self._contact_freeze:
             self._set_grasp_contact(self._contact_freeze, False)

@@ -10,6 +10,7 @@ from ..clients.model_base import ModelClient
 from ..clients.roboml import RoboMLWSClient
 from ..config import ModelComponentConfig
 from ..ros import (
+    ActionReturnType,
     FixedInput,
     Topic,
     SupportedType,
@@ -111,7 +112,7 @@ class ModelComponent(Component):
             },
         }
     )
-    def fallback_to_local(self) -> str:
+    def fallback_to_local(self) -> ActionReturnType:
         """Switch from remote model_client to the built-in local model at runtime.
 
         The local model is deployed on first call (lazy initialization) to avoid
@@ -120,9 +121,9 @@ class ModelComponent(Component):
 
         This is commonly used as a target for Actions in the Event system.
 
-        :return: A confirmation message describing the switch.
-        :rtype: str
-        :raises RuntimeError: If the local model could not be deployed.
+        :return: Whether the switch happened, with a confirmation message or
+            why the local model could not be deployed.
+        :rtype: ActionReturnType
 
         :Example:
 
@@ -147,7 +148,7 @@ class ModelComponent(Component):
         try:
             self._deploy_local_model()
         except Exception as e:
-            raise RuntimeError(f"Failed to deploy local model: {e}") from e
+            return False, f"Failed to deploy local model: {e}"
 
         # Deinitialize remote client
         if self.model_client:
@@ -158,7 +159,10 @@ class ModelComponent(Component):
             self.model_client = None
 
         self.get_logger().info("Switched to local model for inference.")
-        return f"Component '{self.node_name}' switched to local model for inference."
+        return (
+            True,
+            f"Component '{self.node_name}' switched to local model for inference.",
+        )
 
     @component_fallback(
         description={
@@ -179,7 +183,7 @@ class ModelComponent(Component):
             },
         }
     )
-    def change_model_client(self, model_client_name: str) -> str:
+    def change_model_client(self, model_client_name: str) -> ActionReturnType:
         """
         Hot-swap the active model client at runtime.
 
@@ -191,10 +195,10 @@ class ModelComponent(Component):
 
         :param model_client_name: The key corresponding to the desired client in ``additional_model_clients``.
         :type model_client_name: str
-        :return: A confirmation message describing the swap.
-        :rtype: str
-        :raises RuntimeError: If no additional clients are registered, the
-            requested client name is not found, or initialization fails.
+        :return: Whether the swap happened, with a confirmation message or why
+            not: no additional clients are registered, the requested client
+            name is not found, or its initialization failed.
+        :rtype: ActionReturnType
 
         :Example:
 
@@ -213,13 +217,13 @@ class ModelComponent(Component):
         ```
         """
         if not self._additional_model_clients:
-            raise RuntimeError(
+            return False, (
                 "Cannot change model client as the component was not given any "
                 "additional model clients at init."
             )
         new_client = self._additional_model_clients.get(model_client_name, None)
         if not new_client:
-            raise RuntimeError(
+            return False, (
                 f"No additional client named '{model_client_name}' is available. "
                 f"Available clients: {list(self._additional_model_clients.keys())}"
             )
@@ -235,11 +239,12 @@ class ModelComponent(Component):
             self.model_client = new_client
             self.model_client.initialize()  # initialize the new client
         except Exception as e:
-            raise RuntimeError(
-                f"Error initializing new model client '{model_client_name}': {e}"
-            ) from e
+            return (
+                False,
+                f"Error initializing new model client '{model_client_name}': {e}",
+            )
 
-        return (
+        return True, (
             f"Component '{self.node_name}' switched to model client "
             f"'{model_client_name}'."
         )

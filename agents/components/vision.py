@@ -9,6 +9,7 @@ import cv2
 from ..clients.model_base import ModelClient
 from ..config import VisionConfig
 from ..ros import (
+    ActionReturnType,
     CameraInfo,
     DetectionsMultiSource,
     Detections,
@@ -380,7 +381,7 @@ class Vision(DepthLiftMixin, ModelComponent):
         topic_name: str,
         save_path: str = "~/emos/pictures",
         timeout: float = 0.5,
-    ) -> str:
+    ) -> ActionReturnType:
         """
         Take a picture from a specific input topic and save it to the specified location.
 
@@ -396,10 +397,10 @@ class Vision(DepthLiftMixin, ModelComponent):
         :param timeout: Timeout if an image is not available on the topic.
                           Defaults to 0.5 seconds.
         :type timeout: float
-        :return: The full path to the saved image file.
-        :rtype: str
-        :raises ValueError: If the topic is not one of the component inputs.
-        :raises TimeoutError: If no image was received within the timeout.
+        :return: Whether a picture was saved, with its full path or why not:
+            the topic is not one of the component inputs, or no image was
+            received within the timeout.
+        :rtype: ActionReturnType
         """
         # Preflight check for timed components
         if (
@@ -418,7 +419,7 @@ class Vision(DepthLiftMixin, ModelComponent):
         trig_dict = getattr(self, "trig_callbacks", {})
         target_callback = trig_dict.get(topic_name) or self.callbacks.get(topic_name)
         if not target_callback:
-            raise ValueError(
+            return False, (
                 f"Topic '{topic_name}' is not one of the component inputs. "
                 "You can only take pictures on topics that are provided as "
                 "inputs to this component."
@@ -462,9 +463,7 @@ class Vision(DepthLiftMixin, ModelComponent):
                 target_callback._extra_callback = None
 
         if not frames:
-            raise TimeoutError(
-                f"Timeout: No image received on '{topic_name}' within {timeout}s."
-            )
+            return False, f"No image received on '{topic_name}' within {timeout}s"
 
         # Save Image
         timestamp = int(time.time() * 1000)
@@ -476,7 +475,7 @@ class Vision(DepthLiftMixin, ModelComponent):
         cv2.imwrite(full_path, save_img)
         self.get_logger().info(f"Saved picture to {full_path}")
 
-        return f"Picture from '{topic_name}' saved to {full_path}"
+        return True, f"Picture from '{topic_name}' saved to {full_path}"
 
     @component_action(
         description={
@@ -515,7 +514,7 @@ class Vision(DepthLiftMixin, ModelComponent):
         duration: float = 5.0,
         save_path: str = "~/emos/videos",
         fps: int = 30,
-    ) -> str:
+    ) -> ActionReturnType:
         """
         Record a video from a specific input topic for a set duration.
 
@@ -531,9 +530,9 @@ class Vision(DepthLiftMixin, ModelComponent):
         :type save_path: str
         :param fps: The frames per second for the recording. Defaults to 20.
         :type fps: int
-        :return: A confirmation message describing the started recording.
-        :rtype: str
-        :raises ValueError: If the topic is not one of the component inputs.
+        :return: Whether the recording started, with a confirmation message or
+            why not: the topic is not one of the component inputs.
+        :rtype: ActionReturnType
         """
         # Preflight checks for timed components
         if self.run_type == ComponentRunType.TIMED:
@@ -556,7 +555,7 @@ class Vision(DepthLiftMixin, ModelComponent):
         target_callback = trig_dict.get(topic_name) or self.callbacks.get(topic_name)
         # Identify callback type
         if not target_callback:
-            raise ValueError(
+            return False, (
                 f"Topic '{topic_name}' is not one of the component inputs. "
                 "You can only record videos on topics that are provided as "
                 "inputs to this component."
@@ -592,7 +591,7 @@ class Vision(DepthLiftMixin, ModelComponent):
         # infrastructure is in place to allow for monitoring and returning
         # results from async actions.
 
-        return (
+        return True, (
             f"Started recording {duration}s video from '{topic_name}' at {fps} FPS. "
             f"Video will be saved to {save_path}."
         )
@@ -623,7 +622,7 @@ class Vision(DepthLiftMixin, ModelComponent):
             },
         }
     )
-    def track(self, label: str) -> str:
+    def track(self, label: str) -> ActionReturnType:
         """Start tracking objects matching the given label.
 
         Configures the remote model server to enable ByteTrack trackers
@@ -633,10 +632,10 @@ class Vision(DepthLiftMixin, ModelComponent):
 
         :param label: Object label to track (e.g. 'person', 'cup').
         :type label: str
-        :return: A confirmation message describing the started tracking.
-        :rtype: str
-        :raises RuntimeError: If the component does not have a remote
-            RoboML model client or a Tracking output topic.
+        :return: Whether tracking started, with a confirmation message or why
+            not: the component has no remote RoboML model client or no
+            Tracking output topic.
+        :rtype: ActionReturnType
         """
         from ..clients.roboml import RoboMLHTTPClient, RoboMLRESPClient
 
@@ -644,7 +643,7 @@ class Vision(DepthLiftMixin, ModelComponent):
         if not self.model_client or not isinstance(
             self.model_client, (RoboMLHTTPClient, RoboMLRESPClient)
         ):
-            raise RuntimeError(
+            return False, (
                 "Tracking requires a RoboML model client. "
                 "Local models do not support tracking."
             )
@@ -654,7 +653,7 @@ class Vision(DepthLiftMixin, ModelComponent):
             t.msg_type in (Trackings, TrackingsMultiSource) for t in self.out_topics
         )
         if not has_tracking_output:
-            raise RuntimeError(
+            return False, (
                 "Tracking requires at least one output topic of type "
                 "Trackings or TrackingsMultiSource."
             )
@@ -672,7 +671,7 @@ class Vision(DepthLiftMixin, ModelComponent):
         self.config.labels_to_track = [label]
         self.inference_params = self.config._get_inference_params()
         self.get_logger().info(f"Now tracking: '{label}'")
-        return (
+        return True, (
             f"Tracking started for label '{label}'. Tracking results are now "
             "being published on the component's Tracking output topics."
         )
