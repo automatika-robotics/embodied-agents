@@ -42,6 +42,7 @@ from ros_sugar.config import (
     base_validators,
 )
 from ros_sugar.core import BaseComponent, Monitor
+from ros_sugar.core._action_registry import SystemActionRegistry
 from ros_sugar.core.component import MutuallyExclusiveCallbackGroup
 from ros_sugar import UI_EXTENSIONS
 from ros_sugar.utils import (
@@ -146,6 +147,7 @@ __all__ = [
     "component_fallback",
     "component_action",
     "ActionReturnType",
+    "SystemActionRegistry",
     "VisionLanguageAction",
     "MoveManipulator",
     "GetParameters",
