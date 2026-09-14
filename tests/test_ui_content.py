@@ -30,6 +30,28 @@ def test_video_ui_content_is_the_last_frame_as_jpeg():
     assert frame[4, 4, 0] > 200 and frame[4, 4, 2] < 50
 
 
+def test_joint_state_ui_content_is_json_with_names():
+    """Positions stay where Sugarcoat's JointState payload has them"""
+    from sensor_msgs.msg import JointState as JointStateROS
+
+    from agents.callbacks import JointStateCallback
+
+    callback = JointStateCallback(Topic(name="joints", msg_type="JointState"))
+    callback.msg = JointStateROS(
+        name=["shoulder", "elbow"], position=[0.1, 0.2], velocity=[0.5, 0.0]
+    )
+
+    content = callback._get_ui_content()
+
+    json.dumps(content)  # served as JSON by the UI API
+    assert content == {
+        "data": [0.1, 0.2],
+        "names": ["shoulder", "elbow"],
+        "velocities": [0.5, 0.0],
+        "efforts": [],
+    }
+
+
 def _chunk(text, done):
     from agents.ros import StreamingString
 

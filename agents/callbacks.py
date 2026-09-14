@@ -445,6 +445,16 @@ class JointStateCallback(GenericCallback):
             efforts=np.array(self.msg.effort),
         )
 
+    def _get_ui_content(self, **_) -> Dict:
+        """Positions under ``data``, the shape of Sugarcoat's JointState
+        payload, with the names, velocities and efforts"""
+        return {
+            "data": list(self.msg.position),
+            "names": list(self.msg.name),
+            "velocities": list(self.msg.velocity),
+            "efforts": list(self.msg.effort),
+        }
+
 
 class Detections3DCallback(GenericCallback):
     """
