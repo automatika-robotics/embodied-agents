@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 import os
 import cv2
 import numpy as np
@@ -40,10 +40,10 @@ class StreamingStringCallback(TextCallback):
         self._stream_text += msg.data
         super().callback(msg)
 
-    def _get_ui_content(self, **_) -> str:
+    def _get_ui_content(self, **_) -> Dict:
         """Full text of the current stream, so latest-value readers never miss
-        coalesced chunks."""
-        return self._stream_text
+        coalesced chunks, and whether the stream is done."""
+        return {"data": self._stream_text, "done": self.msg.done}
 
     def _get_output(self, **_) -> Optional[str]:
         """Gets text.
@@ -127,6 +127,13 @@ class VideoCallback(GenericCallback):
                 self.compressed_encoding = parse_format(img.format)
             video.append(read_compressed_image(img, self.compressed_encoding))
         return np.array(video)
+
+    def _get_ui_content(self, **_) -> str:
+        """Last frame of the video as a base64 JPEG, shown like an Image"""
+        video = self.get_output()
+        if video is None or not len(video):
+            return ""
+        return convert_img_to_jpeg_str(video[-1], self.node_name)
 
 
 class RGBDCallback(GenericCallback):
