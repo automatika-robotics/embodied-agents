@@ -65,7 +65,7 @@ class Memory(Component):
     instead of flat vector DB storage.
 
     :param layers: Input layers to encode. Each layer subscribes to a topic
-        whose callback produces a string via ``_get_ui_content``. Layers with
+        whose callback produces a string via ``get_output``. Layers with
         ``is_internal_state=True`` are written via ``add_body_state`` and
         retrieved through the ``body_status`` tool; all other layers are
         perception layers retrieved through ``semantic_search`` and friends.
