@@ -41,8 +41,7 @@ from ros_sugar.config import (
     BaseAttrs,
     base_validators,
 )
-from ros_sugar.core import BaseComponent, Monitor
-from ros_sugar.core._action_registry import SystemActionRegistry
+from ros_sugar.core import BaseComponent, Monitor, SystemActionRegistry
 from ros_sugar.core.component import MutuallyExclusiveCallbackGroup
 from ros_sugar import UI_EXTENSIONS
 from ros_sugar.utils import (
