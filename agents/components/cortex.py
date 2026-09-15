@@ -1,34 +1,34 @@
-from copy import copy
 import json
 import os
 import time
-from typing import Optional, List, Dict, Set, Any, Tuple
+from copy import copy
+from typing import Any, Dict, List, Optional, Set, Tuple
 
-from ..clients.model_base import ModelClient
 from ..clients.db_base import DBClient
+from ..clients.model_base import ModelClient
 from ..config import CortexConfig
 from ..ros import (
-    SystemActionRegistry,
-    String,
-    StreamingString,
-    Topic,
     Action,
-    Event,
-    ComponentRunType,
-    VisionLanguageAction,
-    Monitor,
+    ActionClientHandler,
     BaseComponent,
     BaseComponentConfig,
-    ActionClientHandler,
+    ComponentRunType,
+    Event,
+    Monitor,
     ServiceClientHandler,
-    ros_msg_to_str,
+    StreamingString,
+    String,
+    SystemActionRegistry,
+    Topic,
+    VisionLanguageAction,
+    get_logger,
     get_methods_with_decorator,
-    get_logger
+    ros_msg_to_str,
 )
 from ..utils import (
-    validate_func_args,
-    strip_think_tokens,
     execute_method_response_to_str,
+    strip_think_tokens,
+    validate_func_args,
 )
 from ..utils.actions import goal_type_to_json_properties
 from .model_component import ModelComponent
@@ -161,9 +161,11 @@ class Cortex(ModelComponent, Monitor):
         self._effective_planning_prompt = self._PLANNING_PROMPT
 
         # Planning-prompt addenda. The effective planning prompt is always
-        # _PLANNING_PROMPT + _robot_description + _memory_addendum
-        self._robot_description = ""   # set by set_robot_description()
-        self._memory_addendum = ""     # set by _augment_planning_prompt_for_memory()
+        # _PLANNING_PROMPT + _robot_description + _sensors_description
+        # + _memory_addendum
+        self._robot_description = ""  # set by set_robot_description()
+        self._sensors_description = ""  # set by set_sensor_descriptions()
+        self._memory_addendum = ""  # set by _augment_planning_prompt_for_memory()
 
         # Initialize messages buffer
         self.messages: List[Dict] = [
@@ -181,6 +183,8 @@ class Cortex(ModelComponent, Monitor):
         # Action server goals and Service request tools
         self._action_goal_tools: Dict[str, Tuple[str, str, Any]] = {}
         self._service_request_tools: Dict[str, Tuple[str, str, Any]] = {}
+        # Plugin action tools: tool name -> (plugin, action name, tool parameters)
+        self._plugin_action_tools: Dict[str, Tuple[Any, str, Dict]] = {}
 
         # Behavioral actions: dispatched via internal event system
         self._behavioral_actions = actions
@@ -230,17 +234,9 @@ class Cortex(ModelComponent, Monitor):
         # set the cortex action name
         self.main_action_name = "cortex_input_command"
 
-    @staticmethod
-    def _validate_actions(actions: Optional[List[Action]]):
-        """Validate that all passed actions have descriptions."""
-        if not actions:
-            return
-        for action in actions:
-            if not action.description:
-                raise ValueError(
-                    "Each Cortex Action must have a description for the planner. "
-                    f"Action '{action.action_name}' is missing a description."
-                )
+    # =========================================================================
+    # Monitor setup (called by the Launcher)
+    # =========================================================================
 
     def _init_internal_monitor(
         self,
@@ -257,7 +253,7 @@ class Cortex(ModelComponent, Monitor):
         action_registry: Optional[SystemActionRegistry] = None,
         **_,
     ):
-        """Initialize Monitor capabilities. Called by the Launcher. """
+        """Initialize Monitor capabilities. Called by the Launcher."""
         # Store component references for introspection by inspect_component
         self._managed_components: Dict[str, BaseComponent] = {}
         if components:
@@ -281,6 +277,22 @@ class Cortex(ModelComponent, Monitor):
         )
         self.config = _config
         self._setup_internal_action_events(self._behavioral_actions)
+
+    # =========================================================================
+    # Tools: recipe actions (dispatched via internal events)
+    # =========================================================================
+
+    @staticmethod
+    def _validate_actions(actions: Optional[List[Action]]):
+        """Validate that all passed actions have descriptions."""
+        if not actions:
+            return
+        for action in actions:
+            if not action.description:
+                raise ValueError(
+                    "Each Cortex Action must have a description for the planner. "
+                    f"Action '{action.action_name}' is missing a description."
+                )
 
     def _setup_internal_action_events(self, actions: Optional[List[Action]]) -> None:
         """Create internal event topics and tool descriptions for each action."""
@@ -307,23 +319,54 @@ class Cortex(ModelComponent, Monitor):
             self._execution_tools.add(name)
             self._execution_tool_descriptions.append(tool_description)
 
+    def _dispatch_action(self, name: str) -> str:
+        """Dispatch an action by publishing to its internal event topic."""
+        dispatch_method = self.emit_internal_event_methods.get(name, None)
+        if not dispatch_method:
+            available = list(self.emit_internal_event_methods.keys())
+            return (
+                f"Error: Action '{name}' does not exist. Available actions: {available}"
+            )
+        try:
+            dispatch_method()
+            return f"Action '{name}' dispatched."
+        except Exception as e:
+            return f"Error dispatching action '{name}': {e}"
+
+    # =========================================================================
+    # Tools: plugin actions (run in the launcher process)
+    # =========================================================================
+
+    @staticmethod
+    def _plugin_namespace(plugin: Any) -> str:
+        """Namespace a plugin's actions are registered under: the plugin's id.
+
+        The id is unique within a recipe, so two sensors of the same kind get
+        distinct tools. An object without one falls back to its metadata name
+        and to "robot" if that is empty.
+        """
+        plugin_id = getattr(plugin, "id", None)
+        if isinstance(plugin_id, str) and plugin_id:
+            return plugin_id
+        metadata_name = getattr(getattr(plugin, "metadata", None), "name", "") or ""
+        return metadata_name.strip().lower().replace(" ", "_") or "robot"
+
     def add_plugin_actions(self, plugin: Any) -> None:
-        """Expose a robot plugin's actions to cortex as execution tools.
+        """Expose a plugin's actions to cortex as execution tools.
 
-        Each `robot.ActionRegistry` factory on ``plugin`` is
-        materialized once, namespaced as ``{plugin_ns}.{action_name}`` and gets
-        added as a behavioral action.
+        Works for the robot plugin and for sensor plugins alike. Each
+        `robot.ActionRegistry` factory on ``plugin`` is registered as
+        ``{plugin_id}.{action_name}``. Nothing is built here: when the tool is
+        called, the factory builds the action from the call's arguments and
+        cortex runs it (see `_call_plugin_action`).
 
-        :param plugin: A `robot.RobotPlugin` instance with
-            an ``actions`` registry. Plugins without actions are a no-op.
+        :param plugin: A `robot.Plugin` instance with an ``actions`` registry.
+            Plugins without actions are a no-op.
         """
         if plugin is None or not getattr(plugin, "actions", None):
             return
 
-        # Namespace: plugin display name lowercased, spaces -> underscores;
-        # falls back to "robot" if the plugin author left metadata.name empty.
-        metadata_name = getattr(getattr(plugin, "metadata", None), "name", "") or ""
-        ns = metadata_name.strip().lower().replace(" ", "_") or "robot"
+        ns = self._plugin_namespace(plugin)
 
         tool_descriptions = plugin.actions.tool_descriptions(namespace=ns)
         if not tool_descriptions:
@@ -333,38 +376,483 @@ class Cortex(ModelComponent, Monitor):
         for tool_desc in tool_descriptions:
             tool_name = tool_desc["function"]["name"]
             if tool_name in self._execution_tools:
-                get_logger('cortex').warning(
+                get_logger("cortex").warning(
                     f"Plugin action '{tool_name}' collides with an existing "
                     "tool; skipping."
                 )
                 continue
 
-            # Materialize the Action from the factory
             local_name = tool_name.split(".", 1)[1]
-            factory = getattr(plugin.actions, local_name)
-            try:
-                action = factory()
-            except Exception as e:
-                get_logger('cortex').error(
-                    f"Failed to materialize plugin action '{tool_name}': {e}"
-                )
-                continue
-            action.action_name = tool_name
-            if not action.description:
-                action._description = tool_desc["function"].get("description", "")
-
-            Monitor.add_internal_event_action_pair(
-                self, event_id=tool_name, action=action
-            )
+            parameters = tool_desc["function"].get("parameters") or {}
+            self._plugin_action_tools[tool_name] = (plugin, local_name, parameters)
             self._execution_tools.add(tool_name)
             self._execution_tool_descriptions.append(tool_desc)
             registered.append(tool_name)
 
         if registered:
-            get_logger('cortex').info(
+            get_logger("cortex").info(
                 f"Registered {len(registered)} plugin action(s) from '{ns}' "
                 f"as Cortex execution tools: {registered}"
             )
+
+    def _call_plugin_action(self, tool_name: str, args: Dict) -> str:
+        """Build a plugin action from the call's arguments and run it.
+
+        Only the arguments the tool declares reach the factory. Anything else
+        would land in the ``Action``'s own keyword arguments. A call missing a
+        required argument is refused.
+
+        :param tool_name: The plugin tool, ``{plugin_id}.{action_name}``
+        :param args: Parsed tool-call arguments
+        :return: The action's message, or an error line on failure
+        """
+        plugin, local_name, parameters = self._plugin_action_tools[tool_name]
+        declared = parameters.get("properties") or {}
+        if missing := [k for k in parameters.get("required", []) if k not in args]:
+            return (
+                f"Error: {tool_name} failed with error: missing required "
+                f"argument(s) {missing}"
+            )
+        if ignored := sorted(set(args) - set(declared)):
+            self.get_logger().warning(
+                f"Ignoring arguments {ignored} that {tool_name} does not declare"
+            )
+        call_args = {k: v for k, v in args.items() if k in declared}
+
+        self.get_logger().info(
+            f"Calling plugin action {tool_name} with args: {call_args}"
+        )
+        action = getattr(plugin.actions, local_name)(**call_args)
+        action.action_name = tool_name
+        success, message = action()
+        if not success:
+            return f"Error: {tool_name} failed with error: {message}"
+        return message or f"{tool_name} executed successfully"
+
+    # =========================================================================
+    # Tools: components (reached through the Monitor)
+    # =========================================================================
+
+    def _register_system_tools(self):
+        """Register system management capabilities and component actions as LLM tools.
+
+        Called during activation after Monitor.activate() has created service
+        clients. Discovers all @component_action and @component_fallback methods
+        on managed components and registers them as callable tools.
+
+        Tools are separated into two categories:
+        - **Planning tools** (``inspect_component``): used during the planning
+          loop to research components before building a plan.
+        - **Execution tools** (``update_parameter``, ``send_goal_to_*``,
+          component actions): used in the execution plan.
+        """
+        component_names_str = ", ".join(self._components_to_monitor)
+
+        # inspect_component: planning-only tool
+        inspect_desc = {
+            "type": "function",
+            "function": {
+                "name": "inspect_component",
+                "description": (
+                    "Get detailed information about a component: its input/output "
+                    "topics, available actions, and additional model clients. "
+                    "Use this to discover topic names or understand a component "
+                    "before calling its actions. "
+                    f"Available components: {component_names_str}"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "component": {
+                            "type": "string",
+                            "description": "Component name to inspect.",
+                        },
+                    },
+                    "required": ["component"],
+                },
+            },
+        }
+        self._planning_tools.add("inspect_component")
+        self._planning_tool_descriptions.append(inspect_desc)
+
+        # update_parameter: execution tool
+        update_param_desc = {
+            "type": "function",
+            "function": {
+                "name": "update_parameter",
+                "description": (
+                    "Update a configuration parameter on a component. "
+                    f"Available components: {component_names_str}"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "component": {
+                            "type": "string",
+                            "description": "Component name",
+                        },
+                        "param_name": {
+                            "type": "string",
+                            "description": "Parameter name to update",
+                        },
+                        "new_value": {
+                            "type": "string",
+                            "description": "New value for the parameter",
+                        },
+                    },
+                    "required": ["component", "param_name", "new_value"],
+                },
+            },
+        }
+        self._execution_tools.add("update_parameter")
+        self._execution_tool_descriptions.append(update_param_desc)
+
+        # Per-component action goal tools: execution tools
+        for comp_name, action_client in self._main_action_clients.items():
+            self.__register_action_client_as_tool(
+                component_name=comp_name,
+                action_name=action_client.config.name,
+                action_type=action_client.config.action_type,
+            )
+
+        # Discover and register component actions from all managed components
+        self._register_component_actions()
+
+    # Lifecycle management methods that should not be exposed as LLM tools.
+    # These are handled by the Monitor / Launcher
+    _LIFECYCLE_METHODS = frozenset({
+        "start",
+        "stop",
+        "restart",
+        "reconfigure",
+        "set_param",
+        "set_params",
+        "broadcast_status",
+    })
+
+    def _register_component_actions(self):
+        """Discover LLM tools on managed components.
+
+        For each managed component, registers:
+          1. Its ``@component_action`` / ``@component_fallback`` methods
+             (routed to the planning or execution toolset based on the
+             ``_action_phase`` tag from ``agents.ros.component_action``).
+          2. Its additional ROS services as tools.
+          3. Its additional ROS action servers as tools.
+
+        Lifecycle management methods (start, stop, restart, ...) are
+        excluded. Tool names are namespaced as ``{component_name}.{method_name}``.
+        """
+        for comp_name, comp in self._managed_components.items():
+            self._register_component_methods_as_tools(comp_name, comp)
+            self._register_component_entrypoints_as_tools(comp_name, comp)
+
+    def _register_component_methods_as_tools(self, comp_name: str, comp: Any) -> None:
+        """Register decorated action/fallback methods on one component.
+
+        For each method:
+          1. Parse the raw ``_action_description`` into OpenAI tool format
+             (falling back to a docstring stub if not valid JSON).
+          2. Read the ``_action_phase`` tag (default ``execution``) and
+             add the tool to the planning set, execution set, or both.
+        """
+        action_methods = get_methods_with_decorator(comp, "component_action")
+        fallback_methods = get_methods_with_decorator(comp, "component_fallback")
+
+        for attr_name in action_methods + fallback_methods:
+            if attr_name in self._LIFECYCLE_METHODS:
+                continue
+
+            class_attr = getattr(type(comp), attr_name, None)
+            desc_raw = (
+                getattr(class_attr, "_action_description", None) if class_attr else None
+            )
+            if not desc_raw:
+                continue
+
+            tool_name = f"{comp_name}.{attr_name}"
+            try:
+                parsed = json.loads(desc_raw)
+                tool_desc = {
+                    "type": "function",
+                    "function": {**parsed["function"], "name": tool_name},
+                }
+            except (json.JSONDecodeError, TypeError, KeyError):
+                tool_desc = {
+                    "type": "function",
+                    "function": {
+                        "name": tool_name,
+                        "description": desc_raw[:200],
+                        "parameters": {
+                            "type": "object",
+                            "properties": {},
+                            "required": [],
+                        },
+                    },
+                }
+
+            phase = getattr(class_attr, "_action_phase", "execution")
+            if phase in ("planning", "both") and tool_name not in self._planning_tools:
+                self._planning_tools.add(tool_name)
+                self._planning_tool_descriptions.append(tool_desc)
+            if (
+                phase in ("execution", "both")
+                and tool_name not in self._execution_tools
+            ):
+                self._execution_tools.add(tool_name)
+                self._execution_tool_descriptions.append(tool_desc)
+
+    def _register_component_entrypoints_as_tools(
+        self, comp_name: str, comp: Any
+    ) -> None:
+        """Register a component's additional ROS services and action servers."""
+        entrypoints: Dict[str, Dict] = comp.get_ros_entrypoints()
+
+        for srv_name, srv_type in entrypoints.get("services", {}).items():
+            self.__register_service_client_as_tool(
+                component_name=comp_name, srv_name=srv_name, srv_type=srv_type
+            )
+
+        # NOTE: Additional action servers, on top of the component's main one that
+        # _register_system_tools has already registered
+        for action_name, action_type in entrypoints.get("actions", {}).items():
+            self.__register_action_client_as_tool(
+                component_name=comp_name,
+                action_name=action_name,
+                action_type=action_type,
+            )
+
+    def __register_action_client_as_tool(
+        self, component_name: str, action_name: str, action_type: Any
+    ) -> None:
+        """Helper method to register a component Action Server as a system tool
+
+        :param component_name: Component name
+        :type component_name: str
+        :param action_name: Action server name
+        :type action_name: str
+        :param action_type: Action server type
+        :type action_type: Any
+        """
+        name = action_name.replace("/", "_")
+        tool_name = f"send_goal_to_{name}"
+        server = (component_name, action_name, action_type)
+        if (registered := self._action_goal_tools.get(tool_name)) is not None:
+            # A component's main action server can also be listed among its
+            # additional ones. Check for duplicates
+            if registered != server:
+                self.get_logger().warning(
+                    f"Action server '{action_name}' on '{component_name}' maps "
+                    f"to tool '{tool_name}', already registered for "
+                    f"'{registered[1]}' on '{registered[0]}'; skipping."
+                )
+            return
+        goal_type = action_type.Goal
+        properties, required = goal_type_to_json_properties(goal_type)
+        self._execution_tools.add(tool_name)
+        self._action_goal_tools[tool_name] = server
+        self._execution_tool_descriptions.append({
+            "type": "function",
+            "function": {
+                "name": tool_name,
+                "description": (
+                    f"Send an action goal to the '{component_name}' component's "
+                    f"action server ({name})."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": properties,
+                    "required": required,
+                },
+            },
+        })
+
+    def __register_service_client_as_tool(
+        self, component_name: str, srv_name: str, srv_type: Any
+    ) -> None:
+        """Helper method to register a component Service as a system tool
+
+        :param component_name: Component name
+        :type component_name: str
+        :param srv_name: Server name
+        :type srv_name: str
+        :param srv_type: Server type
+        :type srv_type: Any
+        """
+        name = srv_name.replace("/", "_")
+        tool_name = f"send_request_to_{name}"
+        req_type = srv_type.Request
+        properties, required = goal_type_to_json_properties(req_type)
+        self._execution_tools.add(tool_name)
+        self._service_request_tools[tool_name] = (component_name, srv_name, srv_type)
+        self._execution_tool_descriptions.append({
+            "type": "function",
+            "function": {
+                "name": tool_name,
+                "description": (
+                    f"Send a service request to the '{component_name}' component's "
+                    f"server ({name})."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": properties,
+                    "required": required,
+                },
+            },
+        })
+
+    def _inspect_component(self, component_name: str) -> str:
+        """Return a text description of a component's structure.
+
+        Delegates to the component's own ``inspect_component()`` for base
+        info (inputs, outputs, config, additional model clients), then
+        appends the Cortex-registered execution tools for that component.
+        """
+        comp = self._managed_components.get(component_name)
+        if not comp:
+            available = list(self._managed_components.keys())
+            return (
+                f"Error: Component '{component_name}' not found. Available: {available}"
+            )
+
+        result = comp.inspect_component()
+
+        # Append Cortex-registered execution tools for this component
+        prefix = f"{component_name}."
+        comp_tools = [name for name in self._execution_tools if name.startswith(prefix)]
+        if comp_tools:
+            lines = ["Actions (available as tools):"]
+            for tool_name in comp_tools:
+                for td in self._execution_tool_descriptions:
+                    if td["function"]["name"] == tool_name:
+                        fn = td["function"]
+                        params = fn.get("parameters", {}).get("properties", {})
+                        param_str = ", ".join(
+                            f"{k}: {v.get('type', '?')}" for k, v in params.items()
+                        )
+                        lines.append(
+                            f"  - {tool_name}({param_str}): {fn.get('description', '')}"
+                        )
+                        break
+            result += "\n" + "\n".join(lines)
+        else:
+            result += "\nActions: none"
+
+        return result
+
+    def _call_component_action(self, tool_name: str, args: Dict) -> str:
+        """Call a component action method via its ExecuteMethod service.
+
+        Returns the action's message as a string, suitable to feed back to
+        an LLM as a tool result, prefixed with ``"Error: ..."`` when the
+        action failed.
+        """
+        self.get_logger().info(
+            f"Calling component action {tool_name} with args: {args}"
+        )
+        try:
+            comp_name, method_name = tool_name.split(".", 1)
+        except ValueError as e:
+            return f"Error: Could not parse tool name for {tool_name}: {e}"
+
+        try:
+            response = self.execute_component_method(comp_name, method_name, args)
+        except Exception as e:
+            return f"Error calling {tool_name}: {e}"
+
+        return execute_method_response_to_str(tool_name, response)
+
+    def _send_action_goal_from_dict(
+        self,
+        tool_name: str,
+        component_name: str,
+        action_name: str,
+        action_type: Any,
+        goal_fields: Dict,
+    ) -> str:
+        """Construct a Goal message from a dict and send it to a component's
+        action server.
+
+        A server runs one goal at a time and rejects a new one while it does,
+        so a goal this tool already has running is replaced: canceled, and
+        waited on, before the new one is sent.
+
+        :param component_name: Target component name
+        :type component_name: str
+        :param action_name: Target action server name
+        :type action_name: str
+        :param action_type: Target action server type
+        :type action_type: Any
+        :param goal_fields:  Dict of goal field values from the LLM
+        :type goal_fields: Dict
+        :return: Result string for the execution log
+        :rtype: str
+        """
+        action_client = self.get_action_client(action_name, action_type)
+        try:
+            if action_client.goal_accepted and not action_client.action_returned:
+                canceled, why = action_client.cancel_request()
+                if not canceled:
+                    return (
+                        f"Error: '{tool_name}' still has a goal running and it "
+                        f"could not be canceled to make room for the new one: {why}"
+                    )
+                self._active_action_clients.pop(tool_name, None)
+                self.get_logger().info(
+                    f"Canceled the running goal of '{tool_name}' to send a new one"
+                )
+            sent = action_client.send_request_from_dict(goal_fields)
+            if sent:
+                self._active_action_clients[tool_name] = action_client
+                return (
+                    f"Action '{tool_name}' has been dispatched to '{component_name}' "
+                    f"and is now running asynchronously."
+                )
+            if action_client.goal_rejected:
+                return (
+                    f"Error: '{component_name}' rejected the goal because it is "
+                    "busy with another one. Cancel that one first."
+                )
+            return (
+                f"Error: Failed to construct or send action goal to "
+                f"'{component_name}' from fields: {goal_fields}"
+            )
+        except Exception as e:
+            return f"Error sending action goal to '{component_name}': {e}"
+
+    def _send_service_request_from_dict(
+        self, component_name: str, srv_name: str, srv_type: Any, req_fields: Dict
+    ) -> str:
+        """Construct a Request message from a dict and send it to a component's
+        service.
+
+        :param component_name: Target component name
+        :type component_name: str
+        :param srv_name: Target server name
+        :type srv_name: str
+        :param srv_type: Target server type
+        :type srv_type: Any
+        :param req_fields: Dict of request field values from the LLM
+        :type req_fields: Dict
+        :return: Result string for the execution log
+        :rtype: str
+        """
+        srv_client: ServiceClientHandler = self._get_srv_client(srv_name, srv_type)
+        try:
+            result = srv_client.send_request_from_dict(req_fields)
+            if result is None:
+                return (
+                    f"Error: Failed to construct or send service request to "
+                    f"'{component_name}' service '{srv_name}' from fields: {req_fields}"
+                )
+            return f"Service {srv_name} for {component_name} completed and returned result {result}."
+
+        except Exception as e:
+            return f"Error sending service request to '{component_name}' service {srv_name}: {e}"
+
+    # =========================================================================
+    # Planning prompt
+    # =========================================================================
 
     def set_robot_description(self, plugin: Any) -> None:
         """Augment the planning prompt with the attached robot's identity.
@@ -382,7 +870,7 @@ class Cortex(ModelComponent, Monitor):
         try:
             desc = plugin.describe()
         except Exception as e:
-            get_logger('cortex').error(f"Failed to read robot plugin description: {e}")
+            get_logger("cortex").error(f"Failed to read robot plugin description: {e}")
             return
 
         meta = desc.get("metadata", {})
@@ -396,7 +884,7 @@ class Cortex(ModelComponent, Monitor):
         action_names = [a["name"] for a in desc.get("actions", [])]
 
         # Namespace the plugin actions get registered under as execution tools
-        ns = name.strip().lower().replace(" ", "_") or "robot"
+        ns = self._plugin_namespace(plugin)
 
         def _join(items: List[str]) -> str:
             return ", ".join(items) if items else "(none)"
@@ -422,63 +910,59 @@ class Cortex(ModelComponent, Monitor):
             "Capabilities exposed through your robot body:\n"
             f"  - Sensor feedback you receive: {_join(feedback_keys)}\n"
             f"  - Commands you can issue: {_join(command_keys)}\n"
-            f"  - Built-in robot actions: {_join(action_names)}\n"
-            + action_hint
+            f"  - Built-in robot actions: {_join(action_names)}\n" + action_hint
         )
 
         self._compose_planning_prompt()
-        get_logger('cortex').info(
+        get_logger("cortex").info(
             f"Planning prompt augmented with robot identity for '{name}'."
         )
 
-    def _compose_planning_prompt(self) -> None:
-        """Rebuild the effective planning prompt from the base prompt plus
-        every active addendum (robot identity, memory guidance).
+    def set_sensor_descriptions(self, plugins: List[Any]) -> None:
+        """Augment the planning prompt with the sensors attached to the robot.
 
-        Single source of truth and Idempotent.
+        Each attached sensor is listed under the id its tools are namespaced by,
+        with what its plugin says about it, so the agent knows what each sensor
+        is and can tell two of the same kind apart.
+
+        :param plugins: The attached `robot.SensorPlugin` instances.
         """
-        self._effective_planning_prompt = (
-            self._PLANNING_PROMPT
-            + self._robot_description
-            + self._memory_addendum
-        )
-        self.config._system_prompt = self._effective_planning_prompt
-        self.messages = [
-            {"role": "system", "content": self._effective_planning_prompt}
-        ]
+        entries: List[str] = []
+        for plugin in plugins or []:
+            try:
+                desc = plugin.describe()
+            except Exception as e:
+                get_logger("cortex").error(
+                    f"Failed to read sensor plugin description: {e}"
+                )
+                continue
+            ns = self._plugin_namespace(plugin)
+            meta = desc.get("metadata", {})
+            entry = f"  - {ns}: {meta.get('name', '') or ns}"
+            if vendor := meta.get("vendor", ""):
+                entry += f", by {vendor}"
+            if blurb := meta.get("description", ""):
+                entry += f"\n    {blurb}"
+            if feedback_keys := [f["key"] for f in desc.get("feedbacks", [])]:
+                entry += f"\n    Feedback: {', '.join(feedback_keys)}"
+            if action_names := [a["name"] for a in desc.get("actions", [])]:
+                tools = ", ".join(f"{ns}.{a}" for a in action_names)
+                entry += f"\n    Tools: {tools}"
+            entries.append(entry)
 
-    # =========================================================================
-    # Lifecycle
-    # =========================================================================
-
-    def custom_on_configure(self):
-        if not self.model_client and self.config.enable_local_model:
-            self._deploy_local_model()
-        if self.db_client:
-            self.db_client.check_connection()
-            self.db_client.initialize()
-        super().custom_on_configure()
-
-    def custom_on_activate(self):
-        super().custom_on_activate()
-        if self._components_to_monitor:
-            Monitor.activate(self)
-            self._register_system_tools()
-            self._augment_planning_prompt_for_memory()
-        # Always (re)compose so the planning prompt reflects every addendum
-        # set so far -- robot identity, memory guidance, or neither --
-        # regardless of which augmentation paths ran.
+        if entries:
+            self._sensors_description = (
+                "\n\n=== Attached Sensors ===\n"
+                "Besides your robot body, these sensors are attached. Each is "
+                "named by the id its execution tools are namespaced under:\n"
+                + "\n".join(entries)
+            )
+            get_logger("cortex").info(
+                f"Planning prompt augmented with {len(entries)} attached sensor(s)."
+            )
+        else:
+            self._sensors_description = ""
         self._compose_planning_prompt()
-
-        # Display all the tools registered
-        planning_names = [
-            t["function"]["name"] for t in self._planning_tool_descriptions
-        ]
-        execution_names = [
-            t["function"]["name"] for t in self._execution_tool_descriptions
-        ]
-        self.get_logger().debug(f"Cortex planning tools: {planning_names}")
-        self.get_logger().debug(f"Cortex execution tools: {execution_names}")
 
     def _augment_planning_prompt_for_memory(self) -> None:
         """Append memory-aware guidance to the planning prompt when a
@@ -601,6 +1085,55 @@ class Cortex(ModelComponent, Monitor):
             f"Planning prompt augmented for Memory component '{memory_comp.node_name}'."
         )
 
+    def _compose_planning_prompt(self) -> None:
+        """Rebuild the effective planning prompt from the base prompt plus
+        every active addendum (robot identity, attached sensors, memory
+        guidance).
+
+        Single source of truth and Idempotent.
+        """
+        self._effective_planning_prompt = (
+            self._PLANNING_PROMPT
+            + self._robot_description
+            + self._sensors_description
+            + self._memory_addendum
+        )
+        self.config._system_prompt = self._effective_planning_prompt
+        self.messages = [{"role": "system", "content": self._effective_planning_prompt}]
+
+    # =========================================================================
+    # Lifecycle
+    # =========================================================================
+
+    def custom_on_configure(self):
+        if not self.model_client and self.config.enable_local_model:
+            self._deploy_local_model()
+        if self.db_client:
+            self.db_client.check_connection()
+            self.db_client.initialize()
+        super().custom_on_configure()
+
+    def custom_on_activate(self):
+        super().custom_on_activate()
+        if self._components_to_monitor:
+            Monitor.activate(self)
+            self._register_system_tools()
+            self._augment_planning_prompt_for_memory()
+        # Always (re)compose so the planning prompt reflects every addendum
+        # set so far -- robot identity, memory guidance, or neither --
+        # regardless of which augmentation paths ran.
+        self._compose_planning_prompt()
+
+        # Display all the tools registered
+        planning_names = [
+            t["function"]["name"] for t in self._planning_tool_descriptions
+        ]
+        execution_names = [
+            t["function"]["name"] for t in self._execution_tool_descriptions
+        ]
+        self.get_logger().debug(f"Cortex planning tools: {planning_names}")
+        self.get_logger().debug(f"Cortex execution tools: {execution_names}")
+
     def custom_on_deactivate(self):
         if self.db_client:
             self.db_client.check_connection()
@@ -620,6 +1153,16 @@ class Cortex(ModelComponent, Monitor):
             device=self.config.device_local_model,
             ncpu=self.config.ncpu_local_model,
         )
+
+    def _warmup(self):
+        """Warm up and verify model connectivity."""
+        self._call_inference({
+            "query": [
+                {"role": "system", "content": self._PLANNING_PROMPT},
+                {"role": "user", "content": "Hello"},
+            ],
+            **self.config._get_inference_params(),
+        })
 
     # =========================================================================
     # RAG
@@ -664,105 +1207,6 @@ class Cortex(ModelComponent, Monitor):
             "metadatas": metadatas,
         }
         self.db_client.add(db_input)
-
-    # =========================================================================
-    # Helpers
-    # =========================================================================
-
-    def _parse_tool_args(self, fn_args) -> Dict:
-        """Parse tool arguments, deserializing JSON strings where needed."""
-        # OpenAI-compatible endpoints return tool-call arguments as a
-        # JSON string; Ollama returns a dict. Normalize to a dict first.
-        if isinstance(fn_args, str):
-            fn_args = fn_args.strip()
-            try:
-                fn_args = json.loads(fn_args) if fn_args else {}
-            except json.JSONDecodeError:
-                fn_args = {}
-        if not isinstance(fn_args, dict):
-            return {}
-        parsed_args = {}
-        for key, arg in fn_args.items():
-            if isinstance(arg, str):
-                arg_str = arg.strip()
-                if not arg_str:
-                    parsed_args[key] = ""
-                    continue
-                try:
-                    parsed_args[key] = json.loads(arg_str)
-                except json.JSONDecodeError:
-                    parsed_args[key] = arg_str
-            else:
-                parsed_args[key] = arg
-        return parsed_args
-
-    def __register_action_client_as_tool(
-        self, component_name: str, action_name: str, action_type: Any
-    ) -> None:
-        """Helper method to register a component Action Server as a system tool
-
-        :param component_name: Component name
-        :type component_name: str
-        :param action_name: Action server name
-        :type action_name: str
-        :param action_type: Action server type
-        :type action_type: Any
-        """
-        name = action_name.replace("/", "_")
-        tool_name = f"send_goal_to_{name}"
-        goal_type = action_type.Goal
-        properties, required = goal_type_to_json_properties(goal_type)
-        self._execution_tools.add(tool_name)
-        self._action_goal_tools[tool_name] = (component_name, action_name, action_type)
-        self._execution_tool_descriptions.append({
-            "type": "function",
-            "function": {
-                "name": tool_name,
-                "description": (
-                    f"Send an action goal to the '{component_name}' component's "
-                    f"action server ({name})."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": properties,
-                    "required": required,
-                },
-            },
-        })
-
-    def __register_service_client_as_tool(
-        self, component_name: str, srv_name: str, srv_type: Any
-    ) -> None:
-        """Helper method to register a component Service as a system tool
-
-        :param component_name: Component name
-        :type component_name: str
-        :param srv_name: Server name
-        :type srv_name: str
-        :param srv_type: Server type
-        :type srv_type: Any
-        """
-        name = srv_name.replace("/", "_")
-        tool_name = f"send_request_to_{name}"
-        req_type = srv_type.Request
-        properties, required = goal_type_to_json_properties(req_type)
-        self._execution_tools.add(tool_name)
-        self._service_request_tools[tool_name] = (component_name, srv_name, srv_type)
-        self._execution_tool_descriptions.append({
-            "type": "function",
-            "function": {
-                "name": tool_name,
-                "description": (
-                    f"Send a service request to the '{component_name}' component's "
-                    f"server ({name})."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": properties,
-                    "required": required,
-                },
-            },
-        })
 
     # =========================================================================
     # Phase 1: Planning (multi-step loop)
@@ -984,6 +1428,33 @@ class Cortex(ModelComponent, Monitor):
     # Phase 2: Execution with confirmation
     # =========================================================================
 
+    def _parse_tool_args(self, fn_args) -> Dict:
+        """Parse tool arguments, deserializing JSON strings where needed."""
+        # OpenAI-compatible endpoints return tool-call arguments as a
+        # JSON string; Ollama returns a dict. Normalize to a dict first.
+        if isinstance(fn_args, str):
+            fn_args = fn_args.strip()
+            try:
+                fn_args = json.loads(fn_args) if fn_args else {}
+            except json.JSONDecodeError:
+                fn_args = {}
+        if not isinstance(fn_args, dict):
+            return {}
+        parsed_args = {}
+        for key, arg in fn_args.items():
+            if isinstance(arg, str):
+                arg_str = arg.strip()
+                if not arg_str:
+                    parsed_args[key] = ""
+                    continue
+                try:
+                    parsed_args[key] = json.loads(arg_str)
+                except json.JSONDecodeError:
+                    parsed_args[key] = arg_str
+            else:
+                parsed_args[key] = arg
+        return parsed_args
+
     def _build_confirmation_message(
         self,
         plan: List[Dict],
@@ -1093,6 +1564,30 @@ class Cortex(ModelComponent, Monitor):
         # EXECUTE, either explicitly stated or implied by a tool call
         return "EXECUTE", resolved_step
 
+    def _wait_for_active_clients(
+        self, goal_handle, feedback_msg, plan, executed_results, step_index, label: str
+    ) -> Tuple[str, Optional[Dict]]:
+        """Poll active async actions until the LLM stops returning CONTINUE.
+
+        :returns: Tuple of (decision, resolved_step)
+        """
+        decision, resolved_step = self._confirm_step(plan, executed_results, step_index)
+        while decision == "CONTINUE":
+            if goal_handle.is_cancel_requested:
+                return "ABORT", None
+            self._send_feedback(
+                goal_handle,
+                feedback_msg,
+                step_index,
+                f"{label}: waiting for async actions to complete...",
+            )
+            time.sleep(self.config.monitoring_interval)
+            decision, resolved_step = self._confirm_step(
+                plan, executed_results, step_index
+            )
+            self.get_logger().info(f"[{label}] re-check -> {decision}")
+        return decision, resolved_step
+
     def _execute_action_step(self, step: Dict) -> str:
         """Execute a single planned step via the appropriate dispatch mechanism."""
         fn_name = step["function"]["name"]
@@ -1108,285 +1603,6 @@ class Cortex(ModelComponent, Monitor):
                 self._execution_tools
             )
             return f"Error: Unknown tool '{fn_name}'. Available: {all_tools}"
-
-    # =========================================================================
-    # System management tools (via Monitor)
-    # =========================================================================
-
-    def _register_system_tools(self):
-        """Register system management capabilities and component actions as LLM tools.
-
-        Called during activation after Monitor.activate() has created service
-        clients. Discovers all @component_action and @component_fallback methods
-        on managed components and registers them as callable tools.
-
-        Tools are separated into two categories:
-        - **Planning tools** (``inspect_component``): used during the planning
-          loop to research components before building a plan.
-        - **Execution tools** (``update_parameter``, ``send_goal_to_*``,
-          component actions): used in the execution plan.
-        """
-        component_names_str = ", ".join(self._components_to_monitor)
-
-        # inspect_component: planning-only tool
-        inspect_desc = {
-            "type": "function",
-            "function": {
-                "name": "inspect_component",
-                "description": (
-                    "Get detailed information about a component: its input/output "
-                    "topics, available actions, and additional model clients. "
-                    "Use this to discover topic names or understand a component "
-                    "before calling its actions. "
-                    f"Available components: {component_names_str}"
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "component": {
-                            "type": "string",
-                            "description": "Component name to inspect.",
-                        },
-                    },
-                    "required": ["component"],
-                },
-            },
-        }
-        self._planning_tools.add("inspect_component")
-        self._planning_tool_descriptions.append(inspect_desc)
-
-        # update_parameter: execution tool
-        update_param_desc = {
-            "type": "function",
-            "function": {
-                "name": "update_parameter",
-                "description": (
-                    "Update a configuration parameter on a component. "
-                    f"Available components: {component_names_str}"
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "component": {
-                            "type": "string",
-                            "description": "Component name",
-                        },
-                        "param_name": {
-                            "type": "string",
-                            "description": "Parameter name to update",
-                        },
-                        "new_value": {
-                            "type": "string",
-                            "description": "New value for the parameter",
-                        },
-                    },
-                    "required": ["component", "param_name", "new_value"],
-                },
-            },
-        }
-        self._execution_tools.add("update_parameter")
-        self._execution_tool_descriptions.append(update_param_desc)
-
-        # Per-component action goal tools: execution tools
-        for comp_name, action_client in self._main_action_clients.items():
-            self.__register_action_client_as_tool(
-                component_name=comp_name,
-                action_name=action_client.config.name,
-                action_type=action_client.config.action_type,
-            )
-
-        # Discover and register component actions from all managed components
-        self._register_component_actions()
-
-    # Lifecycle management methods that should not be exposed as LLM tools.
-    # These are handled by the Monitor / Launcher
-    _LIFECYCLE_METHODS = frozenset({
-        "start",
-        "stop",
-        "restart",
-        "reconfigure",
-        "set_param",
-        "set_params",
-        "broadcast_status",
-    })
-
-    def _register_component_actions(self):
-        """Discover LLM tools on managed components.
-
-        For each managed component, registers:
-          1. Its ``@component_action`` / ``@component_fallback`` methods
-             (routed to the planning or execution toolset based on the
-             ``_action_phase`` tag from ``agents.ros.component_action``).
-          2. Its additional ROS services as tools.
-          3. Its additional ROS action servers as tools.
-
-        Lifecycle management methods (start, stop, restart, ...) are
-        excluded. Tool names are namespaced as ``{component_name}.{method_name}``.
-        """
-        for comp_name, comp in self._managed_components.items():
-            self._register_component_methods_as_tools(comp_name, comp)
-            self._register_component_entrypoints_as_tools(comp_name, comp)
-
-    def _register_component_methods_as_tools(self, comp_name: str, comp: Any) -> None:
-        """Register decorated action/fallback methods on one component.
-
-        For each method:
-          1. Parse the raw ``_action_description`` into OpenAI tool format
-             (falling back to a docstring stub if not valid JSON).
-          2. Read the ``_action_phase`` tag (default ``execution``) and
-             add the tool to the planning set, execution set, or both.
-        """
-        action_methods = get_methods_with_decorator(comp, "component_action")
-        fallback_methods = get_methods_with_decorator(comp, "component_fallback")
-
-        for attr_name in action_methods + fallback_methods:
-            if attr_name in self._LIFECYCLE_METHODS:
-                continue
-
-            class_attr = getattr(type(comp), attr_name, None)
-            desc_raw = (
-                getattr(class_attr, "_action_description", None) if class_attr else None
-            )
-            if not desc_raw:
-                continue
-
-            tool_name = f"{comp_name}.{attr_name}"
-            try:
-                parsed = json.loads(desc_raw)
-                tool_desc = {
-                    "type": "function",
-                    "function": {**parsed["function"], "name": tool_name},
-                }
-            except (json.JSONDecodeError, TypeError, KeyError):
-                tool_desc = {
-                    "type": "function",
-                    "function": {
-                        "name": tool_name,
-                        "description": desc_raw[:200],
-                        "parameters": {
-                            "type": "object",
-                            "properties": {},
-                            "required": [],
-                        },
-                    },
-                }
-
-            phase = getattr(class_attr, "_action_phase", "execution")
-            if phase in ("planning", "both") and tool_name not in self._planning_tools:
-                self._planning_tools.add(tool_name)
-                self._planning_tool_descriptions.append(tool_desc)
-            if (
-                phase in ("execution", "both")
-                and tool_name not in self._execution_tools
-            ):
-                self._execution_tools.add(tool_name)
-                self._execution_tool_descriptions.append(tool_desc)
-
-    def _register_component_entrypoints_as_tools(
-        self, comp_name: str, comp: Any
-    ) -> None:
-        """Register a component's additional ROS services and action servers."""
-        entrypoints: Dict[str, Dict] = comp.get_ros_entrypoints()
-
-        for srv_name, srv_type in entrypoints.get("services", {}).items():
-            self.__register_service_client_as_tool(
-                component_name=comp_name, srv_name=srv_name, srv_type=srv_type
-            )
-
-        for action_name, action_type in entrypoints.get("actions", {}).items():
-            self.__register_action_client_as_tool(
-                component_name=comp_name,
-                action_name=action_name,
-                action_type=action_type,
-            )
-
-    def _send_action_goal_from_dict(
-        self,
-        tool_name: str,
-        component_name: str,
-        action_name: str,
-        action_type: Any,
-        goal_fields: Dict,
-    ) -> str:
-        """Construct a Goal message from a dict and send it to a component's
-        action server.
-
-        A server runs one goal at a time and rejects a new one while it does,
-        so a goal this tool already has running is replaced: canceled, and
-        waited on, before the new one is sent.
-
-        :param component_name: Target component name
-        :type component_name: str
-        :param action_name: Target action server name
-        :type action_name: str
-        :param action_type: Target action server type
-        :type action_type: Any
-        :param goal_fields:  Dict of goal field values from the LLM
-        :type goal_fields: Dict
-        :return: Result string for the execution log
-        :rtype: str
-        """
-        action_client = self.get_action_client(action_name, action_type)
-        try:
-            if action_client.goal_accepted and not action_client.action_returned:
-                canceled, why = action_client.cancel_request()
-                if not canceled:
-                    return (
-                        f"Error: '{tool_name}' still has a goal running and it "
-                        f"could not be canceled to make room for the new one: {why}"
-                    )
-                self._active_action_clients.pop(tool_name, None)
-                self.get_logger().info(
-                    f"Canceled the running goal of '{tool_name}' to send a new one"
-                )
-            sent = action_client.send_request_from_dict(goal_fields)
-            if sent:
-                self._active_action_clients[tool_name] = action_client
-                return (
-                    f"Action '{tool_name}' has been dispatched to '{component_name}' "
-                    f"and is now running asynchronously."
-                )
-            if action_client.goal_rejected:
-                return (
-                    f"Error: '{component_name}' rejected the goal because it is "
-                    "busy with another one. Cancel that one first."
-                )
-            return (
-                f"Error: Failed to construct or send action goal to "
-                f"'{component_name}' from fields: {goal_fields}"
-            )
-        except Exception as e:
-            return f"Error sending action goal to '{component_name}': {e}"
-
-    def _send_service_request_from_dict(
-        self, component_name: str, srv_name: str, srv_type: Any, req_fields: Dict
-    ) -> str:
-        """Construct a Request message from a dict and send it to a component's
-        service.
-
-        :param component_name: Target component name
-        :type component_name: str
-        :param srv_name: Target server name
-        :type srv_name: str
-        :param srv_type: Target server type
-        :type srv_type: Any
-        :param req_fields: Dict of request field values from the LLM
-        :type req_fields: Dict
-        :return: Result string for the execution log
-        :rtype: str
-        """
-        srv_client: ServiceClientHandler = self._get_srv_client(srv_name, srv_type)
-        try:
-            result = srv_client.send_request_from_dict(req_fields)
-            if result is None:
-                return (
-                    f"Error: Failed to construct or send service request to "
-                    f"'{component_name}' service '{srv_name}' from fields: {req_fields}"
-                )
-            return f"Service {srv_name} for {component_name} completed and returned result {result}."
-
-        except Exception as e:
-            return f"Error sending service request to '{component_name}' service {srv_name}: {e}"
 
     def _execute_system_tool(self, tool_name: str, args: Dict) -> str:
         """Execute an execution-phase system tool or a component action."""
@@ -1413,192 +1629,12 @@ class Cortex(ModelComponent, Monitor):
                 return self._send_service_request_from_dict(
                     comp_name, srv_name, srv_type, args
                 )
+            elif tool_name in self._plugin_action_tools:
+                return self._call_plugin_action(tool_name, args)
             # else: the tool is a component action
             return self._call_component_action(tool_name, args)
         except Exception as e:
             return f"Error calling {tool_name}: {e}"
-
-    def _call_component_action(self, tool_name: str, args: Dict) -> str:
-        """Call a component action method via its ExecuteMethod service.
-
-        Returns the action's message as a string, suitable to feed back to
-        an LLM as a tool result, prefixed with ``"Error: ..."`` when the
-        action failed.
-        """
-        self.get_logger().info(
-            f"Calling component action {tool_name} with args: {args}"
-        )
-        try:
-            comp_name, method_name = tool_name.split(".", 1)
-        except ValueError as e:
-            return f"Error: Could not parse tool name for {tool_name}: {e}"
-
-        try:
-            response = self.execute_component_method(comp_name, method_name, args)
-        except Exception as e:
-            return f"Error calling {tool_name}: {e}"
-
-        return execute_method_response_to_str(tool_name, response)
-
-    def _inspect_component(self, component_name: str) -> str:
-        """Return a text description of a component's structure.
-
-        Delegates to the component's own ``inspect_component()`` for base
-        info (inputs, outputs, config, additional model clients), then
-        appends the Cortex-registered execution tools for that component.
-        """
-        comp = self._managed_components.get(component_name)
-        if not comp:
-            available = list(self._managed_components.keys())
-            return (
-                f"Error: Component '{component_name}' not found. Available: {available}"
-            )
-
-        result = comp.inspect_component()
-
-        # Append Cortex-registered execution tools for this component
-        prefix = f"{component_name}."
-        comp_tools = [name for name in self._execution_tools if name.startswith(prefix)]
-        if comp_tools:
-            lines = ["Actions (available as tools):"]
-            for tool_name in comp_tools:
-                for td in self._execution_tool_descriptions:
-                    if td["function"]["name"] == tool_name:
-                        fn = td["function"]
-                        params = fn.get("parameters", {}).get("properties", {})
-                        param_str = ", ".join(
-                            f"{k}: {v.get('type', '?')}" for k, v in params.items()
-                        )
-                        lines.append(
-                            f"  - {tool_name}({param_str}): {fn.get('description', '')}"
-                        )
-                        break
-            result += "\n" + "\n".join(lines)
-        else:
-            result += "\nActions: none"
-
-        return result
-
-    # =========================================================================
-    # Behavioral action dispatch (via event system)
-    # =========================================================================
-
-    def _dispatch_action(self, name: str) -> str:
-        """Dispatch an action by publishing to its internal event topic."""
-        dispatch_method = self.emit_internal_event_methods.get(name, None)
-        if not dispatch_method:
-            available = list(self.emit_internal_event_methods.keys())
-            return (
-                f"Error: Action '{name}' does not exist. Available actions: {available}"
-            )
-        try:
-            dispatch_method()
-            return f"Action '{name}' dispatched."
-        except Exception as e:
-            return f"Error dispatching action '{name}': {e}"
-
-    # =========================================================================
-    # Action client helpers
-    # =========================================================================
-
-    def _monitor_active_clients(self) -> Optional[str]:
-        """Helper method to get a status update on the ongoing Action clients
-
-        :return: Active tools status feedback
-        :rtype: Optional[str]
-        """
-        if not self._active_action_clients:
-            # Not active clients -> Nothing to monitor
-            return None
-        completed_actions = []
-        feedback_lines = "[Active Tools Status]\n"
-        for tool_name, action_client in self._active_action_clients.items():
-            if action_client.action_returned:
-                # Action is done and returned result
-                result = action_client.action_result
-                status = action_client._status
-                completed_actions.append(tool_name)
-                feedback_lines += (
-                    f"- {tool_name}: {status.upper()} | Result: {result}\n"
-                )
-                continue
-            updates_dict = action_client.get_ui_elements()
-            feedback_lines += f"- {tool_name}: {updates_dict['status']} (running for {updates_dict['duration_secs']}s)"
-            if updates_dict["feedback"]:
-                feedback_lines += (
-                    f" | Latest feedback: {ros_msg_to_str(updates_dict['feedback'])}"
-                )
-            if updates_dict["feedback_timeout"]:
-                feedback_lines += " [WARNING: No new feedback received — the tool may be stalled or waiting on an external process.]"
-            feedback_lines += "\n"
-        feedback_lines += "[End Of Tools Status Update]\n"
-        # Remove completed actions from the active clients registry
-        for tool in completed_actions:
-            self._active_action_clients.pop(tool)
-        return feedback_lines
-
-    def _cancel_all_active_clients(self):
-        """Helper method to cancel all action Action clients
-
-        :return: Cancellation error message if errors occurred
-        :rtype: Optional[str]
-        """
-        if not self._active_action_clients:
-            # Not active clients to cancel
-            return
-        successful_cancellation = []
-        for tool_name, action_client in self._active_action_clients.items():
-            cancelled, _ = action_client.cancel_request()
-            if not cancelled:
-                self.get_logger().error(
-                    f"Error: Failed to cancel the following ongoing tool: {tool_name}"
-                )
-            else:
-                successful_cancellation.append(tool_name)
-        for key in successful_cancellation:
-            self._active_action_clients.pop(key)
-
-    # =========================================================================
-    # Main action server callback
-    # =========================================================================
-
-    def _send_feedback(
-        self,
-        goal_handle,
-        feedback_msg,
-        timestep: int,
-        text: str,
-        completed: bool = False,
-    ) -> None:
-        """Publish feedback on the action server."""
-        feedback_msg.timestep = timestep
-        feedback_msg.completed = completed
-        feedback_msg.feedback = text
-        goal_handle.publish_feedback(feedback_msg)
-
-    def _wait_for_active_clients(
-        self, goal_handle, feedback_msg, plan, executed_results, step_index, label: str
-    ) -> Tuple[str, Optional[Dict]]:
-        """Poll active async actions until the LLM stops returning CONTINUE.
-
-        :returns: Tuple of (decision, resolved_step)
-        """
-        decision, resolved_step = self._confirm_step(plan, executed_results, step_index)
-        while decision == "CONTINUE":
-            if goal_handle.is_cancel_requested:
-                return "ABORT", None
-            self._send_feedback(
-                goal_handle,
-                feedback_msg,
-                step_index,
-                f"{label}: waiting for async actions to complete...",
-            )
-            time.sleep(self.config.monitoring_interval)
-            decision, resolved_step = self._confirm_step(
-                plan, executed_results, step_index
-            )
-            self.get_logger().info(f"[{label}] re-check -> {decision}")
-        return decision, resolved_step
 
     def _execute_plan(self, plan, goal_handle, feedback_msg) -> Tuple[List[Dict], bool]:
         """Execute plan steps with per-step confirmation.
@@ -1692,6 +1728,85 @@ class Cortex(ModelComponent, Monitor):
                 return executed_results, True
 
         return executed_results, False
+
+    # =========================================================================
+    # Running action goals
+    # =========================================================================
+
+    def _monitor_active_clients(self) -> Optional[str]:
+        """Helper method to get a status update on the ongoing Action clients
+
+        :return: Active tools status feedback
+        :rtype: Optional[str]
+        """
+        if not self._active_action_clients:
+            # Not active clients -> Nothing to monitor
+            return None
+        completed_actions = []
+        feedback_lines = "[Active Tools Status]\n"
+        for tool_name, action_client in self._active_action_clients.items():
+            if action_client.action_returned:
+                # Action is done and returned result
+                result = action_client.action_result
+                status = action_client._status
+                completed_actions.append(tool_name)
+                feedback_lines += (
+                    f"- {tool_name}: {status.upper()} | Result: {result}\n"
+                )
+                continue
+            updates_dict = action_client.get_ui_elements()
+            feedback_lines += f"- {tool_name}: {updates_dict['status']} (running for {updates_dict['duration_secs']}s)"
+            if updates_dict["feedback"]:
+                feedback_lines += (
+                    f" | Latest feedback: {ros_msg_to_str(updates_dict['feedback'])}"
+                )
+            if updates_dict["feedback_timeout"]:
+                feedback_lines += " [WARNING: No new feedback received — the tool may be stalled or waiting on an external process.]"
+            feedback_lines += "\n"
+        feedback_lines += "[End Of Tools Status Update]\n"
+        # Remove completed actions from the active clients registry
+        for tool in completed_actions:
+            self._active_action_clients.pop(tool)
+        return feedback_lines
+
+    def _cancel_all_active_clients(self):
+        """Helper method to cancel all action Action clients
+
+        :return: Cancellation error message if errors occurred
+        :rtype: Optional[str]
+        """
+        if not self._active_action_clients:
+            # Not active clients to cancel
+            return
+        successful_cancellation = []
+        for tool_name, action_client in self._active_action_clients.items():
+            cancelled, _ = action_client.cancel_request()
+            if not cancelled:
+                self.get_logger().error(
+                    f"Error: Failed to cancel the following ongoing tool: {tool_name}"
+                )
+            else:
+                successful_cancellation.append(tool_name)
+        for key in successful_cancellation:
+            self._active_action_clients.pop(key)
+
+    # =========================================================================
+    # Main action server callback
+    # =========================================================================
+
+    def _send_feedback(
+        self,
+        goal_handle,
+        feedback_msg,
+        timestep: int,
+        text: str,
+        completed: bool = False,
+    ) -> None:
+        """Publish feedback on the action server."""
+        feedback_msg.timestep = timestep
+        feedback_msg.completed = completed
+        feedback_msg.feedback = text
+        goal_handle.publish_feedback(feedback_msg)
 
     def _finalize_goal(
         self,
@@ -1865,7 +1980,7 @@ class Cortex(ModelComponent, Monitor):
         return result_msg
 
     # =========================================================================
-    # Unused/overridden methods (action server mode)
+    # Not used in action server mode
     # =========================================================================
 
     def _create_input(self, *args, **kwargs) -> Optional[Dict]:
@@ -1875,16 +1990,6 @@ class Cortex(ModelComponent, Monitor):
     def _execution_step(self, *args, **kwargs):
         """Not used -- Cortex runs as an action server."""
         pass
-
-    def _warmup(self):
-        """Warm up and verify model connectivity."""
-        self._call_inference({
-            "query": [
-                {"role": "system", "content": self._PLANNING_PROMPT},
-                {"role": "user", "content": "Hello"},
-            ],
-            **self.config._get_inference_params(),
-        })
 
     def _handle_websocket_streaming(self):
         """Not used -- streaming is disabled for Cortex."""
