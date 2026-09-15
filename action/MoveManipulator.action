@@ -1,0 +1,48 @@
+# Action definition for MoveIt components.
+
+# mode: one of "pose", "joints", "named", "cartesian", "pick", "place".
+# If left empty, the mode is inferred from whichever target fields are populated.
+string mode
+
+# Target end-effector pose (mode: "pose"), or the pick/place location
+# (modes: "pick", "place"). header.frame_id defaults to the planning frame.
+# NOTE: An identity quaternion is the wire default of an unfilled field, so it
+# is read as "no preference", not as a target. Pose goals then leave the orientation
+# to the planner (within the configured tolerance); Cartesian motions, including
+# the pick/place descend and retreat, hold the current end-effector
+# orientation. Any quaternion with a non-zero x, y or z is followed exactly.
+geometry_msgs/PoseStamped target_pose
+# Planning scene object to pick (mode: "pick"): an object id (e.g.
+# "det__mug_0") or a label (e.g. "mug"), resolved against the objects this
+# component has placed in the scene. Alternative to locating the pick by
+# target_pose. The named object becomes the grasp target; everything else in
+# the scene remains an obstacle.
+string target_object
+# Joint-space target (mode: "joints"). Parallel arrays.
+string[] joint_names
+float64[] joint_positions
+# SRDF named target, e.g. "home" or "ready" (mode: "named")
+string named_target
+# End-effector waypoints for a straight-line Cartesian path (mode:
+# "cartesian"). Waypoints with an identity orientation hold the current
+# end-effector orientation.
+geometry_msgs/Pose[] cartesian_waypoints
+# Reference frame for cartesian_waypoints. Empty = planning frame.
+string frame_id
+# Plan without executing (motion validity check)
+bool plan_only
+
+# Per-goal overrides of the configured scaling factors. 0.0 = use the config value
+float32 velocity_scaling
+float32 acceleration_scaling
+---
+bool success
+# Raw MoveItErrorCodes value returned by MoveIt
+int32 error_code
+# Human readable success/error description
+string message
+# Fraction of the requested Cartesian path that was achieved (cartesian mode only)
+float32 cartesian_fraction
+---
+# Current MoveIt state, PLANNING / MONITOR / EXECUTING
+string state

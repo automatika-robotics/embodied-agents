@@ -83,6 +83,50 @@ class TestMLLMConfig:
         assert "task" not in params
 
 
+class TestShared3DFields:
+    """The 3D lift fields are duplicated flat in VisionConfig and MLLMConfig
+    (a shared attrs base would need slots=False, costing both configs their
+    slot enforcement). This class is what keeps the copies in sync."""
+
+    FIELDS = (
+        "detections_frame",
+        "static_camera_tf",
+        "depth_scale",
+        "min_depth",
+        "max_depth",
+        "max_depth_age",
+        "min_depth_validity",
+        "_depth_topic",
+        "_camera_info_topic",
+    )
+
+    def test_both_configs_carry_the_same_fields_and_defaults(self):
+        from agents.config import VisionConfig
+
+        vision, mllm = VisionConfig(), MLLMConfig()
+        for name in self.FIELDS:
+            assert getattr(mllm, name) == getattr(vision, name)
+
+    def test_depth_range_validated_on_both(self):
+        from agents.config import VisionConfig
+
+        for config_class in (VisionConfig, MLLMConfig):
+            with pytest.raises(ValueError, match="max_depth"):
+                config_class(min_depth=2.0, max_depth=1.0)
+
+    def test_aux_topics_serialize_on_mllm(self):
+        """The stash fields must survive to_dict/from_dict for the
+        serialized multiprocess relaunch, exactly as on VisionConfig."""
+        from agents.ros import Topic
+
+        config = MLLMConfig()
+        config._depth_topic = Topic(name="depth", msg_type="Image")
+        restored = MLLMConfig()
+        restored.from_dict(config.to_dict())
+        assert restored._depth_topic.name == "depth"
+        assert restored._camera_info_topic is None
+
+
 class TestSTTConfig:
     def test_construction(self):
         """SpeechToTextConfig can be constructed with defaults."""
@@ -292,3 +336,55 @@ class TestVLMLocalModelDefaults:
         c = MLLMConfig()
         assert c.local_model_path == "ggml-org/Qwen3-VL-2B-Instruct-GGUF"
         assert c.local_model_options == {}
+
+
+class TestMoveItConfig:
+    def test_defaults(self):
+        from agents.config import MoveItConfig
+
+        c = MoveItConfig(arm_group_name="panda_arm")
+        assert c.arm_group_name == "panda_arm"
+        assert c.gripper_group_name is None
+        assert c.planning_pipeline == "" and c.planner_id == ""
+        assert c.gripper_mode == "move_group"
+        assert c.max_velocity_scaling == 0.1
+        assert c.cartesian_fraction_threshold == 0.95
+        assert c.server_timeout == 30.0 and c.execution_timeout == 120.0
+
+    def test_arm_group_required(self):
+        from agents.config import MoveItConfig
+
+        with pytest.raises(TypeError):
+            MoveItConfig()
+
+    def test_gripper_command_mode_requires_action_name(self):
+        from agents.config import MoveItConfig
+
+        with pytest.raises(ValueError, match="gripper_command_action"):
+            MoveItConfig(arm_group_name="arm", gripper_mode="gripper_command")
+        c = MoveItConfig(
+            arm_group_name="arm",
+            gripper_mode="gripper_command",
+            gripper_command_action="/gripper_controller/gripper_cmd",
+        )
+        assert c.gripper_command_action == "/gripper_controller/gripper_cmd"
+
+    def test_orientation_tolerance_scalar_or_triple(self):
+        from agents.config import MoveItConfig
+
+        c = MoveItConfig(
+            arm_group_name="arm", goal_orientation_tolerance=[0.01, 0.01, 3.14]
+        )
+        assert c.goal_orientation_tolerance == [0.01, 0.01, 3.14]
+        with pytest.raises(ValueError, match="3 positive"):
+            MoveItConfig(arm_group_name="arm", goal_orientation_tolerance=[0.01, 0.01])
+        with pytest.raises(ValueError):
+            MoveItConfig(arm_group_name="arm", goal_orientation_tolerance=-1.0)
+
+    def test_scaling_range_enforced(self):
+        from agents.config import MoveItConfig
+
+        with pytest.raises(ValueError):
+            MoveItConfig(arm_group_name="arm", max_velocity_scaling=1.5)
+        with pytest.raises(ValueError):
+            MoveItConfig(arm_group_name="arm", max_velocity_scaling=0.0)

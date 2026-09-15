@@ -406,18 +406,18 @@ class RoboBrain2(Model):
     }
         :param name: An arbitrary name given to the model.
         :type name: str
-        :param checkpoint: The name of the pre-trained model's checkpoint. Default is "BAAI/RoboBrain2.5-4B". For available checkpoints consult [RoboBrain2 and RoboBrain2.5 Model Collections](https://huggingface.co/collections/BAAI) on HuggingFace or ModelScope.
+        :param checkpoint: The name of the pre-trained model's checkpoint. Default is "BAAI/RoboBrain2.0-3B". For available checkpoints consult [RoboBrain2 and RoboBrain2.5 Model Collections](https://huggingface.co/collections/BAAI) on HuggingFace or ModelScope.
         :type checkpoint: str
         :param init_timeout: The timeout in seconds for the initialization process. Defaults to None.
         :type init_timeout: int, optional
 
         Example usage:
         ```python
-        robobrain = RoboBrain2(name='robobrain', checkpoint="BAAI/RoboBrain2.5-8B-NV")
+        robobrain = RoboBrain2(name='robobrain', checkpoint="BAAI/RoboBrain2.0-7B")
         ```
     """
 
-    checkpoint: str = field(default="BAAI/RoboBrain2.5-4B")
+    checkpoint: str = field(default="BAAI/RoboBrain2.0-3B")
 
     def _get_init_params(self) -> Dict:
         """Get init params for model initialization."""
@@ -609,9 +609,16 @@ class LeRobotPolicy(Model):
     checkpoint: str = field(default="lerobot/smolvla_base")
     policy_type: Literal[
         "smolvla", "diffusion", "act", "pi0", "pi05", "groot", "tdmpc", "vqbet"
-    ] = field(default="smolvla")
+    ] = field(
+        default="smolvla",
+        validator=base_validators.in_(
+            ["smolvla", "diffusion", "act", "pi0", "pi05", "groot", "tdmpc", "vqbet"]
+        ),
+    )
     actions_per_chunk: int = field(default=50)
-    policy_device: Literal["cpu", "cuda"] = field(default="cuda")
+    policy_device: Literal["cpu", "cuda"] = field(
+        default="cuda", validator=base_validators.in_(["cpu", "cuda"])
+    )
     dataset_info_file: Optional[str] = field(default=None)
     rename_map: Dict[str, str] = field(default=Factory(dict))
     _features: Dict = field(

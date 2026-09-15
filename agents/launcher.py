@@ -86,6 +86,7 @@ class Launcher(BaseLauncher):
             self.monitor_node = cortex_monitor
             self.monitor_node._init_internal_monitor(
                 components_names=components_names,
+                action_registry=self._action_registry,
                 components=self._components,
                 events_actions=self._monitor_events_actions,
                 events_to_emit=self._internal_events,
@@ -94,12 +95,20 @@ class Launcher(BaseLauncher):
                 activate_on_start=all_components_to_activate_on_start,
                 activation_timeout=self._components_activation_timeout,
             )
-            # Expose the robot plugin's actions to Cortex as execution tools
-            # and augment its planning prompt with the robot's identity.
-            # Must run after _init_internal_monitor and before _setup_additional_internal_actions
+            # Expose every attached plugin's actions to Cortex as execution tools,
+            # and augment its planning prompt with the robot's identity and the
+            # attached sensors. Must run after _init_internal_monitor
+            for plugin in self._plugins.values():
+                cortex_monitor.add_plugin_actions(plugin)
             if self._robot_plugin is not None:
-                cortex_monitor.add_plugin_actions(self._robot_plugin)
                 cortex_monitor.set_robot_description(self._robot_plugin)
+            sensors = [
+                plugin
+                for plugin in self._plugins.values()
+                if plugin is not self._robot_plugin
+            ]
+            if sensors:
+                cortex_monitor.set_sensor_descriptions(sensors)
 
             # Add any additional internal actions related to the monitor (e.g. events handling actions)
             self._setup_additional_internal_actions(
@@ -108,6 +117,7 @@ class Launcher(BaseLauncher):
         else:
             self.monitor_node = Monitor(
                 components_names=components_names,
+                action_registry=self._action_registry,
                 events_actions=self._monitor_events_actions,
                 events_to_emit=self._internal_events,
                 services_components=services_components,

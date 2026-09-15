@@ -42,6 +42,31 @@ def scene_topic():
 
 
 @pytest.fixture
+def detections3d_topic():
+    pytest.importorskip("automatika_embodied_agents.msg")
+    return Topic(name="d3", msg_type="Detections3D")
+
+
+def _detections3d(entries, frame="odom"):
+    """Build a Detections3D message from (label, score, center, size) tuples."""
+    from automatika_embodied_agents.msg import Bbox3D, Detections3D
+
+    msg = Detections3D()
+    msg.header.frame_id = frame
+    for label, score, center, size in entries:
+        box = Bbox3D()
+        box.center.position.x, box.center.position.y, box.center.position.z = (
+            float(v) for v in center
+        )
+        box.center.orientation.w = 1.0
+        box.size.x, box.size.y, box.size.z = (float(v) for v in size)
+        msg.boxes.append(box)
+        msg.labels.append(label)
+        msg.scores.append(float(score))
+    return msg
+
+
+@pytest.fixture
 def battery_topic():
     return Topic(name="battery", msg_type="String")
 
@@ -423,3 +448,88 @@ class TestInspectComponent:
 
         result = comp.inspect_component()
         assert "odom" in result
+
+
+class TestDetections3DLayer:
+    """A 3D layer records the OBJECTS' positions, not the robot's."""
+
+    def _component(self, layers, odom_topic, name, tmp_path):
+        comp = _build_memory(layers, odom_topic, name, tmp_path)
+        return comp, _stub_memory_backend(comp)
+
+    def test_each_box_is_stored_at_the_objects_own_position(
+        self, rclpy_init, odom_topic, detections3d_topic, tmp_path
+    ):
+        comp, backend = self._component(
+            [MemLayer(subscribes_to=detections3d_topic)],
+            odom_topic,
+            "mem_3d_boxes",
+            tmp_path,
+        )
+        _stub_callback(
+            comp,
+            "d3",
+            _detections3d([
+                ("orange", 0.9, (2.0, 3.0, 0.05), (0.06, 0.06, 0.06)),
+                ("bowl", 0.7, (2.5, 3.5, 0.04), (0.2, 0.2, 0.1)),
+            ]),
+        )
+
+        comp._store_layers(position=[9.0, 9.0, 0.0], time_stamp=10)
+
+        assert backend.add.call_count == 2
+        first, second = (call.kwargs for call in backend.add.call_args_list)
+        assert first["text"] == "orange"
+        assert (first["x"], first["y"], first["z"]) == (2.0, 3.0, 0.05)
+        assert first["confidence"] == 0.9
+        assert first["metadata"]["size"] == [0.06, 0.06, 0.06]
+        assert first["metadata"]["frame"] == "odom"
+        assert first["layer_name"] == "d3"
+        assert second["text"] == "bowl"
+        assert (second["x"], second["y"]) == (2.5, 3.5)
+        # the robot position stamped every observation before; not here
+        assert all(call.kwargs["x"] != 9.0 for call in backend.add.call_args_list)
+        backend.add_body_state.assert_not_called()
+
+    def test_an_empty_message_stores_nothing(
+        self, rclpy_init, odom_topic, detections3d_topic, tmp_path
+    ):
+        comp, backend = self._component(
+            [MemLayer(subscribes_to=detections3d_topic)],
+            odom_topic,
+            "mem_3d_empty",
+            tmp_path,
+        )
+        _stub_callback(comp, "d3", _detections3d([]))
+
+        comp._store_layers(position=[1.0, 1.0, 0.0], time_stamp=10)
+
+        backend.add.assert_not_called()
+
+    def test_other_layers_still_record_the_robots_position(
+        self, rclpy_init, odom_topic, detections3d_topic, scene_topic, tmp_path
+    ):
+        comp, backend = self._component(
+            [
+                MemLayer(subscribes_to=detections3d_topic),
+                MemLayer(subscribes_to=scene_topic),
+            ],
+            odom_topic,
+            "mem_3d_mixed",
+            tmp_path,
+        )
+        _stub_callback(
+            comp,
+            "d3",
+            _detections3d([("orange", 0.9, (2.0, 3.0, 0.05), (0.06, 0.06, 0.06))]),
+        )
+        _stub_callback(comp, "scene", "a tidy kitchen")
+
+        comp._store_layers(position=[7.0, 8.0, 0.0], time_stamp=30)
+
+        by_text = {call.kwargs["text"]: call.kwargs for call in backend.add.call_args_list}
+        assert (by_text["orange"]["x"], by_text["orange"]["y"]) == (2.0, 3.0)
+        assert (by_text["a tidy kitchen"]["x"], by_text["a tidy kitchen"]["y"]) == (
+            7.0,
+            8.0,
+        )

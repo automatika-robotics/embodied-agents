@@ -12,6 +12,7 @@ __all__ = [
     "VLMConfig",
     "CortexConfig",
     "VLAConfig",
+    "MoveItConfig",
     "SpeechToTextConfig",
     "TextToSpeechConfig",
     "SemanticRouterConfig",
@@ -111,7 +112,9 @@ class LLMConfig(ModelComponentConfig):
 
     enable_rag: bool = field(default=False)
     collection_name: Optional[str] = field(default=None)
-    distance_func: Literal["l2", "ip", "cosine"] = field(default="l2")
+    distance_func: Literal["l2", "ip", "cosine"] = field(
+        default="l2", validator=base_validators.in_(["l2", "ip", "cosine"])
+    )
     n_results: int = field(default=1)
     add_metadata: bool = field(default=False)
     chat_history: bool = field(default=False)
@@ -126,7 +129,9 @@ class LLMConfig(ModelComponentConfig):
     response_terminator: str = field(default="<<Response Ended>>")
     strip_think_tokens: bool = field(default=True)
     enable_local_model: bool = field(default=False)
-    device_local_model: Literal["cpu", "cuda"] = field(default="cuda")
+    device_local_model: Literal["cpu", "cuda"] = field(
+        default="cuda", validator=base_validators.in_(["cpu", "cuda"])
+    )
     ncpu_local_model: int = field(default=1)
     local_model_path: Optional[str] = field(default="Qwen/Qwen3-0.6B-GGUF")
     local_model_options: Dict = field(default=Factory(dict))
@@ -314,6 +319,20 @@ class MLLMConfig(LLMConfig):
     :type ncpu_local_model: int
     :param local_model_path: HuggingFace repository ID for a GGUF VLM model (default: ``ggml-org/Qwen3-VL-2B-Instruct-GGUF``), a local directory with the GGUF and mmproj files, or a local path to a ``.gguf`` file. The VLM family (qwen_vl, gemma, moondream, minicpm, llava, llava16, nanollava) is detected from the model name. This parameter is only effective when ``enable_local_model`` is True.
     :type local_model_path: Optional[str]
+    :param detections_frame: Frame that 3D detections are published in, usually the frame the consumer plans in, e.g. "base_link". Boxes are axis aligned in this frame and it is chosen before they are measured, so it cannot be changed after the fact. Required when a Detections3D output topic is given. Only meaningful with the "grounding" or "affordance" task.
+    :type detections_frame: str
+    :param static_camera_tf: Whether the transform from the camera to `detections_frame` is fixed, which it is for a camera bolted to the robot. Set False for a camera that moves with a moving joint, so the transform keeps being looked up. Default is True.
+    :type static_camera_tf: bool
+    :param depth_scale: Multiplier from the depth image's units to millimeters, overriding what its encoding implies. Default is None, which derives it from the encoding.
+    :type depth_scale: Optional[float]
+    :param min_depth: Closest depth reading to treat as usable, in meters. Default is 0.05.
+    :type min_depth: float
+    :param max_depth: Furthest depth reading to treat as usable, in meters. Default is 5.0.
+    :type max_depth: float
+    :param max_depth_age: How far apart in time the color and depth frames may be before the pair is treated as mismatched, in seconds. Default is 0.2.
+    :type max_depth_age: float
+    :param min_depth_validity: Minimum fraction of usable depth pixels inside a detection's 2D box for its 3D box to be published, in [0, 1]. For a point cloud the same number counts the points that landed in the box per pixel, so a sparse LiDAR needs it lowered, down to 0 to keep every box the detector could place. Default is 0.1.
+    :type min_depth_validity: float
 
     Example of usage:
     ```python
@@ -328,10 +347,42 @@ class MLLMConfig(LLMConfig):
 
     task: Optional[
         Literal["general", "pointing", "affordance", "trajectory", "grounding"]
-    ] = field(default=None)
+    ] = field(
+        default=None,
+        validator=validators.optional(
+            base_validators.in_(
+                ["general", "pointing", "affordance", "trajectory", "grounding"]
+            )
+        ),
+    )
     local_model_path: Optional[str] = field(
         default="ggml-org/Qwen3-VL-2B-Instruct-GGUF"
     )
+    # NOTE: 3D lift fields, kept identical to VisionConfig
+    detections_frame: str = field(default="")
+    static_camera_tf: bool = field(default=True)
+    depth_scale: Optional[float] = field(default=None)
+    min_depth: float = field(default=0.05, validator=base_validators.gt(0.0))
+    max_depth: float = field(default=5.0, validator=base_validators.gt(0.0))
+    max_depth_age: float = field(default=0.2, validator=base_validators.gt(0.0))
+    min_depth_validity: float = field(
+        default=0.1, validator=base_validators.in_range(min_value=0.0, max_value=1.0)
+    )
+    # serialized topics
+    _depth_topic: Optional[Topic] = field(
+        default=None, converter=_get_optional_topic, alias="_depth_topic"
+    )
+    _camera_info_topic: Optional[Topic] = field(
+        default=None, converter=_get_optional_topic, alias="_camera_info_topic"
+    )
+
+    @max_depth.validator
+    def _check_depth_range(self, _, value):
+        """A sensor cannot see further than it can see"""
+        if value <= self.min_depth:
+            raise ValueError(
+                f"max_depth ({value}) must be greater than min_depth ({self.min_depth})"
+            )
 
     @task.validator
     def _check_task(self, _, value):
@@ -446,13 +497,23 @@ class VLAConfig(ModelComponentConfig):
     # TODO: One can make models that take multiple state input types.
     # This parameter would have to be revised in that case
     state_input_type: Literal["positions", "velocities", "accelerations", "efforts"] = (
-        field(default="positions")
+        field(
+            default="positions",
+            validator=base_validators.in_(
+                ["positions", "velocities", "accelerations", "efforts"]
+            ),
+        )
     )
     # TODO: One can make models that produce multiple action output types.
     # This parameter would have to be revised in that case
     action_output_type: Literal[
         "positions", "velocities", "accelerations", "efforts"
-    ] = field(default="positions")
+    ] = field(
+        default="positions",
+        validator=base_validators.in_(
+            ["positions", "velocities", "accelerations", "efforts"]
+        ),
+    )
     observation_sending_rate: float = field(
         default=10.0, validator=base_validators.in_range(min_value=1e-6, max_value=1e6)
     )
@@ -465,11 +526,17 @@ class VLAConfig(ModelComponentConfig):
     robot_urdf_file: Optional[str] = field(default=None)
     joint_limits: Optional[Dict] = field(default=None)
     policy_action_units: Literal["radians", "degrees", "normalized"] = field(
-        default="radians"
+        default="radians",
+        validator=base_validators.in_(["radians", "degrees", "normalized"]),
     )
     aggregate_fn_name: Literal[
         "latest_only", "weighted_average", "average", "conservative"
-    ] = field(default="latest_only")
+    ] = field(
+        default="latest_only",
+        validator=base_validators.in_(
+            ["latest_only", "weighted_average", "average", "conservative"]
+        ),
+    )
     _termination_mode: Literal["timesteps", "keyboard", "event"] = field(
         default="timesteps", alias="_termination_mode"
     )
@@ -486,6 +553,207 @@ class VLAConfig(ModelComponentConfig):
 
     def _get_inference_params(self) -> Dict:
         return {}
+
+
+@define(kw_only=True)
+class MoveItConfig(BaseComponentConfig):
+    """
+    Configuration for the MoveIt manipulation component.
+
+    It defines which planning groups to command on a running MoveIt 2 `move_group`
+    node, how to plan (planner selection, effort, tolerances) and how the gripper
+    is controlled.
+
+    :param arm_group_name: Name of the SRDF planning group of the arm (e.g. "panda_arm"). Group names are defined in the robot's MoveIt (SRDF) configuration.
+    :type arm_group_name: str
+    :param gripper_group_name: Name of the SRDF planning group of the gripper (e.g. "hand"). Required for gripper control when `gripper_mode` is "move_group". Default is None.
+    :type gripper_group_name: Optional[str]
+    :param cartesian_group_name: Planning group used for Cartesian path requests (straight-line motions, including the descend/retreat steps of pick and place). Default is None, which uses `arm_group_name`. Setting a separate group lets an underactuated (e.g. 5-DOF) arm pair a position-only IK configuration on the arm group (for pose goals) with an orientation-tracking IK configuration on a twin group over the same chain. MoveIt's Cartesian interpolator validates the achieved orientation of every step against a fixed precision the request cannot override, which a position-only solver cannot meet.
+    :type cartesian_group_name: Optional[str]
+    :param oriented_group_name: Planning group for pose goals that carry an explicit orientation. Sampling orientation-constrained goals and tracking Cartesian interpolation steps place opposite demands on an IK solver, so underactuated arms may need a third IK profile here. Default is None, which falls back to `cartesian_group_name`, then `arm_group_name`.
+    :type oriented_group_name: Optional[str]
+    :param oriented_orientation_tolerance: Orientation tolerance in radians for pose goals that carry an explicit orientation. Kept tight because wrist slack moves the gripper jaws centimeters, while `goal_orientation_tolerance` stays wide for unoriented goals. Default is 0.15.
+    :type oriented_orientation_tolerance: float
+    :param grasp_orientation: End-effector attitude for pick goals without an orientation of their own, as a quaternion [x, y, z, w] in the pose reference frame. Derive it from a known-good grasp (e.g. FK over a demonstration pose). With approach_mode "side" it describes a grasp along +x and is rotated to the target's bearing, so one calibration serves every direction. Default is None (goals keep their own orientation, given or not).
+    :type grasp_orientation: Optional[List[float]]
+    :param end_effector_link: End-effector link that pose targets and Cartesian waypoints refer to. Empty (default) uses the planning group's default tip link.
+    :type end_effector_link: str
+    :param pose_reference_frame: Default reference frame for pose targets that carry an empty `header.frame_id`. Empty (default) uses move_group's planning frame.
+    :type pose_reference_frame: str
+    :param planning_pipeline: Planning pipeline to use (e.g. "ompl", "pilz_industrial_motion_planner"). Empty (default) uses move_group's default pipeline. Validated against the pipelines advertised by move_group at activation.
+    :type planning_pipeline: str
+    :param planner_id: Planner algorithm within the pipeline (e.g. "RRTConnect", "RRTstar" for OMPL). Empty (default) uses the pipeline's default planner. Validated against the planners advertised by move_group at activation.
+    :type planner_id: str
+    :param num_planning_attempts: Number of planning attempts before the best solution is returned. Default is 5.
+    :type num_planning_attempts: int
+    :param allowed_planning_time: Maximum planning time in seconds. Default is 5.0.
+    :type allowed_planning_time: float
+    :param max_velocity_scaling: Fraction of the joint velocity limits used when timing trajectories, in (0, 1]. Default is 0.1 — deliberately slow; increase once a setup is trusted.
+    :type max_velocity_scaling: float
+    :param max_acceleration_scaling: Fraction of the joint acceleration limits used when timing trajectories, in (0, 1]. Default is 0.1.
+    :type max_acceleration_scaling: float
+    :param goal_position_tolerance: Position tolerance in meters for pose targets. Default is 1e-3.
+    :type goal_position_tolerance: float
+    :param goal_orientation_tolerance: Orientation tolerance in radians for pose targets — a single value applied to all axes, or a list of 3 per-axis values (x, y, z). Relaxing a single axis (e.g. z to ~3.14) makes many poses reachable for underactuated (e.g. 5-DOF) arms. Default is 1e-2.
+    :type goal_orientation_tolerance: Union[float, List[float]]
+    :param goal_joint_tolerance: Position tolerance in radians for joint targets. Default is 1e-3.
+    :type goal_joint_tolerance: float
+    :param cartesian_max_step: End-effector interpolation step in meters for Cartesian paths. Default is 0.0025.
+    :type cartesian_max_step: float
+    :param cartesian_jump_threshold: Maximum allowed joint-space jump between consecutive Cartesian points (0.0 disables the check). Default is 0.0.
+    :type cartesian_jump_threshold: float
+    :param cartesian_avoid_collisions: Whether Cartesian paths must avoid collisions. Default is True.
+    :type cartesian_avoid_collisions: bool
+    :param cartesian_fraction_threshold: Minimum fraction of the requested Cartesian path that must be achievable for the goal to be executed, in [0, 1]. Default is 0.95.
+    :type cartesian_fraction_threshold: float
+    :param gripper_mode: How the gripper is controlled: "move_group" (default) sends named targets on `gripper_group_name`; "gripper_command" sends a control_msgs GripperCommand to `gripper_command_action`.
+    :type gripper_mode: Literal["move_group", "gripper_command"]
+    :param gripper_command_action: Action name of the gripper controller (e.g. "/gripper_controller/gripper_cmd"). Required when `gripper_mode` is "gripper_command".
+    :type gripper_command_action: str
+    :param gripper_open_target: SRDF named target used by `open_gripper` in "move_group" mode. Default is "open".
+    :type gripper_open_target: str
+    :param gripper_close_target: SRDF named target used by `close_gripper` in "move_group" mode. Default is "close".
+    :type gripper_close_target: str
+    :param gripper_open_position: Gripper position used by `open_gripper` in "gripper_command" mode. Default is 0.04.
+    :type gripper_open_position: float
+    :param gripper_close_position: Gripper position used by `close_gripper` in "gripper_command" mode. Default is 0.0.
+    :type gripper_close_position: float
+    :param gripper_max_effort: Maximum effort for GripperCommand goals (0.0 lets the controller decide). Default is 0.0.
+    :type gripper_max_effort: float
+    :param move_group_namespace: Namespace prefix of the move_group interfaces (e.g. "/my_robot" if the actions are at "/my_robot/move_action"). Default is "".
+    :type move_group_namespace: str
+    :param move_group_node_name: Name of the move_group node, used to fetch the SRDF (named targets) from its parameters. Default is "move_group".
+    :type move_group_node_name: str
+    :param srdf_file: Path or URL of a local SRDF file used as fallback for named targets when the SRDF cannot be fetched from move_group. Default is None.
+    :type srdf_file: Optional[str]
+    :param server_timeout: Time in seconds to wait for move_group's servers to become available. Default is 30.0.
+    :type server_timeout: float
+    :param execution_timeout: Maximum wall time in seconds for a single plan+execute goal. Default is 120.0.
+    :type execution_timeout: float
+    :param scene_update_mode: WHEN detected objects are pushed into the planning scene: "manual" (default) only on the `update_planning_scene` component action, "on_goal" additionally refreshes the scene right before each motion goal is planned, "continuous" keeps refreshing at `scene_update_rate` while detections arrive. Only effective when the component is given a Detections3D input topic. In every mode the scene freezes while an object is held. The first refresh after release reconciles the scene.
+    :type scene_update_mode: Literal["manual", "on_goal", "continuous"]
+    :param scene_update_rate: Scene refreshes per second in "continuous" mode. Default is 1.0.
+    :type scene_update_rate: float
+    :param scene_detection_labels: Detection labels allowed into the planning scene. Default is None, which admits every label.
+    :type scene_detection_labels: Optional[List[str]]
+    :param scene_object_ttl: Seconds a detection-sourced object stays in the scene after the detector stops reporting it, before a refresh removes it. Bridges detection dropouts without keeping ghost obstacles around. Default is 5.0.
+    :type scene_object_ttl: float
+    :param object_padding: Margin in meters added on every side of detected objects, for planning clearance around imperfectly measured geometry. Default is 0.0.
+    :type object_padding: float
+    :param min_object_thickness: Floor in meters for each extent of a detected object. Surfaces seen head-on are lifted with no measurable extent along the view axis, and a zero-thickness box is invisible to collision checking. Default is 0.01.
+    :type min_object_thickness: float
+    :param touch_links: Links allowed to stay in contact with an attached object, e.g. the gripper's links. Default is None, which resolves them from the robot SRDF at attach time.
+    :type touch_links: Optional[List[str]]
+    :param approach_clearance: Height in meters above a pick or place target at which the collision-aware approach motion ends and the straight-line descent begins; also the height objects are lifted or retreated to. Default is 0.1.
+    :type approach_clearance: float
+    :param approach_mode: Geometry of the pick approach. "above" (default) hovers over the target and descends vertically, correct for grippers that can point down at their grasp. "side" puts the pre-grasp BEHIND the target at grasp height, backed off horizontally along the base-to-target bearing, so the straight-line descent becomes a horizontal slide into the grasp and the lift goes straight up instead of back to the pre-grasp point. For grippers whose mouths must take the object horizontally, such as surface-height grasps on underactuated arms.
+    :type approach_mode: Literal["above", "side"]
+    :param target_match_radius: How far in meters a scene object may be from a pick goal's target_pose and still be taken as the intended target. Tighten for dense scenes, loosen for coarse target coordinates such as language-model guesses. Default is 0.2.
+    :type target_match_radius: float
+
+    Example of usage:
+    ```python
+    config = MoveItConfig(arm_group_name="panda_arm", gripper_group_name="hand")
+    ```
+    """
+
+    arm_group_name: str = field()
+    gripper_group_name: Optional[str] = field(default=None)
+    cartesian_group_name: Optional[str] = field(default=None)
+    oriented_group_name: Optional[str] = field(default=None)
+    oriented_orientation_tolerance: float = field(
+        default=0.15, validator=base_validators.gt(0.0)
+    )
+    grasp_orientation: Optional[List[float]] = field(default=None)
+    end_effector_link: str = field(default="")
+    pose_reference_frame: str = field(default="")
+    planning_pipeline: str = field(default="")
+    planner_id: str = field(default="")
+    num_planning_attempts: int = field(default=5, validator=base_validators.gt(0))
+    allowed_planning_time: float = field(
+        default=5.0, validator=base_validators.gt(0.0)
+    )
+    max_velocity_scaling: float = field(
+        default=0.1, validator=base_validators.in_range(min_value=1e-3, max_value=1.0)
+    )
+    max_acceleration_scaling: float = field(
+        default=0.1, validator=base_validators.in_range(min_value=1e-3, max_value=1.0)
+    )
+    goal_position_tolerance: float = field(
+        default=1e-3, validator=base_validators.gt(0.0)
+    )
+    goal_orientation_tolerance: Union[float, List[float]] = field(default=1e-2)
+    goal_joint_tolerance: float = field(default=1e-3, validator=base_validators.gt(0.0))
+    cartesian_max_step: float = field(default=0.0025, validator=base_validators.gt(0.0))
+    cartesian_jump_threshold: float = field(default=0.0)
+    cartesian_avoid_collisions: bool = field(default=True)
+    cartesian_fraction_threshold: float = field(
+        default=0.95, validator=base_validators.in_range(min_value=0.0, max_value=1.0)
+    )
+    gripper_mode: Literal["move_group", "gripper_command"] = field(
+        default="move_group",
+        validator=base_validators.in_(["move_group", "gripper_command"]),
+    )
+    gripper_command_action: str = field(default="")
+    gripper_open_target: str = field(default="open")
+    gripper_close_target: str = field(default="close")
+    gripper_open_position: float = field(default=0.04)
+    gripper_close_position: float = field(default=0.0)
+    gripper_max_effort: float = field(default=0.0)
+    move_group_namespace: str = field(default="")
+    move_group_node_name: str = field(default="move_group")
+    srdf_file: Optional[str] = field(default=None)
+    server_timeout: float = field(default=30.0, validator=base_validators.gt(0.0))
+    execution_timeout: float = field(default=120.0, validator=base_validators.gt(0.0))
+    scene_update_mode: Literal["manual", "on_goal", "continuous"] = field(
+        default="manual",
+        validator=base_validators.in_(["manual", "on_goal", "continuous"]),
+    )
+    scene_update_rate: float = field(default=1.0, validator=base_validators.gt(0.0))
+    scene_detection_labels: Optional[List[str]] = field(default=None)
+    scene_object_ttl: float = field(default=5.0, validator=base_validators.gt(0.0))
+    object_padding: float = field(
+        default=0.0, validator=base_validators.in_range(min_value=0.0, max_value=1.0)
+    )
+    min_object_thickness: float = field(default=0.01, validator=base_validators.gt(0.0))
+    touch_links: Optional[List[str]] = field(default=None)
+    approach_clearance: float = field(default=0.1, validator=base_validators.gt(0.0))
+    approach_mode: Literal["above", "side"] = field(
+        default="above", validator=base_validators.in_(["above", "side"])
+    )
+    target_match_radius: float = field(default=0.2, validator=base_validators.gt(0.0))
+
+    @goal_orientation_tolerance.validator
+    def _check_orientation_tolerance(self, _, value):
+        """Orientation tolerance validator"""
+        if isinstance(value, (int, float)):
+            if value <= 0:
+                raise ValueError("goal_orientation_tolerance must be greater than 0")
+            return
+        if len(value) != 3 or any(v <= 0 for v in value):
+            raise ValueError(
+                "goal_orientation_tolerance must be a single positive value or "
+                "a list of 3 positive per-axis (x, y, z) values"
+            )
+
+    @grasp_orientation.validator
+    def _check_grasp_orientation(self, _, value):
+        """Grasp orientation validator"""
+        if value is not None and len(value) != 4:
+            raise ValueError(
+                "grasp_orientation must be a quaternion as [x, y, z, w]"
+            )
+
+    @gripper_command_action.validator
+    def _check_gripper_command_action(self, _, value):
+        """Gripper command action validator.
+
+        Defined on gripper_command_action (declared after gripper_mode)."""
+        if self.gripper_mode == "gripper_command" and not value:
+            raise ValueError(
+                "gripper_command_action must be set when gripper_mode is "
+                "'gripper_command' (e.g. '/gripper_controller/gripper_cmd')"
+            )
 
 
 @define(kw_only=True)
@@ -516,6 +784,20 @@ class VisionConfig(ModelComponentConfig):
        :type ncpu_local_classifier: int
        :param local_classifier_model_path: Path or URL to the ONNX model used by the local classifier (default: DEIM, Huang et al. CVPR 2025). Other models based on [DEIM](https://github.com/ShihuaHuang95/DEIM?tab=readme-ov-file#deim-d-fine) can be checked [here](https://github.com/automatika-robotics/embodied-agents/releases/tag/0.3.3). This parameter is only effective when enable_local_classifier is set to True.
        :type local_classifier_model_path: str
+       :param detections_frame: Frame that 3D detections are published in, usually the frame the consumer plans in, e.g. "base_link". Boxes are axis aligned in this frame and it is chosen before they are measured, so it cannot be changed after the fact. Required when a Detections3D output topic is given.
+       :type detections_frame: str
+       :param static_camera_tf: Whether the transform from the camera to `detections_frame` is fixed, which it is for a camera bolted to the robot. Set False for a camera that moves with a moving joint, so the transform keeps being looked up. Default is True.
+       :type static_camera_tf: bool
+       :param depth_scale: Multiplier from the depth image's units to millimeters, overriding what its encoding implies. Default is None, which derives it from the encoding.
+       :type depth_scale: Optional[float]
+       :param min_depth: Closest depth reading to treat as usable, in meters. Default is 0.05.
+       :type min_depth: float
+       :param max_depth: Furthest depth reading to treat as usable, in meters. Default is 5.0.
+       :type max_depth: float
+       :param max_depth_age: How far apart in time the color and depth frames may be before the pair is treated as mismatched, in seconds. Only applies to depth arriving on its own topic, since an RGBD frame carries both halves together. Default is 0.2.
+       :type max_depth_age: float
+       :param min_depth_validity: Minimum fraction of usable depth pixels inside a detection's 2D box for its 3D box to be published, in [0, 1]. For a point cloud the same number counts the points that landed in the box per pixel, so a sparse LiDAR needs it lowered, down to 0 to keep every box the detector could place. Default is 0.1.
+       :type min_depth_validity: float
 
        Example of usage:
        ```python
@@ -533,11 +815,38 @@ class VisionConfig(ModelComponentConfig):
     input_height: int = field(default=640)
     input_width: int = field(default=640)
     dataset_labels: Optional[Dict] = field(default=None)
-    device_local_classifier: Literal["cpu", "cuda", "tensorrt"] = field(default="cuda")
+    device_local_classifier: Literal["cpu", "cuda", "tensorrt"] = field(
+        default="cuda", validator=base_validators.in_(["cpu", "cuda", "tensorrt"])
+    )
     ncpu_local_classifier: int = field(default=1)
     local_classifier_model_path: str = field(
         default="https://github.com/automatika-robotics/embodied-agents/releases/download/0.3.3/deim_dfine_hgnetv2_n_coco_160e.onnx"
     )
+    # NOTE: 3D lift fields, kept identical to MLLMConfig
+    detections_frame: str = field(default="")
+    static_camera_tf: bool = field(default=True)
+    depth_scale: Optional[float] = field(default=None)
+    min_depth: float = field(default=0.05, validator=base_validators.gt(0.0))
+    max_depth: float = field(default=5.0, validator=base_validators.gt(0.0))
+    max_depth_age: float = field(default=0.2, validator=base_validators.gt(0.0))
+    min_depth_validity: float = field(
+        default=0.1, validator=base_validators.in_range(min_value=0.0, max_value=1.0)
+    )
+    # serialized topics
+    _depth_topic: Optional[Topic] = field(
+        default=None, converter=_get_optional_topic, alias="_depth_topic"
+    )
+    _camera_info_topic: Optional[Topic] = field(
+        default=None, converter=_get_optional_topic, alias="_camera_info_topic"
+    )
+
+    @max_depth.validator
+    def _check_depth_range(self, _, value):
+        """A sensor cannot see further than it can see"""
+        if value <= self.min_depth:
+            raise ValueError(
+                f"max_depth ({value}) must be greater than min_depth ({self.min_depth})"
+            )
 
     def _get_inference_params(self) -> Dict:
         """get_inference_params.
@@ -602,7 +911,9 @@ class TextToSpeechConfig(ModelComponentConfig):
     """
 
     enable_local_model: bool = field(default=False)
-    device_local_model: Literal["cpu", "cuda"] = field(default="cuda")
+    device_local_model: Literal["cpu", "cuda"] = field(
+        default="cuda", validator=base_validators.in_(["cpu", "cuda"])
+    )
     ncpu_local_model: int = field(default=1)
     local_model_path: Optional[str] = field(
         default="csukuangfj2/sherpa-onnx-pocket-tts-int8-2026-01-26"
@@ -810,7 +1121,9 @@ class SpeechToTextConfig(ModelComponentConfig):
     """
 
     enable_local_model: bool = field(default=False)
-    device_local_model: Literal["cpu", "cuda"] = field(default="cuda")
+    device_local_model: Literal["cpu", "cuda"] = field(
+        default="cuda", validator=base_validators.in_(["cpu", "cuda"])
+    )
     ncpu_local_model: int = field(default=1)
     local_model_path: Optional[str] = field(
         default="csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8"
@@ -837,8 +1150,12 @@ class SpeechToTextConfig(ModelComponentConfig):
     speech_buffer_max_len: int = field(default=30000)
     stream: bool = field(default=False)
     min_chunk_size: int = field(default=2000, validator=base_validators.gt(500))
-    device_vad: Literal["cpu", "cuda", "tensorrt"] = field(default="cpu")
-    device_wakeword: Literal["cpu", "cuda", "tensorrt"] = field(default="cpu")
+    device_vad: Literal["cpu", "cuda", "tensorrt"] = field(
+        default="cpu", validator=base_validators.in_(["cpu", "cuda", "tensorrt"])
+    )
+    device_wakeword: Literal["cpu", "cuda", "tensorrt"] = field(
+        default="cpu", validator=base_validators.in_(["cpu", "cuda", "tensorrt"])
+    )
     ncpu_vad: int = field(default=1)
     ncpu_wakeword: int = field(default=1)
     vad_model_path: str = field(
@@ -902,7 +1219,9 @@ class MapConfig(BaseComponentConfig):
     """
 
     map_name: str = field()
-    distance_func: Literal["l2", "ip", "cosine"] = field(default="l2")
+    distance_func: Literal["l2", "ip", "cosine"] = field(
+        default="l2", validator=base_validators.in_(["l2", "ip", "cosine"])
+    )
     _position: Optional[Topic] = field(
         default=None, converter=_get_optional_topic, alias="_position"
     )
@@ -1026,7 +1345,9 @@ class SemanticRouterConfig(ModelComponentConfig):
     """
 
     router_name: str = field()
-    distance_func: Literal["l2", "ip", "cosine"] = field(default="l2")
+    distance_func: Literal["l2", "ip", "cosine"] = field(
+        default="l2", validator=base_validators.in_(["l2", "ip", "cosine"])
+    )
     maximum_distance: float = field(
         default=0.4, validator=base_validators.in_range(min_value=0.1, max_value=1.0)
     )
@@ -1059,18 +1380,23 @@ class MotionDetectorConfig(BaseComponentConfig):
     :param min_video_frames: The minimum number of frames in a video segment. Default is 15, assuming a 0.5 second video at 30 fps.
     :type min_video_frames: int
     :param max_video_frames: The maximum number of frames in a video segment. Default is 600, assuming a 20 second video at 30 fps.
+    :param video_preroll_frames: Number of frames from just before a motion episode begins that open its video, so the video shows the scene before the event; the still frames of the ``motion_stop_delay`` debounce close it. 0 disables. Default is 5.
     :type max_video_frames: int
-    :param motion_estimation_func: The function used for motion estimation. Can be one of "frame_difference" or "optical_flow". Default is None.
+    :param motion_estimation_func: The function used for image motion estimation, one of "frame_difference" (blurred absolute difference) or "optical_flow" (Farneback). Default is "frame_difference".
     :type motion_estimation_func: Optional[str]
     :param threshold: The threshold value for image motion detection. A float between 0.1 and 5.0. Default is 0.3.
     :type threshold: float
     :param flow_kwargs: Additional keyword arguments for the optical flow algorithm. Default is a dictionary with reasonable values.
+    :param image_scale: Factor by which image frames are downscaled before motion estimation, in (0, 1]; 1.0 processes full resolution. Default is 0.5.
+    :type image_scale: float
     :param roi_ignore_polygon: Optional polygon of (x, y) pixel coordinates to ignore during image motion estimation (e.g. a visible robot arm). Default is None.
     :type roi_ignore_polygon: Optional[List]
     :param pause_on_ego_motion: When a position (odometry) topic is provided with image inputs, suppress motion detection while the robot itself is moving. Default is True.
     :type pause_on_ego_motion: bool
     :param ego_speed_threshold: Speed (m/s) above which the robot is considered moving for ``pause_on_ego_motion``. Default is 0.05.
     :type ego_speed_threshold: float
+    :param ego_turn_threshold: Heading rate (rad/s) above which the robot is considered turning for ``pause_on_ego_motion``. A robot turning in place has no linear speed while the whole image sweeps past. Default is 0.1.
+    :type ego_turn_threshold: float
 
     --
     Point cloud input params
@@ -1109,12 +1435,18 @@ class MotionDetectorConfig(BaseComponentConfig):
     )
     publish_bool_on_change_only: bool = field(default=False)
     process_rate: Optional[float] = field(default=None)
-    device: Literal["cpu", "cuda"] = field(default="cpu")
+    device: Literal["cpu", "cuda"] = field(
+        default="cpu", validator=base_validators.in_(["cpu", "cuda"])
+    )
 
     min_video_frames: int = field(default=15)  # assuming 0.5 second video at 30 fps
+    video_preroll_frames: int = field(
+        default=5, validator=base_validators.in_range(min_value=0, max_value=1e3)
+    )
     max_video_frames: int = field(default=600)  # assuming 20 second video at 30 fps
-    motion_estimation_func: Optional[Literal["frame_difference", "optical_flow"]] = (
-        field(default=None)
+    motion_estimation_func: Literal["frame_difference", "optical_flow"] = field(
+        default="frame_difference",
+        validator=base_validators.in_(["frame_difference", "optical_flow"]),
     )
     threshold: float = field(
         default=0.3, validator=base_validators.in_range(min_value=0.1, max_value=5.0)
@@ -1131,10 +1463,16 @@ class MotionDetectorConfig(BaseComponentConfig):
         },
         validator=validate_kwargs_from_default,
     )
+    image_scale: float = field(
+        default=0.5, validator=base_validators.in_range(min_value=0.05, max_value=1.0)
+    )
     roi_ignore_polygon: Optional[List] = field(default=None)
     pause_on_ego_motion: bool = field(default=True)
     ego_speed_threshold: float = field(
         default=0.05, validator=base_validators.in_range(min_value=0.0, max_value=1e3)
+    )
+    ego_turn_threshold: float = field(
+        default=0.1, validator=base_validators.in_range(min_value=0.0, max_value=1e3)
     )
 
     voxel_size: float = field(

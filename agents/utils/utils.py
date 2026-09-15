@@ -8,6 +8,7 @@ from enum import Enum
 from io import BytesIO
 from pathlib import Path
 from typing import (
+    Any,
     List,
     Dict,
     Literal,
@@ -27,7 +28,6 @@ from attrs import Attribute
 from rclpy.logging import get_logger
 from jinja2 import Environment, FileSystemLoader
 from jinja2.environment import Template
-from .pluralize import pluralize
 
 
 def build_url(
@@ -127,29 +127,6 @@ def draw_points_2d(img: np.ndarray, points: np.ndarray, radius: int = 3) -> np.n
         cv2.circle(img, (int(x), int(y)), radius, (255, 0, 0), -1)  # red filled circle
 
     return img
-
-
-def create_detection_context(obj_list: Optional[List]) -> str:
-    """
-    Creates a context prompt based on detections.
-    :param      detections:  The detections
-    :type       detections:  str
-    :returns:   Context string
-    :rtype:     str
-    """
-    if not obj_list:
-        return ""
-    context_list = []
-    for obj_class in set(obj_list):
-        obj_count = obj_list.count(obj_class)
-        if obj_count > 1:
-            context_list.append(f"{str(obj_count)} {pluralize(obj_class)}")
-        else:
-            context_list.append(f"{str(obj_count)} {obj_class}")
-
-    if len(obj_list) > 1:
-        return f"{', '.join(context_list)}"
-    return f"{context_list[0]}"
 
 
 def get_prompt_template(template: Union[str, Path]) -> Template:
@@ -321,31 +298,21 @@ def strip_think_tokens(text: str) -> str:
 
 
 def execute_method_response_to_str(tool_name: str, response) -> str:
-    """Convert an ``ExecuteMethod`` service response into a string suitable
-    as an LLM tool-call result.
+    """Turn an ``ExecuteMethod`` service response into an LLM tool-call result.
 
-    - On failure (``response.success == False``): ``"Error: <tool_name>
-      failed with error: <error_msg>"``.
-    - On success with no return value (method returned ``None`` or ``True``,
-      or the server omitted ``response_json``): a short confirmation string.
-    - On success with a return value: decode ``response.response_json``;
-      plain strings pass through unmolested (preserving multi-line
-      formatting); structured values are re-serialized to JSON.
+    Under the action contract a successful call carries the action's message
+    as a JSON string in ``response_json`` and a failed one carries it in
+    ``error_msg``.
+
+    :param tool_name: The tool the call was made for, named in the result
+    :param response: The service response
+    :return: The action's message, an error line on failure, or a
+        confirmation when the message is empty
     """
     if not response.success:
         return f"Error: {tool_name} failed with error: {response.error_msg}"
-    raw = getattr(response, "response_json", "") or ""
-    if not raw:
-        return f"{tool_name} executed successfully"
-    try:
-        result = json.loads(raw)
-    except (json.JSONDecodeError, TypeError):
-        return raw
-    if result is True or result is None:
-        return f"{tool_name} executed successfully"
-    if isinstance(result, str):
-        return result
-    return json.dumps(result)
+    message = json.loads(response.response_json) if response.response_json else ""
+    return message or f"{tool_name} executed successfully"
 
 
 class VADStatus(Enum):
@@ -555,6 +522,30 @@ def load_model_repo(
         raise
 
     return str(model_dir)
+
+
+def get_frame_id(msg: Any) -> str:
+    """Frame a ROS message was captured in, empty when it does not say.
+
+    :param msg: Any ROS message, with or without a header, or a decoded
+        container carrying its own `frame_id` such as PointCloudData
+    :rtype: str
+    """
+    header = getattr(msg, "header", None)
+    return getattr(header, "frame_id", None) or getattr(msg, "frame_id", "") or ""
+
+
+def get_stamp_secs(msg: Any) -> float:
+    """Capture time of a ROS message in seconds, 0 when it does not say.
+
+    :param msg: Any ROS message, with or without a header, or a decoded
+        container carrying its own `timestamp` such as PointCloudData
+    :rtype: float
+    """
+    stamp = getattr(getattr(msg, "header", None), "stamp", None)
+    if stamp is None:
+        return float(getattr(msg, "timestamp", 0.0))
+    return stamp.sec + stamp.nanosec * 1e-9
 
 
 def flatten(xs):
