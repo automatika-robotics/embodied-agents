@@ -30,6 +30,39 @@ def test_video_ui_content_is_the_last_frame_as_jpeg():
     assert frame[4, 4, 0] > 200 and frame[4, 4, 2] < 50
 
 
+def test_trackings_ui_content_labels_each_box_with_its_track_id():
+    """Tracks are shown on their image like detections, told apart by id"""
+    from unittest.mock import patch
+
+    from agents import callbacks
+    from agents.callbacks import TrackingsCallback
+    from agents.ros import Trackings
+
+    image = np.zeros((32, 48, 3), dtype=np.uint8)
+    callback = TrackingsCallback(Topic(name="tracks", msg_type="Trackings"))
+    callback.msg = Trackings.convert(
+        {
+            "ids": [3, 7],
+            "tracked_labels": ["person", "person"],
+            "tracked_bboxes": [[1, 1, 10, 10], [20, 5, 30, 20]],
+        },
+        images=image,
+    )
+
+    with patch.object(
+        callbacks,
+        "draw_detection_bounding_boxes",
+        wraps=callbacks.draw_detection_bounding_boxes,
+    ) as draw:
+        content = callback._get_ui_content()
+
+    assert draw.call_args.args[2] == ["person #3", "person #7"]
+    frame = cv2.imdecode(
+        np.frombuffer(base64.b64decode(content), dtype=np.uint8), cv2.IMREAD_COLOR
+    )
+    assert frame.shape == image.shape
+
+
 def test_joint_state_ui_content_is_json_with_names():
     """Positions stay where Sugarcoat's JointState payload has them"""
     from sensor_msgs.msg import JointState as JointStateROS

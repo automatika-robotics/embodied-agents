@@ -87,6 +87,7 @@ from automatika_embodied_agents.msg import (
 from automatika_embodied_agents.action import MoveManipulator, VisionLanguageAction
 from .callbacks import (
     DetectionsCallback,
+    TrackingsCallback,
     Detections3DCallback,
     DetectionsMultiSourceCallback,
     PointsOfInterestCallback,
@@ -536,7 +537,8 @@ class Trackings(SupportedType):
     """
 
     _ros_type = ROSTrackings
-    callback = None  # Not defined in EmbodiedAgents
+    callback = TrackingsCallback
+    _ui_rate_sampled = True  # camera-rate frames + bbox drawing/JPEG encode
 
     @classmethod
     def convert(

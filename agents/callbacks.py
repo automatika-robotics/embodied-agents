@@ -342,11 +342,28 @@ class DetectionsCallback(GenericCallback):
 
         # Extract bounding boxes and labels
         bounding_boxes = getattr(self.msg, "boxes", [])
-        labels = getattr(self.msg, "labels", [])
 
-        img = draw_detection_bounding_boxes(img, bounding_boxes, labels)
+        img = draw_detection_bounding_boxes(img, bounding_boxes, self._box_labels())
 
         return convert_img_to_jpeg_str(img, getattr(self, "node_name", "ui"))
+
+    def _box_labels(self) -> list:
+        """The text drawn on each box in the UI"""
+        return list(self.msg.labels)
+
+
+class TrackingsCallback(DetectionsCallback):
+    """
+    Callback class for Trackings msg. Like detections, its get method returns
+    the tracked labels; the UI also shows each box's track id
+    """
+
+    def _box_labels(self) -> list:
+        """Each tracked label with its track id"""
+        return [
+            f"{label} #{track_id}"
+            for label, track_id in zip(self.msg.labels, self.msg.ids)
+        ]
 
 
 class PointsOfInterestCallback(GenericCallback):

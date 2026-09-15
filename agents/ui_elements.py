@@ -7,6 +7,7 @@ from .ros import (
     PointsOfInterest,
     RGBD,
     StreamingString,
+    Trackings,
     Video,
 )
 from ros_sugar.ui_node.elements import (
@@ -39,6 +40,7 @@ def _log_streaming_string_element(logging_card, output: Dict, data_src: str):
 OUTPUT_ELEMENTS = {
     StreamingString: _log_streaming_string_element,
     Detections: _out_image_element,
+    Trackings: _out_image_element,
     DetectionsMultiSource: _out_image_element,
     PointsOfInterest: _out_image_element,
     RGBD: _out_image_element,
