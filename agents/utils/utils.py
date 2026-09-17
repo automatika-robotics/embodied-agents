@@ -1,4 +1,5 @@
 import base64
+import ipaddress
 import json
 import inspect
 import re
@@ -7,6 +8,7 @@ from functools import wraps
 from enum import Enum
 from io import BytesIO
 from pathlib import Path
+from urllib.parse import urlparse
 from typing import (
     Any,
     List,
@@ -59,6 +61,36 @@ def build_url(
         return host
     base = f"{default_scheme}://{host}"
     return f"{base}:{port}" if port is not None else base
+
+
+def plain_text_warning(host: Optional[str]) -> Optional[str]:
+    """The warning to log when a client would send data unencrypted off this
+    machine, or None when there is nothing to warn about.
+
+    :param host: Hostname or IP, optionally scheme-prefixed, as given to a client
+    :type host: Optional[str]
+    :rtype: Optional[str]
+    """
+    host = (host or "127.0.0.1").strip()
+    if "://" in host:
+        parsed = urlparse(host)
+        if parsed.scheme in ("https", "wss"):
+            return None
+        name = parsed.hostname or ""
+    else:
+        # a bare host carries no port
+        name = host.strip("[]")
+    if name == "localhost":
+        return None
+    try:
+        if ipaddress.ip_address(name).is_loopback:
+            return None
+    except ValueError:
+        pass  # a hostname
+    return (
+        f"Connecting to '{host}' without encryption. Point the client at an"
+        " https:// or wss:// endpoint when the server offers TLS."
+    )
 
 
 def draw_detection_bounding_boxes(

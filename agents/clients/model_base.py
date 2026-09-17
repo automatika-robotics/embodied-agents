@@ -4,7 +4,7 @@ from typing import Any, Optional, Dict, Union, Generator, MutableMapping
 from rclpy import logging
 
 from ..models import Model
-from ..utils import validate_func_args, build_url
+from ..utils import validate_func_args, build_url, plain_text_warning
 
 
 class ModelClient(ABC):
@@ -108,6 +108,9 @@ class ModelClient(ABC):
         """initialize.
         :rtype: None
         """
+        # Warn for non encrypted
+        if warning := plain_text_warning(self.host):
+            self.logger.warning(warning)
         if self.init_on_activation:
             self._initialize()
 
