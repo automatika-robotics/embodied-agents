@@ -881,7 +881,7 @@ class TextToSpeechConfig(ModelComponentConfig):
     :type play_on_device: bool
     :param device: Optional device id (int) for playing the audio. Only effective if play_on_device is True (default: None).
     :type device: int
-    :param stream_to_ip: If set, streams the audio to this IP address via UDP instead of playing locally. Requires `play_on_device` to be True.
+    :param stream_to_ip: If set, streams the audio to this IP address via UDP instead of playing locally. Requires `play_on_device` to be True. The stream is raw audio over UDP, unencrypted by design for low latency, so keep it on a trusted network.
     :type stream_to_ip: Optional[str]
     :param stream_to_port: The target port for UDP streaming. Must be set if `stream_to_ip` is set.
     :type stream_to_port: Optional[int]
