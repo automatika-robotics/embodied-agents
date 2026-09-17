@@ -15,7 +15,12 @@ from ..models import (
     GenericTTS,
     TransformersLLM,
 )
-from ..utils import encode_img_base64, validate_func_args
+from ..utils import (
+    encode_img_base64,
+    plain_text_warning,
+    tls_verify,
+    validate_func_args,
+)
 
 
 __all__ = ["GenericHTTPClient"]
@@ -33,8 +38,9 @@ class GenericHTTPClient(ModelClient):
         host: str = "127.0.0.1",
         port: Optional[int] = 8000,
         inference_timeout: int = 30,
-        api_key: Optional[str] = None,
+        api_key_env: Optional[str] = None,
         logging_level: str = "info",
+        ca_cert: Optional[str] = None,
         **kwargs,
     ):
         """
@@ -51,11 +57,16 @@ class GenericHTTPClient(ModelClient):
         :type port: Optional[int]
         :param inference_timeout: The timeout for inference requests.
         :type inference_timeout: int
-        :param api_key: The API key for authentication. If not provided, it will be
-                        retrieved from the OPENAI_API_KEY environment variable.
-        :type api_key: Optional[str]
+        :param api_key_env: Name of the environment variable holding the API
+                            key. Defaults to ``OPENAI_API_KEY``, the convention
+                            OpenAI style servers share, and no key is sent when
+                            that is unset. A variable named here must be set.
+        :type api_key_env: Optional[str]
         :param logging_level: The logging level.
         :type logging_level: str
+        :param ca_cert: Path to a PEM file holding the certificate to trust for
+                        a server that serves its own, instead of the system store.
+        :type ca_cert: Optional[str]
         """
         if isinstance(model, Model):
             ok = isinstance(model, (GenericLLM, GenericSTT, GenericTTS, TransformersLLM))
@@ -73,8 +84,8 @@ class GenericHTTPClient(ModelClient):
                 "A generic client can only take models of type GenericLLM, GenericTTS, GenericSTT, GenericMLLM, TransformersLLM and TransformersMLLM"
             )
 
-        # init_on_activation is not user-configurable for the generic client (no
-        # model-loading step). Force it True and drop any serialized value
+        # NOTE: init_on_activation is not user-configurable for the generic client (no
+        # model loading step). Force it True and drop any serialized value
         kwargs.pop("init_on_activation", None)
         super().__init__(
             model=model,
@@ -83,11 +94,17 @@ class GenericHTTPClient(ModelClient):
             inference_timeout=inference_timeout,
             init_on_activation=True,
             logging_level=logging_level,
+            ca_cert=ca_cert,
             **kwargs,
         )
 
-        # try to get it from the environment variable otherwise default to empty string
-        self.api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
+        self.api_key_env = api_key_env
+        self.api_key = os.environ.get(api_key_env or "OPENAI_API_KEY", "")
+        if api_key_env and not self.api_key:
+            raise ValueError(
+                f"api_key_env names '{api_key_env}', but that environment variable "
+                "is not set in this process"
+            )
         header = {} if not self.api_key else {"Authorization": f"Bearer {self.api_key}"}
 
         self.url = self._build_url()
@@ -97,7 +114,12 @@ class GenericHTTPClient(ModelClient):
             base_url=self.url,
             timeout=self.inference_timeout,
             headers=header,
+            verify=tls_verify(self.ca_cert),
         )
+
+    def serialize(self) -> Dict:
+        """Get api key env variable serialized."""
+        return {**super().serialize(), "api_key_env": self.api_key_env}
 
     @property
     def supports_tool_calls(self) -> bool:
@@ -126,6 +148,13 @@ class GenericHTTPClient(ModelClient):
         2. Verifying that the requested checkpoint exists on the server.
         """
         self.logger.info(f"Initializing {self.model_name}...")
+        # Servers on the LAN take a key over plain HTTP, so we only warn here
+        if self.api_key and plain_text_warning(self.host):
+            self.logger.warning(
+                "The API key goes with every request to this server."
+                " Use an https:// host when the server offers TLS, or a key that"
+                " is worthless elsewhere."
+            )
 
         # Determine Endpoint and Mode
         if self.model_type in [

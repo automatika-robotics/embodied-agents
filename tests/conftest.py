@@ -76,10 +76,12 @@ def mock_component_internals(component):
         return_value=MagicMock(sec=0, nanosec=0)
     )
 
-    # Setup publishers_dict
+    # Setup publishers_dict. Components route on what a publisher publishes,
+    # so it carries the component's real output topic rather than a mock one
     mock_pub = MagicMock()
     mock_pub.publish = MagicMock()
-    mock_pub.output_topic = MagicMock()
+    out_topics = getattr(component, "out_topics", None)
+    mock_pub.output_topic = out_topics[0] if out_topics else MagicMock()
     component.publishers_dict = {"out": mock_pub}
 
     return component

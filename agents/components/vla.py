@@ -131,6 +131,10 @@ class VLA(ModelComponent):
         self._dataset_sorted_joint_names = None
         # Joint Limits
         self.robot_joints_limits = None
+        # Action values seen and capped by the limits while the unit-mismatch
+        # heuristic is still sampling
+        self._cap_actions_seen = 0
+        self._cap_actions_capped = 0
         # Make verifications on init, skip after serialization
         if hasattr(self.model_client, "_model"):
             self._verify_config(component_name)
@@ -582,16 +586,12 @@ class VLA(ModelComponent):
             else action_to_pub_data
         )
 
-        # NOTE: Unit mismatch heuristic: if most early actions are getting capped,
-        # the limits are almost certainly in a different unit space than the
-        # policy's actions. Issue a warning once.
-        if self.robot_joints_limits and not getattr(
-            self, "_cap_mismatch_warned", False
-        ):
-            self._cap_actions_seen = getattr(self, "_cap_actions_seen", 0) + len(
-                np.atleast_1d(safe_action)
-            )
-            self._cap_actions_capped = getattr(self, "_cap_actions_capped", 0) + int(
+        # NOTE: Unit mismatch heuristic: if most of the first 100 action values
+        # get capped, the limits are almost certainly in a different unit space
+        # than the policy's actions. Issue a warning once.
+        if self.robot_joints_limits and self._cap_actions_seen < 100:
+            self._cap_actions_seen += len(np.atleast_1d(safe_action))
+            self._cap_actions_capped += int(
                 np.sum(
                     ~np.isclose(
                         np.asarray(safe_action, dtype=np.float64),
@@ -599,19 +599,18 @@ class VLA(ModelComponent):
                     )
                 )
             )
-            if self._cap_actions_seen >= 100:
-                capped_frac = self._cap_actions_capped / self._cap_actions_seen
-                if capped_frac > 0.5:
-                    self.get_logger().warning(
-                        f"{capped_frac:.0%} of the first {self._cap_actions_seen} action "
-                        "values were capped by joint limits — this usually means the "
-                        "limits and the policy's actions are in different unit spaces. "
-                        "URDF limits are radians; if your policy outputs normalized "
-                        "motor positions (e.g. LeRobot SO-100/101 datasets), set "
-                        "policy_action_units='normalized' in VLAConfig or provide "
-                        "'joint_limits' manually in the policy's units."
-                    )
-                self._cap_mismatch_warned = True
+            capped_frac = self._cap_actions_capped / self._cap_actions_seen
+            if self._cap_actions_seen >= 100 and capped_frac > 0.5:
+                self.log_once(
+                    "cap_mismatch",
+                    f"{capped_frac:.0%} of the first {self._cap_actions_seen} action "
+                    "values were capped by joint limits — this usually means the "
+                    "limits and the policy's actions are in different unit spaces. "
+                    "URDF limits are radians; if your policy outputs normalized "
+                    "motor positions (e.g. LeRobot SO-100/101 datasets), set "
+                    "policy_action_units='normalized' in VLAConfig or provide "
+                    "'joint_limits' manually in the policy's units.",
+                )
 
         # TODO: Add smoothing for bigger deltas between new action and currect state
 

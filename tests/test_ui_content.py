@@ -1,0 +1,129 @@
+"""Tests for the content the UI serves for agents types."""
+
+import base64
+import json
+
+import cv2
+import numpy as np
+import pytest
+
+from agents.ros import Topic
+
+
+def test_video_ui_content_is_the_last_frame_as_jpeg():
+    """A client shows a video like an image, so it gets the last frame"""
+    from agents.callbacks import VideoCallback
+    from agents.ros import Video
+
+    red = np.zeros((8, 8, 3), dtype=np.uint8)
+    red[..., 0] = 255
+    blue = np.zeros((8, 8, 3), dtype=np.uint8)
+    blue[..., 2] = 255
+    callback = VideoCallback(Topic(name="video", msg_type="Video"))
+    callback.msg = Video.convert([red, blue])
+
+    content = callback._get_ui_content()
+
+    json.dumps(content)  # served as JSON by the UI API
+    jpeg = np.frombuffer(base64.b64decode(content), dtype=np.uint8)
+    frame = cv2.imdecode(jpeg, cv2.IMREAD_COLOR)  # BGR
+    assert frame[4, 4, 0] > 200 and frame[4, 4, 2] < 50
+
+
+def test_trackings_ui_content_labels_each_box_with_its_track_id():
+    """Tracks are shown on their image like detections, told apart by id"""
+    from unittest.mock import patch
+
+    from agents import callbacks
+    from agents.callbacks import TrackingsCallback
+    from agents.ros import Trackings
+
+    image = np.zeros((32, 48, 3), dtype=np.uint8)
+    callback = TrackingsCallback(Topic(name="tracks", msg_type="Trackings"))
+    callback.msg = Trackings.convert(
+        {
+            "ids": [3, 7],
+            "tracked_labels": ["person", "person"],
+            "tracked_bboxes": [[1, 1, 10, 10], [20, 5, 30, 20]],
+        },
+        images=image,
+    )
+
+    with patch.object(
+        callbacks,
+        "draw_detection_bounding_boxes",
+        wraps=callbacks.draw_detection_bounding_boxes,
+    ) as draw:
+        content = callback._get_ui_content()
+
+    assert draw.call_args.args[2] == ["person #3", "person #7"]
+    frame = cv2.imdecode(
+        np.frombuffer(base64.b64decode(content), dtype=np.uint8), cv2.IMREAD_COLOR
+    )
+    assert frame.shape == image.shape
+
+
+def test_joint_state_ui_content_is_json_with_names():
+    """Positions stay where Sugarcoat's JointState payload has them"""
+    from sensor_msgs.msg import JointState as JointStateROS
+
+    from agents.callbacks import JointStateCallback
+
+    callback = JointStateCallback(Topic(name="joints", msg_type="JointState"))
+    callback.msg = JointStateROS(
+        name=["shoulder", "elbow"], position=[0.1, 0.2], velocity=[0.5, 0.0]
+    )
+
+    content = callback._get_ui_content()
+
+    json.dumps(content)  # served as JSON by the UI API
+    assert content == {
+        "data": [0.1, 0.2],
+        "names": ["shoulder", "elbow"],
+        "velocities": [0.5, 0.0],
+        "efforts": [],
+    }
+
+
+def _chunk(text, done):
+    from agents.ros import StreamingString
+
+    return StreamingString.convert(text, stream=True, done=done)
+
+
+def test_streaming_string_ui_content_says_when_the_stream_is_done():
+    """A client can only tell a finished answer from a pause with the flag"""
+    from agents.callbacks import StreamingStringCallback
+
+    callback = StreamingStringCallback(Topic(name="answer", msg_type="StreamingString"))
+
+    callback.callback(_chunk("Hello", done=False))
+    assert callback._get_ui_content() == {"data": "Hello", "done": False}
+    callback.callback(_chunk(" world", done=False))
+    callback.callback(_chunk("", done=True))
+    assert callback._get_ui_content() == {"data": "Hello world", "done": True}
+    callback.callback(_chunk("Bye", done=False))
+    assert callback._get_ui_content() == {"data": "Bye", "done": False}
+
+
+def test_log_starts_a_new_entry_for_each_stream():
+    """Streams that follow each other stay separate entries in the log"""
+    pytest.importorskip("fasthtml")
+    pytest.importorskip("monsterui")
+    from fasthtml.common import to_xml
+    from ros_sugar.ui_node.elements import initial_logging_card
+
+    from agents.ui_elements import _log_streaming_string_element
+
+    card = initial_logging_card()
+    for content in (
+        {"data": "Hel", "done": False},
+        {"data": "Hello", "done": True},
+        {"data": "", "done": True},  # an empty stream
+        {"data": "Bye", "done": True},
+    ):
+        card = _log_streaming_string_element(card, content, data_src="robot")
+
+    log = to_xml(card)
+    assert log.count('id="inner-text"') == 2
+    assert "</strong>Hello</span>" in log and "</strong>Bye</span>" in log

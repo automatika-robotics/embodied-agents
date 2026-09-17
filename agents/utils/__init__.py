@@ -1,5 +1,4 @@
 from .utils import (
-    create_detection_context,
     draw_detection_bounding_boxes,
     draw_points_2d,
     validate_kwargs_from_default,
@@ -15,8 +14,12 @@ from .utils import (
     load_model_repo,
     flatten,
     build_url,
+    plain_text_warning,
+    tls_verify,
     build_lerobot_features_from_dataset_info,
     find_missing_values,
+    get_frame_id,
+    get_stamp_secs,
     _LANGUAGE_CODES,
 )
 
@@ -24,9 +27,12 @@ __all__ = [
     "_LANGUAGE_CODES",
     "build_lerobot_features_from_dataset_info",
     "build_url",
+    "plain_text_warning",
+    "tls_verify",
     "find_missing_values",
     "flatten",
-    "create_detection_context",
+    "get_frame_id",
+    "get_stamp_secs",
     "draw_detection_bounding_boxes",
     "draw_points_2d",
     "validate_kwargs_from_default",

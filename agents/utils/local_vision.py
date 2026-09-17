@@ -36,18 +36,51 @@ class LocalVisionModel:
     ):
         # Initialize the ONNX model
         sessionOptions = ort.SessionOptions()
-        sessionOptions.inter_op_num_threads = ncpu
         sessionOptions.intra_op_num_threads = ncpu
+        sessionOptions.inter_op_num_threads = 1
 
         providers = _get_onnx_providers(device, "local_classifier")
         self.model = ort.InferenceSession(
             model_path, sess_options=sessionOptions, providers=providers
         )
-        self.input_height = input_height
-        self.input_width = input_width
+        # get input dims from the model
+        model_height, model_width = self.__model_input_hw()
+        if model_height and model_width:
+            if (model_height, model_width) != (input_height, input_width):
+                logging.getLogger("local_classifier").warning(
+                    f"Local classifier model expects "
+                    f"{model_width}x{model_height} (WxH) input, but "
+                    f"input_width/input_height are set to "
+                    f"{input_width}x{input_height}. Using the model's size. "
+                    "Re-export the model to change it."
+                )
+            self.input_height, self.input_width = model_height, model_width
+        else:
+            self.input_height = input_height
+            self.input_width = input_width
         self.dataset_labels = dataset_labels or {}
         self.original_w: int = 0
         self.original_h: int = 0
+
+    def __model_input_hw(self):
+        """The model's fixed input ``(height, width)``, or ``(None, None)``.
+
+        Returns ``None`` for an axis the export left dynamic (a string or a
+        negative value in the ONNX shape), in which case the caller's
+        configured size is used for it.
+        """
+        inputs = self.model.get_inputs()
+        spec = next((i for i in inputs if i.name == "images"), None)
+        if spec is None:
+            spec = inputs[0] if inputs else None
+        if spec is None or len(spec.shape or []) != 4:
+            return None, None
+        height, width = spec.shape[2], spec.shape[3]
+        static = (
+            isinstance(height, int) and isinstance(width, int)
+            and height > 0 and width > 0
+        )
+        return (height, width) if static else (None, None)
 
     def __resize_with_aspect_ratio(
         self, image, height, width, interpolation=cv2.INTER_LINEAR
@@ -113,7 +146,7 @@ class LocalVisionModel:
         try:
             # Create the size array using NumPy, matching the expected int64 dtype
             orig_size_np = np.array(
-                [[self.input_height, self.input_width]], dtype=np.int64
+                [[self.input_width, self.input_height]], dtype=np.int64
             )
 
             # NOTE: Handles only one image in the input

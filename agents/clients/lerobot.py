@@ -1,5 +1,6 @@
 from io import BytesIO
 from typing import Dict, Union, get_args
+from urllib.parse import urlparse
 import time
 import pickle
 import threading
@@ -34,6 +35,11 @@ class LeRobotClient(ModelClient):
         logging_level: str = "info",
         **kwargs,
     ):
+        # gRPC only takes a bare address, so a scheme is dropped with warning
+        given = host
+        if "://" in host:
+            parsed = urlparse(host)
+            host, port = parsed.hostname or host, parsed.port or port
         try:
             from .lerobot_transport import services_pb2, services_pb2_grpc
 
@@ -74,6 +80,11 @@ class LeRobotClient(ModelClient):
             **kwargs,
         )
 
+        if given != host:
+            self.logger.warning(
+                f"Ignoring the scheme in '{given}': LeRobotClient connects over "
+                f"plain gRPC, without TLS, to {host}:{port}"
+            )
         self.running = False
         self.lock = threading.Lock()
         self.latest_actions = []

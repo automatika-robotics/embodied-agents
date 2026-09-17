@@ -1,13 +1,18 @@
 import base64
+import hashlib
+import ipaddress
 import json
 import inspect
 import re
+import ssl
 import uuid
 from functools import wraps
 from enum import Enum
 from io import BytesIO
 from pathlib import Path
+from urllib.parse import urlparse
 from typing import (
+    Any,
     List,
     Dict,
     Literal,
@@ -27,7 +32,6 @@ from attrs import Attribute
 from rclpy.logging import get_logger
 from jinja2 import Environment, FileSystemLoader
 from jinja2.environment import Template
-from .pluralize import pluralize
 
 
 def build_url(
@@ -59,6 +63,47 @@ def build_url(
         return host
     base = f"{default_scheme}://{host}"
     return f"{base}:{port}" if port is not None else base
+
+
+def plain_text_warning(host: Optional[str]) -> Optional[str]:
+    """The warning to log when a client would send data unencrypted off this
+    machine, or None when there is nothing to warn about.
+
+    :param host: Hostname or IP, optionally scheme-prefixed, as given to a client
+    :type host: Optional[str]
+    :rtype: Optional[str]
+    """
+    host = (host or "127.0.0.1").strip()
+    if "://" in host:
+        parsed = urlparse(host)
+        if parsed.scheme in ("https", "wss"):
+            return None
+        name = parsed.hostname or ""
+    else:
+        # a bare host carries no port
+        name = host.strip("[]")
+    if name == "localhost":
+        return None
+    try:
+        if ipaddress.ip_address(name).is_loopback:
+            return None
+    except ValueError:
+        pass  # a hostname
+    return (
+        f"Connecting to '{host}' without encryption. Point the client at an"
+        " https:// or wss:// endpoint when the server offers TLS."
+    )
+
+
+def tls_verify(ca_cert: Optional[str]) -> Union[bool, ssl.SSLContext]:
+    """What an httpx client verifies server certificates against.
+
+    :param ca_cert: Path to a PEM file holding the certificate, or the
+        authority, to trust
+    :type ca_cert: Optional[str]
+    :rtype: Union[bool, ssl.SSLContext]
+    """
+    return ssl.create_default_context(cafile=ca_cert) if ca_cert else True
 
 
 def draw_detection_bounding_boxes(
@@ -127,29 +172,6 @@ def draw_points_2d(img: np.ndarray, points: np.ndarray, radius: int = 3) -> np.n
         cv2.circle(img, (int(x), int(y)), radius, (255, 0, 0), -1)  # red filled circle
 
     return img
-
-
-def create_detection_context(obj_list: Optional[List]) -> str:
-    """
-    Creates a context prompt based on detections.
-    :param      detections:  The detections
-    :type       detections:  str
-    :returns:   Context string
-    :rtype:     str
-    """
-    if not obj_list:
-        return ""
-    context_list = []
-    for obj_class in set(obj_list):
-        obj_count = obj_list.count(obj_class)
-        if obj_count > 1:
-            context_list.append(f"{str(obj_count)} {pluralize(obj_class)}")
-        else:
-            context_list.append(f"{str(obj_count)} {obj_class}")
-
-    if len(obj_list) > 1:
-        return f"{', '.join(context_list)}"
-    return f"{context_list[0]}"
 
 
 def get_prompt_template(template: Union[str, Path]) -> Template:
@@ -321,31 +343,21 @@ def strip_think_tokens(text: str) -> str:
 
 
 def execute_method_response_to_str(tool_name: str, response) -> str:
-    """Convert an ``ExecuteMethod`` service response into a string suitable
-    as an LLM tool-call result.
+    """Turn an ``ExecuteMethod`` service response into an LLM tool-call result.
 
-    - On failure (``response.success == False``): ``"Error: <tool_name>
-      failed with error: <error_msg>"``.
-    - On success with no return value (method returned ``None`` or ``True``,
-      or the server omitted ``response_json``): a short confirmation string.
-    - On success with a return value: decode ``response.response_json``;
-      plain strings pass through unmolested (preserving multi-line
-      formatting); structured values are re-serialized to JSON.
+    Under the action contract a successful call carries the action's message
+    as a JSON string in ``response_json`` and a failed one carries it in
+    ``error_msg``.
+
+    :param tool_name: The tool the call was made for, named in the result
+    :param response: The service response
+    :return: The action's message, an error line on failure, or a
+        confirmation when the message is empty
     """
     if not response.success:
         return f"Error: {tool_name} failed with error: {response.error_msg}"
-    raw = getattr(response, "response_json", "") or ""
-    if not raw:
-        return f"{tool_name} executed successfully"
-    try:
-        result = json.loads(raw)
-    except (json.JSONDecodeError, TypeError):
-        return raw
-    if result is True or result is None:
-        return f"{tool_name} executed successfully"
-    if isinstance(result, str):
-        return result
-    return json.dumps(result)
+    message = json.loads(response.response_json) if response.response_json else ""
+    return message or f"{tool_name} executed successfully"
 
 
 class VADStatus(Enum):
@@ -356,9 +368,57 @@ class VADStatus(Enum):
     END = 2
 
 
+def download(url: str, destination: Path, desc: str, timeout: float = 60) -> None:
+    """Fetch a URL into a file, verifying it when the URL is pinned.
+
+    A URL may end with ``#sha256=<hex>``. The file's digest must then match, or
+    it is removed with an error. A URL without a pin is fetched unverified. A
+    partial file is removed on any failure.
+
+    :param url: What to fetch, optionally pinned
+    :type url: str
+    :param destination: Where to write it
+    :type destination: Path
+    :param desc: Name shown on the progress bar and in errors
+    :type desc: str
+    :param timeout: Seconds to wait for the server, defaults to 60
+    :type timeout: float
+    :raises ValueError: If the file does not match its pin
+    """
+    from tqdm import tqdm
+
+    url, _, fragment = url.partition("#")
+    expected = fragment[len("sha256=") :] if fragment.startswith("sha256=") else None
+    digest = hashlib.sha256()
+    try:
+        with httpx.stream("GET", url, timeout=timeout, follow_redirects=True) as r:
+            r.raise_for_status()
+            progress = tqdm(
+                total=int(r.headers.get("content-length", 0)),
+                unit="iB",
+                unit_scale=True,
+                desc=desc,
+            )
+            with open(destination, "wb") as f:
+                for chunk in r.iter_bytes(chunk_size=65536):
+                    f.write(chunk)
+                    digest.update(chunk)
+                    progress.update(len(chunk))
+            progress.close()
+        if expected and digest.hexdigest() != expected:
+            raise ValueError(
+                f"'{desc}' downloaded from {url} does not match its pinned SHA-256: "
+                f"expected {expected}, got {digest.hexdigest()}. The file has "
+                "changed since it was pinned; check it before trusting it"
+            )
+    except Exception:
+        if destination.exists():
+            destination.unlink()
+        raise
+
+
 def load_model(model_name: str, model_path: str) -> str:
     """Model download utility function"""
-    from tqdm import tqdm
     from platformdirs import user_cache_dir
 
     cachedir = user_cache_dir("ros_agents")
@@ -375,31 +435,8 @@ def load_model(model_name: str, model_path: str) -> str:
     elif model_full_path.is_file():
         return str(model_full_path)
 
-    else:
-        # assume model path is a url open stream
-        with httpx.stream("GET", model_path, timeout=20, follow_redirects=True) as r:
-            r.raise_for_status()
-            total_size = int(r.headers.get("content-length", 0))
-            progress_bar = tqdm(
-                total=total_size, unit="iB", unit_scale=True, desc=f"{model_name}"
-            )
-            # delete the file if an exception occurs while downloading
-            try:
-                with open(model_full_path, "wb") as f:
-                    for chunk in r.iter_bytes(chunk_size=1024):
-                        f.write(chunk)
-                        progress_bar.update(len(chunk))
-            except Exception:
-                import logging
-
-                logging.error(
-                    f"Error occurred while downloading model {model_name} from given url. Try restarting your components."
-                )
-                if model_full_path.exists():
-                    model_full_path.unlink()
-                raise
-
-    progress_bar.close()
+    # otherwise the model path is a url
+    download(model_path, model_full_path, model_name, timeout=20)
     return str(model_full_path)
 
 
@@ -426,7 +463,8 @@ def load_model_archive(model_name: str, url: str) -> str:
     if Path(url).is_dir():
         return str(Path(url))
 
-    archive_name = url.rstrip("/").rsplit("/", 1)[-1]
+    # the name comes from the url, without a #sha256= pin it may carry
+    archive_name = url.partition("#")[0].rstrip("/").rsplit("/", 1)[-1]
     stem = archive_name
     for suffix in (".tar.bz2", ".tar.gz", ".tgz", ".tar"):
         if stem.endswith(suffix):
@@ -445,11 +483,7 @@ def load_model_archive(model_name: str, url: str) -> str:
     staging_dir.mkdir(parents=True, exist_ok=True)
     archive_path = staging_dir / archive_name
     try:
-        with httpx.stream("GET", url, timeout=60, follow_redirects=True) as r:
-            r.raise_for_status()
-            with open(archive_path, "wb") as f:
-                for chunk in r.iter_bytes(chunk_size=65536):
-                    f.write(chunk)
+        download(url, archive_path, model_name)
         with tarfile.open(archive_path) as tar:
             try:
                 tar.extractall(staging_dir, filter="data")
@@ -555,6 +589,30 @@ def load_model_repo(
         raise
 
     return str(model_dir)
+
+
+def get_frame_id(msg: Any) -> str:
+    """Frame a ROS message was captured in, empty when it does not say.
+
+    :param msg: Any ROS message, with or without a header, or a decoded
+        container carrying its own `frame_id` such as PointCloudData
+    :rtype: str
+    """
+    header = getattr(msg, "header", None)
+    return getattr(header, "frame_id", None) or getattr(msg, "frame_id", "") or ""
+
+
+def get_stamp_secs(msg: Any) -> float:
+    """Capture time of a ROS message in seconds, 0 when it does not say.
+
+    :param msg: Any ROS message, with or without a header, or a decoded
+        container carrying its own `timestamp` such as PointCloudData
+    :rtype: float
+    """
+    stamp = getattr(getattr(msg, "header", None), "stamp", None)
+    if stamp is None:
+        return float(getattr(msg, "timestamp", 0.0))
+    return stamp.sec + stamp.nanosec * 1e-9
 
 
 def flatten(xs):

@@ -112,6 +112,11 @@ def _parse_args() -> Tuple[argparse.Namespace, List[str]]:
         type=str,
         help="Serialized robot plugin spec and feedback-bus endpoint",
     )
+    parser.add_argument(
+        "--plugins",
+        type=str,
+        help="Serialized plugin specs and shared feedback-bus endpoint",
+    )
 
     return parser.parse_known_args()
 
@@ -276,8 +281,10 @@ def _setup_component_post_init(component: Any, args: argparse.Namespace) -> None
     if args.external_processors:
         component._external_processors_json = args.external_processors
 
-    # Rebuild the robot plugin and connect it to the HOST feedback bus
-    if args.robot_plugin:
+    # Rebuild plugins as CLIENTs and connect them to the HOST feedback bus
+    if getattr(args, "plugins", None):
+        component._plugins_json = args.plugins
+    elif args.robot_plugin:  # pre-rename ros_sugar API, kept for compat
         component._robot_plugin_json = args.robot_plugin
 
     # Set additional model clients if any

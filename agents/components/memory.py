@@ -5,12 +5,14 @@ import json
 from ..clients.model_base import ModelClient
 from ..config import MemoryConfig
 from ..ros import (
+    ActionReturnType,
     Odometry,
     String,
     StreamingString,
     Event,
     Topic,
     Detections,
+    Detections3D,
     DetectionsMultiSource,
     MemLayer,
     ActionPhase,
@@ -63,10 +65,11 @@ class Memory(Component):
     instead of flat vector DB storage.
 
     :param layers: Input layers to encode. Each layer subscribes to a topic
-        whose callback produces a string via ``_get_ui_content``. Layers with
+        whose callback produces a string via ``get_output``. Layers with
         ``is_internal_state=True`` are written via ``add_body_state`` and
         retrieved through the ``body_status`` tool; all other layers are
         perception layers retrieved through ``semantic_search`` and friends.
+        A layer subscribed to a Detections3D topic is stored per OBJECT.
     :type layers: list[MemLayer]
     :param position: Odometry topic providing the robot's current position.
     :type position: Topic
@@ -131,7 +134,13 @@ class Memory(Component):
         self.config: MemoryConfig = config or MemoryConfig()
         self.allowed_inputs = {
             "Required": [Odometry],
-            "Optional": [String, StreamingString, Detections, DetectionsMultiSource],
+            "Optional": [
+                String,
+                StreamingString,
+                Detections,
+                Detections3D,
+                DetectionsMultiSource,
+            ],
         }
         self.model_client = model_client
         self.embedding_client = embedding_client
@@ -366,6 +375,11 @@ class Memory(Component):
         ts = float(time_stamp)
 
         for name, layer in self.layers_dict.items():
+            if not layer.is_internal_state and issubclass(
+                layer.subscribes_to.msg_type, Detections3D
+            ):
+                self._store_detections_3d(name, ts)
+                continue
             raw = self.callbacks[name].get_output()
             if raw is None:
                 continue
@@ -391,6 +405,41 @@ class Memory(Component):
                     layer_name=name,
                     timestamp=ts,
                 )
+
+    def _store_detections_3d(self, name: str, timestamp: float) -> None:
+        """Store one observation per 3D box, at the OBJECT's position.
+
+        3D boxes carry metric centers, so each observation is placed where
+        the object is rather than where the robot stood. The layer's boxes must
+        be published in the same world frame as the position topic by setting the
+        3D lift's ``detections_frame`` config param.
+        """
+        msg = self.callbacks[name].get_output(get_msg=True)
+        if msg is None or not msg.boxes:
+            # absence is not an observation worth an embedding
+            return
+        for index, box in enumerate(msg.boxes):
+            center = box.center.position
+            self.memory.add(
+                text=msg.labels[index] if index < len(msg.labels) else "object",
+                x=float(center.x),
+                y=float(center.y),
+                z=float(center.z),
+                layer_name=name,
+                timestamp=timestamp,
+                source_type="detection_3d",
+                confidence=(
+                    float(msg.scores[index]) if index < len(msg.scores) else 1.0
+                ),
+                metadata={
+                    "size": [
+                        float(box.size.x),
+                        float(box.size.y),
+                        float(box.size.z),
+                    ],
+                    "frame": msg.header.frame_id,
+                },
+            )
 
     def _execution_step(self, **kwargs):
         """Periodic execution: read position and store layer data."""
@@ -435,13 +484,14 @@ class Memory(Component):
             },
         }
     )
-    def store(self) -> None:
+    def store(self) -> ActionReturnType:
         """Explicitly trigger storage of current layer data."""
         position = self.callbacks[self.position.name].get_output()
         if position is None:
-            return
+            return False, "No odometry position is available, so nothing was stored"
         time_stamp = self.get_ros_time().sec
         self._store_layers(position[:3], time_stamp)
+        return True, "Stored the current layer data"
 
     @component_action(
         description={
@@ -516,7 +566,7 @@ class Memory(Component):
         x: Optional[float] = None,
         y: Optional[float] = None,
         z: Optional[float] = None,
-    ) -> bool:
+    ) -> ActionReturnType:
         """Store an arbitrary piece of text at a given (or current) position.
 
         :param content: Text to record.
@@ -524,7 +574,8 @@ class Memory(Component):
         :param x: Optional X in world-frame meters. If omitted, current odometry is used.
         :param y: Optional Y in world-frame meters. If omitted, current odometry is used.
         :param z: Optional Z in meters. If omitted, current odometry is used.
-        :returns: True if the note was stored, False if position was unavailable.
+        :returns: Whether the note was stored, and why not when no position
+            was available.
         """
         if x is None or y is None:
             position = self.callbacks[self.position.name].get_output()
@@ -533,7 +584,10 @@ class Memory(Component):
                     "store_note: no coordinates given and no odometry "
                     "available, note not stored."
                 )
-                return False
+                return False, (
+                    "No coordinates were given and no odometry is available, "
+                    "so the note was not stored"
+                )
             px = float(position[0])
             py = float(position[1])
             pz = float(position[2]) if len(position) > 2 else 0.0
@@ -550,7 +604,9 @@ class Memory(Component):
             layer_name=layer_name,
             timestamp=float(self.get_ros_time().sec),
         )
-        return True
+        return True, (
+            f"Stored the note in layer '{layer_name}' at ({px:.2f}, {py:.2f}, {pz:.2f})"
+        )
 
     @component_action(
         description={
@@ -581,9 +637,10 @@ class Memory(Component):
             },
         }
     )
-    def start_episode(self, name: str) -> str:
+    def start_episode(self, name: str) -> ActionReturnType:
         """Start a named episode."""
-        return self.memory.start_episode(name)
+        episode_id = self.memory.start_episode(name)
+        return True, f"Started episode '{name}' with id {episode_id}"
 
     @component_action(
         description={
@@ -601,63 +658,66 @@ class Memory(Component):
             },
         }
     )
-    def end_episode(self) -> str:
+    def end_episode(self) -> ActionReturnType:
         """End the active episode and trigger consolidation."""
-        return self.memory.end_episode() or "No active episode"
+        episode_id = self.memory.end_episode()
+        if episode_id is None:
+            return False, "No active episode to end"
+        return True, f"Ended episode {episode_id}"
 
     ### Retrieval actions ###
 
     @component_action(description=_tool("semantic_search"), phase=ActionPhase.PLANNING)
-    def semantic_search(self, **kwargs) -> str:
+    def semantic_search(self, **kwargs) -> ActionReturnType:
         """Search memory by meaning."""
-        return self.memory.dispatch_tool_call("semantic_search", kwargs)
+        return True, self.memory.dispatch_tool_call("semantic_search", kwargs)
 
     @component_action(description=_tool("spatial_query"), phase=ActionPhase.PLANNING)
-    def spatial_query(self, **kwargs) -> str:
+    def spatial_query(self, **kwargs) -> ActionReturnType:
         """Find observations within a radius of a point."""
-        return self.memory.dispatch_tool_call("spatial_query", kwargs)
+        return True, self.memory.dispatch_tool_call("spatial_query", kwargs)
 
     @component_action(description=_tool("temporal_query"), phase=ActionPhase.PLANNING)
-    def temporal_query(self, **kwargs) -> str:
+    def temporal_query(self, **kwargs) -> ActionReturnType:
         """Find observations in a time range."""
-        return self.memory.dispatch_tool_call("temporal_query", kwargs)
+        return True, self.memory.dispatch_tool_call("temporal_query", kwargs)
 
     @component_action(description=_tool("episode_summary"), phase=ActionPhase.PLANNING)
-    def episode_summary(self, **kwargs) -> str:
+    def episode_summary(self, **kwargs) -> ActionReturnType:
         """Get summary of one or more episodes."""
-        return self.memory.dispatch_tool_call("episode_summary", kwargs)
+        return True, self.memory.dispatch_tool_call("episode_summary", kwargs)
 
     @component_action(
         description=_tool("get_current_context"), phase=ActionPhase.PLANNING
     )
-    def get_current_context(self, **kwargs) -> str:
+    def get_current_context(self, **kwargs) -> ActionReturnType:
         """Get situational awareness."""
-        return self.memory.dispatch_tool_call("get_current_context", kwargs)
+        return True, self.memory.dispatch_tool_call("get_current_context", kwargs)
 
     @component_action(description=_tool("search_gists"), phase=ActionPhase.PLANNING)
-    def search_gists(self, **kwargs) -> str:
+    def search_gists(self, **kwargs) -> ActionReturnType:
         """Search consolidated memory summaries."""
-        return self.memory.dispatch_tool_call("search_gists", kwargs)
+        return True, self.memory.dispatch_tool_call("search_gists", kwargs)
 
     @component_action(description=_tool("entity_query"), phase=ActionPhase.PLANNING)
-    def entity_query(self, **kwargs) -> str:
+    def entity_query(self, **kwargs) -> ActionReturnType:
         """Find known entities."""
-        return self.memory.dispatch_tool_call("entity_query", kwargs)
+        return True, self.memory.dispatch_tool_call("entity_query", kwargs)
 
     @component_action(description=_tool("locate"), phase=ActionPhase.PLANNING)
-    def locate(self, **kwargs) -> str:
+    def locate(self, **kwargs) -> ActionReturnType:
         """Find the spatial location of a concept."""
-        return self.memory.dispatch_tool_call("locate", kwargs)
+        return True, self.memory.dispatch_tool_call("locate", kwargs)
 
     @component_action(description=_tool("recall"), phase=ActionPhase.PLANNING)
-    def recall(self, **kwargs) -> str:
+    def recall(self, **kwargs) -> ActionReturnType:
         """Recall everything known about a concept."""
-        return self.memory.dispatch_tool_call("recall", kwargs)
+        return True, self.memory.dispatch_tool_call("recall", kwargs)
 
     @component_action(description=_tool("body_status"), phase=ActionPhase.BOTH)
-    def body_status(self, **kwargs) -> str:
+    def body_status(self, **kwargs) -> ActionReturnType:
         """Get latest body/internal state readings."""
-        return self.memory.dispatch_tool_call("body_status", kwargs)
+        return True, self.memory.dispatch_tool_call("body_status", kwargs)
 
     ###  LLM tool registration ###
 
