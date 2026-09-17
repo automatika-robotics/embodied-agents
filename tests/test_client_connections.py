@@ -1,11 +1,18 @@
 """What clients say when they would send data unencrypted off this machine."""
 
+import ssl
+import sys
 from unittest.mock import MagicMock
 
+import httpx
+import ollama
 import pytest
 
+from agents.clients.chroma import ChromaClient
 from agents.clients.generic import GenericHTTPClient
-from agents.utils import plain_text_warning
+from agents.clients.ollama import OllamaClient
+from agents.clients.roboml import RoboMLHTTPClient
+from agents.utils import plain_text_warning, tls_verify
 
 
 class TestPlainTextWarning:
@@ -169,3 +176,98 @@ class TestWhereTheKeyComesFrom:
         assert serialized["api_key_env"] == "LLAMA_KEY"
         assert "sk-test" not in str(serialized)
         assert rebuilt.api_key == "sk-test" and rebuilt.host == "10.0.0.5"
+
+
+@pytest.fixture
+def ca_cert(tmp_path):
+    """A self-signed certificate, as a server serving its own would present"""
+    import datetime
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "gpu-box")])
+    now = datetime.datetime.now(datetime.timezone.utc)
+    cert = (
+        x509
+        .CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(1)
+        .not_valid_before(now)
+        .not_valid_after(now + datetime.timedelta(days=1))
+        .sign(key, hashes.SHA256())
+    )
+    path = tmp_path / "gpu-box.pem"
+    path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    return str(path)
+
+
+class TestTrustingAServersOwnCertificate:
+    """A server with a self-signed certificate is trusted through `ca_cert`,
+    a PEM path, on every client that connects over TLS"""
+
+    MODEL = TestClientsWarnWhenStarted.MODEL
+    HOST = "https://gpu-box:8443"
+
+    def test_the_system_store_is_the_default(self):
+        assert tls_verify(None) is True
+
+    def test_a_pem_file_becomes_a_context_trusting_it(self, ca_cert):
+        context = tls_verify(ca_cert)
+
+        assert isinstance(context, ssl.SSLContext)
+        assert context.cert_store_stats()["x509"] == 1
+
+    def _clients(self, monkeypatch):
+        """One constructor per TLS-capable client, none reaching a server"""
+        for cls in (RoboMLHTTPClient, ChromaClient, OllamaClient):
+            monkeypatch.setattr(cls, "_check_connection", lambda self: None)
+        # Chroma's local embeddings import a heavy package at construction
+        monkeypatch.setitem(sys.modules, "sentence_transformers", MagicMock())
+        ollama_model = {**self.MODEL, "model_type": "OllamaModel"}
+        db = {
+            "db_type": "ChromaDB",
+            "init_timeout": 10,
+            "db_init_params": {"embeddings": "default"},
+        }
+        return {
+            "generic": lambda **kw: GenericHTTPClient(self.MODEL, **kw),
+            "roboml": lambda **kw: RoboMLHTTPClient(self.MODEL, **kw),
+            "chroma": lambda **kw: ChromaClient(db, **kw),
+            "ollama": lambda **kw: OllamaClient(ollama_model, **kw),
+        }
+
+    @pytest.mark.parametrize("name", ["generic", "roboml", "chroma", "ollama"])
+    def test_the_certificate_reaches_the_connection(self, monkeypatch, ca_cert, name):
+        made = MagicMock()
+        monkeypatch.setattr(httpx, "Client", made)
+        monkeypatch.setattr(ollama, "Client", made)
+
+        self._clients(monkeypatch)[name](host=self.HOST, ca_cert=ca_cert)
+
+        assert isinstance(made.call_args.kwargs["verify"], ssl.SSLContext)
+
+    @pytest.mark.parametrize("name", ["generic", "roboml", "chroma", "ollama"])
+    def test_without_one_the_system_store_is_used(self, monkeypatch, name):
+        made = MagicMock()
+        monkeypatch.setattr(httpx, "Client", made)
+        monkeypatch.setattr(ollama, "Client", made)
+
+        self._clients(monkeypatch)[name](host=self.HOST)
+
+        assert made.call_args.kwargs["verify"] is True
+
+    def test_the_path_survives_serialization(self, monkeypatch, ca_cert):
+        clients = self._clients(monkeypatch)
+
+        model_client = clients["generic"](host=self.HOST, ca_cert=ca_cert)
+        db_client = clients["chroma"](host=self.HOST, ca_cert=ca_cert)
+
+        assert model_client.serialize()["ca_cert"] == ca_cert
+        assert db_client.serialize()["ca_cert"] == ca_cert
+        assert GenericHTTPClient(**model_client.serialize()).ca_cert == ca_cert

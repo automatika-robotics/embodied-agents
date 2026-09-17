@@ -12,7 +12,7 @@ import msgpack
 import msgpack_numpy as m_pack
 
 from ..models import Model, OllamaModel
-from ..utils import encode_img_base64
+from ..utils import encode_img_base64, tls_verify
 from .model_base import ModelClient
 
 # patch msgpack for numpy arrays
@@ -48,6 +48,7 @@ class RoboMLHTTPClient(ModelClient):
         inference_timeout: int = 30,
         init_on_activation: bool = True,
         logging_level: str = "info",
+        ca_cert: Optional[str] = None,
         **kwargs,
     ):
         if isinstance(model, OllamaModel):
@@ -61,12 +62,17 @@ class RoboMLHTTPClient(ModelClient):
             inference_timeout=inference_timeout,
             init_on_activation=init_on_activation,
             logging_level=logging_level,
+            ca_cert=ca_cert,
             **kwargs,
         )
         self.url = self._build_url()
 
         # create httpx client
-        self.client = httpx.Client(base_url=self.url, timeout=self.inference_timeout)
+        self.client = httpx.Client(
+            base_url=self.url,
+            timeout=self.inference_timeout,
+            verify=tls_verify(self.ca_cert),
+        )
         self._check_connection()
 
     def _check_connection(self) -> None:

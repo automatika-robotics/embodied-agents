@@ -15,7 +15,12 @@ from ..models import (
     GenericTTS,
     TransformersLLM,
 )
-from ..utils import encode_img_base64, plain_text_warning, validate_func_args
+from ..utils import (
+    encode_img_base64,
+    plain_text_warning,
+    tls_verify,
+    validate_func_args,
+)
 
 
 __all__ = ["GenericHTTPClient"]
@@ -35,6 +40,7 @@ class GenericHTTPClient(ModelClient):
         inference_timeout: int = 30,
         api_key_env: Optional[str] = None,
         logging_level: str = "info",
+        ca_cert: Optional[str] = None,
         **kwargs,
     ):
         """
@@ -58,6 +64,9 @@ class GenericHTTPClient(ModelClient):
         :type api_key_env: Optional[str]
         :param logging_level: The logging level.
         :type logging_level: str
+        :param ca_cert: Path to a PEM file holding the certificate to trust for
+                        a server that serves its own, instead of the system store.
+        :type ca_cert: Optional[str]
         """
         if isinstance(model, Model):
             ok = isinstance(model, (GenericLLM, GenericSTT, GenericTTS, TransformersLLM))
@@ -85,6 +94,7 @@ class GenericHTTPClient(ModelClient):
             inference_timeout=inference_timeout,
             init_on_activation=True,
             logging_level=logging_level,
+            ca_cert=ca_cert,
             **kwargs,
         )
 
@@ -104,6 +114,7 @@ class GenericHTTPClient(ModelClient):
             base_url=self.url,
             timeout=self.inference_timeout,
             headers=header,
+            verify=tls_verify(self.ca_cert),
         )
 
     def serialize(self) -> Dict:

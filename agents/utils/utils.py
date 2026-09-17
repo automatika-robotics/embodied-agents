@@ -3,6 +3,7 @@ import ipaddress
 import json
 import inspect
 import re
+import ssl
 import uuid
 from functools import wraps
 from enum import Enum
@@ -91,6 +92,17 @@ def plain_text_warning(host: Optional[str]) -> Optional[str]:
         f"Connecting to '{host}' without encryption. Point the client at an"
         " https:// or wss:// endpoint when the server offers TLS."
     )
+
+
+def tls_verify(ca_cert: Optional[str]) -> Union[bool, ssl.SSLContext]:
+    """What an httpx client verifies server certificates against.
+
+    :param ca_cert: Path to a PEM file holding the certificate, or the
+        authority, to trust
+    :type ca_cert: Optional[str]
+    :rtype: Union[bool, ssl.SSLContext]
+    """
+    return ssl.create_default_context(cafile=ca_cert) if ca_cert else True
 
 
 def draw_detection_bounding_boxes(
