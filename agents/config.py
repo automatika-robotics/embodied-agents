@@ -782,7 +782,7 @@ class VisionConfig(ModelComponentConfig):
        :type device_local_classifier: str
        :param ncpu_local_classifier: Number of CPU cores to allocate to the local classifier when using CPU (default: 1). This parameter is only effective when enable_local_classifier is set to True.
        :type ncpu_local_classifier: int
-       :param local_classifier_model_path: Path or URL to the ONNX model used by the local classifier (default: DEIM, Huang et al. CVPR 2025). Other models based on [DEIM](https://github.com/ShihuaHuang95/DEIM?tab=readme-ov-file#deim-d-fine) can be checked [here](https://github.com/automatika-robotics/embodied-agents/releases/tag/0.3.3). This parameter is only effective when enable_local_classifier is set to True.
+       :param local_classifier_model_path: Path or URL to the ONNX model used by the local classifier (default: DEIM, Huang et al. CVPR 2025). Other models based on [DEIM](https://github.com/ShihuaHuang95/DEIM?tab=readme-ov-file#deim-d-fine) can be checked [here](https://github.com/automatika-robotics/embodied-agents/releases/tag/0.3.3). A URL may end with ``#sha256=<hex>`` to verify the download, as the default does. This parameter is only effective when enable_local_classifier is set to True.
        :type local_classifier_model_path: str
        :param detections_frame: Frame that 3D detections are published in, usually the frame the consumer plans in, e.g. "base_link". Boxes are axis aligned in this frame and it is chosen before they are measured, so it cannot be changed after the fact. Required when a Detections3D output topic is given.
        :type detections_frame: str
@@ -820,7 +820,7 @@ class VisionConfig(ModelComponentConfig):
     )
     ncpu_local_classifier: int = field(default=1)
     local_classifier_model_path: str = field(
-        default="https://github.com/automatika-robotics/embodied-agents/releases/download/0.3.3/deim_dfine_hgnetv2_n_coco_160e.onnx"
+        default="https://github.com/automatika-robotics/embodied-agents/releases/download/0.3.3/deim_dfine_hgnetv2_n_coco_160e.onnx#sha256=d9e5a4aecfc923faeaaab96262444a489b635310fb397f1de8ac9f743cdcde68"
     )
     # NOTE: 3D lift fields, kept identical to MLLMConfig
     detections_frame: str = field(default="")
@@ -1086,8 +1086,9 @@ class SpeechToTextConfig(ModelComponentConfig):
     --
     Model Paths
     --
-    :param vad_model_path: Path or URL to VAD ONNX model.
-                           Defaults to the Silero VAD model URL.
+    :param vad_model_path: Path or URL to VAD ONNX model. A URL may end with
+                           ``#sha256=<hex>`` to verify the download, as the
+                           default does. Defaults to the Silero VAD model.
     :type vad_model_path: str
 
     :param wakeword_model_path: Source of the sherpa-onnx keyword spotting bundle:
@@ -1095,7 +1096,9 @@ class SpeechToTextConfig(ModelComponentConfig):
                                 repository ID, or a local directory. Defaults to the
                                 official English zipformer KWS bundle (3.3M params)
                                 from the sherpa-onnx releases. For other languages
-                                see https://github.com/k2-fsa/sherpa-onnx/releases/tag/kws-models
+                                see https://github.com/k2-fsa/sherpa-onnx/releases/tag/kws-models.
+                                An archive URL may end with ``#sha256=<hex>`` to
+                                verify the download, as the default does.
     :type wakeword_model_path: str
 
     --
@@ -1159,10 +1162,10 @@ class SpeechToTextConfig(ModelComponentConfig):
     ncpu_vad: int = field(default=1)
     ncpu_wakeword: int = field(default=1)
     vad_model_path: str = field(
-        default="https://raw.githubusercontent.com/snakers4/silero-vad/refs/heads/master/src/silero_vad/data/silero_vad.onnx"
+        default="https://raw.githubusercontent.com/snakers4/silero-vad/bfdc0193023f121ea5b3cc7b176dbed570a68a59/src/silero_vad/data/silero_vad.onnx#sha256=1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3"
     )
     wakeword_model_path: str = field(
-        default="https://github.com/k2-fsa/sherpa-onnx/releases/download/kws-models/sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01.tar.bz2"
+        default="https://github.com/k2-fsa/sherpa-onnx/releases/download/kws-models/sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01.tar.bz2#sha256=f170013b4716e41b62b9bfd809687c207cef798ef9bc6534d524e17af9b6561a"
     )
     _sample_rate: int = field(default=16000, alias="_sample_rate")
     _block_size: int = field(default=1280, alias="_block_size")

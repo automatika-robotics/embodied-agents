@@ -136,7 +136,9 @@ class TestSTTConfig:
         c = SpeechToTextConfig(enable_vad=True, enable_wakeword=True)
         assert c.wakeword_phrase == "ok robot"
         assert c.wakeword_threshold == 0.25
-        assert c.wakeword_model_path.endswith(".tar.bz2")
+        # an archive URL, pinned to the bytes it was checked against
+        archive, _, pin = c.wakeword_model_path.partition("#")
+        assert archive.endswith(".tar.bz2") and pin.startswith("sha256=")
         # the openWakeWord-era model fields are gone
         assert not hasattr(c, "melspectrogram_model_path")
         assert not hasattr(c, "embedding_model_path")
