@@ -10,6 +10,7 @@ import pytest
 
 from agents.clients.chroma import ChromaClient
 from agents.clients.generic import GenericHTTPClient
+from agents.clients.lerobot import LeRobotClient
 from agents.clients.ollama import OllamaClient
 from agents.clients.roboml import RoboMLHTTPClient, RoboMLWSClient
 from agents.utils import plain_text_warning, tls_verify
@@ -310,3 +311,41 @@ class TestTheWebSocketClientsUrl:
 
         assert isinstance(secure._ws_ssl, ssl.SSLContext)
         assert plain._ws_ssl is None
+
+
+class TestTheLeRobotClientsHost:
+    """The LeRobot client speaks plain gRPC to a bare address. A scheme in the
+    host is dropped with a warning, since the channel has no TLS either way"""
+
+    MODEL = {**TestClientsWarnWhenStarted.MODEL, "model_type": "LeRobotPolicy"}
+
+    def _client(self, monkeypatch, host):
+        # neither gRPC nor torch is needed to check how the address is formed
+        grpc = MagicMock()
+        for name in ("grpc", "torch"):
+            monkeypatch.setitem(sys.modules, name, grpc)
+        for name in ("services_pb2", "services_pb2_grpc"):
+            monkeypatch.setitem(
+                sys.modules, f"agents.clients.lerobot_transport.{name}", MagicMock()
+            )
+        logger = MagicMock()
+        monkeypatch.setattr(
+            "agents.clients.model_base.logging.get_logger", lambda name: logger
+        )
+        monkeypatch.setattr(LeRobotClient, "_check_connection", lambda self: None)
+        client = LeRobotClient(self.MODEL, host=host, port=8080)
+        return client, grpc.insecure_channel.call_args.args[0], logger
+
+    def test_a_bare_host_is_used_as_given(self, monkeypatch):
+        client, target, logger = self._client(monkeypatch, "10.0.0.5")
+
+        assert target == "10.0.0.5:8080"
+        assert not logger.warning.called
+
+    def test_a_scheme_is_dropped_with_a_warning(self, monkeypatch):
+        client, target, logger = self._client(monkeypatch, "https://10.0.0.5:9000")
+
+        assert target == "10.0.0.5:9000"
+        assert (client.host, client.port) == ("10.0.0.5", 9000)
+        logger.warning.assert_called_once()
+        assert "https://10.0.0.5:9000" in logger.warning.call_args.args[0]
