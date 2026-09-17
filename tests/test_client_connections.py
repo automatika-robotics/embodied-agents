@@ -11,7 +11,7 @@ import pytest
 from agents.clients.chroma import ChromaClient
 from agents.clients.generic import GenericHTTPClient
 from agents.clients.ollama import OllamaClient
-from agents.clients.roboml import RoboMLHTTPClient
+from agents.clients.roboml import RoboMLHTTPClient, RoboMLWSClient
 from agents.utils import plain_text_warning, tls_verify
 
 
@@ -271,3 +271,42 @@ class TestTrustingAServersOwnCertificate:
         assert model_client.serialize()["ca_cert"] == ca_cert
         assert db_client.serialize()["ca_cert"] == ca_cert
         assert GenericHTTPClient(**model_client.serialize()).ca_cert == ca_cert
+
+
+class TestTheWebSocketClientsUrl:
+    """The RoboML WebSocket client sets its model up over HTTP and runs
+    inference over a WebSocket to the same server, so one host must serve
+    both, over TLS or not"""
+
+    MODEL = TestClientsWarnWhenStarted.MODEL
+
+    def _client(self, monkeypatch, **kwargs):
+        monkeypatch.setattr(RoboMLHTTPClient, "_check_connection", lambda self: None)
+        return RoboMLWSClient(self.MODEL, **kwargs)
+
+    @pytest.mark.parametrize(
+        "host, endpoint",
+        [
+            ("127.0.0.1", "ws://127.0.0.1:8000/m/ws_inference"),
+            ("http://gpu-box:8000", "ws://gpu-box:8000/m/ws_inference"),
+            ("https://gpu-box:8443", "wss://gpu-box:8443/m/ws_inference"),
+        ],
+    )
+    def test_the_websocket_follows_the_http_scheme(self, monkeypatch, host, endpoint):
+        client = self._client(monkeypatch, host=host)
+
+        assert client.url.startswith("http")
+        assert client.websocket_endpoint == endpoint
+
+    def test_a_websocket_scheme_in_the_host_is_refused(self, monkeypatch):
+        with pytest.raises(ValueError, match="http:// or https://"):
+            self._client(monkeypatch, host="wss://gpu-box:8443")
+
+    def test_a_certificate_applies_to_the_secure_websocket_only(
+        self, monkeypatch, ca_cert
+    ):
+        secure = self._client(monkeypatch, host="https://gpu-box:8443", ca_cert=ca_cert)
+        plain = self._client(monkeypatch, host="http://gpu-box:8000", ca_cert=ca_cert)
+
+        assert isinstance(secure._ws_ssl, ssl.SSLContext)
+        assert plain._ws_ssl is None
