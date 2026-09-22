@@ -2,8 +2,10 @@
 
 from unittest.mock import MagicMock, patch
 
+from ros_sugar.core import BaseComponent
 from ros_sugar.robot import PluginMetadata, RobotPlugin, SensorPlugin
 
+from agents.config import CortexConfig
 from agents.launcher import Launcher
 from agents.components.cortex import Cortex
 
@@ -17,6 +19,7 @@ def _launcher(components):
     launcher._internal_events = []
     launcher._components_activation_timeout = 1.0
     launcher._action_registry = MagicMock(name="registry")
+    launcher._pkg_executable = {}
     # _robot_plugin is a property reading the attached plugins
     launcher._plugins = {}
     launcher._namespace = ""
@@ -36,8 +39,10 @@ def _install_monitor(launcher, names):
 
 class TestTheMonitorGetsTheActionRegistry:
     """The registry of what the stack can be asked to do is built by the base
-    Launcher and handed over as an attribute. Both monitors this launcher can
-    install must receive it"""
+    Launcher. A plain Monitor receives it directly. Cortex is built without
+    it, because the registry built so far still lists Cortex as a component,
+    and the base Launcher rebuilds and hands it over once the override
+    returns"""
 
     def test_a_plain_monitor(self):
         launcher = _launcher([])
@@ -61,7 +66,32 @@ class TestTheMonitorGetsTheActionRegistry:
 
         assert launcher.monitor_node is cortex
         kwargs = cortex._init_internal_monitor.call_args.kwargs
-        assert kwargs["action_registry"] is launcher._action_registry
+        assert "action_registry" not in kwargs
+
+    def test_the_rebuilt_registry_leaves_cortex_out(
+        self, rclpy_init, mock_model_client
+    ):
+        """The handover the base Launcher does after the override: the registry
+        is built from the components with Cortex removed, so Cortex's own
+        methods are never listed as something the stack can be asked to do"""
+        cortex = Cortex(
+            actions=[],
+            model_client=mock_model_client,
+            config=CortexConfig(),
+            component_name="test_launcher_cortex",
+        )
+        worker = BaseComponent(component_name="test_launcher_worker")
+        launcher = _launcher([cortex, worker])
+
+        with patch("agents.launcher.ComponentLaunchAction"):
+            _install_monitor(launcher, [cortex.node_name, worker.node_name])
+            launcher._hand_registry_to_monitor()
+
+        assert cortex._registry_given
+        owners = cortex._action_registry.owners()
+        assert worker.node_name in owners
+        assert "monitor" in owners
+        assert cortex.node_name not in owners
 
 
 class _Robot(RobotPlugin):

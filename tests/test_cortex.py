@@ -916,11 +916,13 @@ class TestCortexRobotDescription:
 
 
 class TestStandingInForTheMonitor:
-    def test_the_launchers_action_registry_is_kept(self, rclpy_init, mock_model_client):
-        """The Launcher builds the registry of what the stack can be asked to
-        do and hands it to whichever node monitors the stack. Standing in for
-        the Monitor, Cortex must keep that one rather than the empty registry
-        a Monitor builds for itself when given none."""
+    """The Launcher builds the registry of what the stack can be asked to do
+    and hands it to whichever node monitors the stack. Cortex takes it either
+    way it can arrive"""
+
+    def test_a_registry_passed_at_construction_is_kept(
+        self, rclpy_init, mock_model_client
+    ):
         registry = SystemActionRegistry.from_components([])
         comp = _make_cortex(
             [_make_mock_action()], mock_model_client, "test_cortex_registry"
@@ -929,6 +931,24 @@ class TestStandingInForTheMonitor:
         comp._init_internal_monitor(components_names=[], action_registry=registry)
 
         assert comp._action_registry is registry
+        assert comp._registry_given
+
+    def test_a_registry_handed_over_later_is_installed(
+        self, rclpy_init, mock_model_client
+    ):
+        """What the Launcher does: Cortex is built without the registry, and
+        the one rebuilt with Cortex removed is handed over before activation"""
+        registry = SystemActionRegistry.from_components([])
+        comp = _make_cortex(
+            [_make_mock_action()], mock_model_client, "test_cortex_registry_later"
+        )
+        comp._init_internal_monitor(components_names=[])
+        assert not comp._registry_given
+
+        comp.set_action_registry(registry)
+
+        assert comp._action_registry is registry
+        assert comp._registry_given
 
 
 class TestDispatchingAGoal:

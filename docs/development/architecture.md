@@ -56,7 +56,7 @@ The mixin decides whether a tick can be lifted. When depth or calibration is mis
 
 ### Cortex as the Monitor
 
-`Cortex` subclasses both `ModelComponent` and sugarcoat's `Monitor`. When a recipe includes a `Cortex`, the `Launcher` installs it in place of the default `Monitor` (see `Launcher._init_monitor_node`). The launcher takes Cortex out of the components to be monitored, since Cortex is now the monitor, and initializes its monitor side through `Cortex._init_internal_monitor`. That call hands over the same arguments the default `Monitor` would receive, including the launcher's `SystemActionRegistry`, the registry of everything the stack can be asked to do by name.
+`Cortex` subclasses both `ModelComponent` and sugarcoat's `Monitor`. When a recipe includes a `Cortex`, the `Launcher` installs it in place of the default `Monitor` (see `Launcher._init_monitor_node`). The launcher takes Cortex out of the components to be monitored, since Cortex is now the monitor, and initializes its monitor side through `Cortex._init_internal_monitor` with the same arguments the default `Monitor` would receive.
 
 ## The `_execution_step()` Pattern
 
