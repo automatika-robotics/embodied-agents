@@ -104,6 +104,12 @@ class Cortex(ModelComponent, Monitor):
         "at execution time using actual results from prior steps. "
         "Never return fewer tool calls than needed — always include every "
         "step in the plan even if some arguments are not yet known. "
+        "A component's action server runs one goal at a time: if a goal is "
+        "rejected because the server is busy with a goal you did not send, "
+        "stop it with that component's cancel_main_goal tool when the task "
+        "calls for it, then send yours. Use the wait tool to hold for a number "
+        "of seconds when a step needs time to take effect, not to wait for a "
+        "running action goal: its progress is reported to you as it runs. "
         "If the task requires no actions, respond with text only."
     )
 
@@ -506,6 +512,32 @@ class Cortex(ModelComponent, Monitor):
         self._execution_tools.add("update_parameter")
         self._execution_tool_descriptions.append(update_param_desc)
 
+        # wait: execution tool, the one step that takes time on purpose
+        wait_desc = {
+            "type": "function",
+            "function": {
+                "name": "wait",
+                "description": (
+                    "Wait for a number of seconds before the next step, for "
+                    "something started earlier to take effect. Not for waiting "
+                    "on a running action goal, whose progress is reported to "
+                    "you as it runs."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "duration": {
+                            "type": "number",
+                            "description": "Seconds to wait",
+                        },
+                    },
+                    "required": ["duration"],
+                },
+            },
+        }
+        self._execution_tools.add("wait")
+        self._execution_tool_descriptions.append(wait_desc)
+
         # Register all the tools the monitor has gathered from components
         self._register_component_tools()
 
@@ -713,7 +745,8 @@ class Cortex(ModelComponent, Monitor):
             if action_client.goal_rejected:
                 return (
                     f"Error: '{component_name}' rejected the goal because it is "
-                    "busy with another one. Cancel that one first."
+                    "busy with another one. Stop that one first with the "
+                    f"'{component_name}.cancel_main_goal' tool."
                 )
             return (
                 f"Error: Failed to construct or send action goal to "
@@ -1526,6 +1559,8 @@ class Cortex(ModelComponent, Monitor):
                 if success:
                     return f"{tool_name} executed successfully"
                 return f"Error: {tool_name} failed with error: {message}"
+            if tool_name == "wait":
+                return self._wait(args.get("duration"))
             if tool_name in self._plugin_action_tools:
                 return self._call_plugin_action(tool_name, args)
             ref = self._tool_refs.get(tool_name)
@@ -1544,6 +1579,25 @@ class Cortex(ModelComponent, Monitor):
             return self._call_component_action(tool_name, args)
         except Exception as e:
             return f"Error calling {tool_name}: {e}"
+
+    def _wait(self, duration: Any) -> str:
+        """The wait tool dwells before the next step."""
+        try:
+            seconds = float(duration)
+        except (TypeError, ValueError):
+            return f"Error: wait takes a number of seconds, got {duration!r}"
+        if seconds < 0:
+            return f"Error: cannot wait for {seconds} seconds"
+        deadline = time.monotonic() + seconds
+        while (remaining := deadline - time.monotonic()) > 0:
+            handle = self._main_goal_handle
+            if handle is not None and handle.is_cancel_requested:
+                return (
+                    f"Wait stopped after {seconds - remaining:.1f}s: the task "
+                    "was cancelled"
+                )
+            time.sleep(min(self.config.monitoring_interval, remaining))
+        return f"Waited {seconds:g}s"
 
     def _execute_plan(self, plan, goal_handle, feedback_msg) -> Tuple[List[Dict], bool]:
         """Execute plan steps with per-step confirmation.

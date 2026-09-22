@@ -1,6 +1,7 @@
 """Tests for Cortex component — requires rclpy."""
 
 import json
+import time
 import pytest
 from typing import Tuple
 from unittest.mock import MagicMock
@@ -17,6 +18,7 @@ from agents.ros import (
     MONITOR_OWNER,
     ActionPhase,
     ActionReturnType,
+    BaseComponent,
     Topic,
     Action,
     ComponentRunType,
@@ -1088,7 +1090,82 @@ class TestDispatchingAGoal:
 
         assert result.startswith("Error:")
         assert "rejected" in result and "busy" in result
+        # The way out is named: the planner can stop a goal it did not send
+        assert "vla.cancel_main_goal" in result
         assert self.TOOL not in comp._active_action_clients
+
+
+class TestTheStopTool:
+    """Every component running an action server inherits cancel_main_goal,
+    described by sugarcoat, so the registry walk offers it as a tool"""
+
+    def test_action_server_components_get_it_and_others_do_not(
+        self, rclpy_init, mock_model_client
+    ):
+        comp = _make_cortex([], mock_model_client, "test_cortex_stop_tool")
+        arm = BaseComponent(
+            component_name="test_cortex_stop_arm", main_action_type=VisionLanguageAction
+        )
+        arm.run_type = ComponentRunType.ACTION_SERVER
+        worker = BaseComponent(component_name="test_cortex_stop_worker")
+        mock_component_internals(comp)
+        comp._action_registry = SystemActionRegistry.from_components([arm, worker])
+
+        comp._register_system_tools()
+
+        assert f"{arm.node_name}.cancel_main_goal" in comp._execution_tools
+        assert f"{worker.node_name}.cancel_main_goal" not in comp._execution_tools
+        tool = next(
+            t["function"]
+            for t in comp._execution_tool_descriptions
+            if t["function"]["name"] == f"{arm.node_name}.cancel_main_goal"
+        )
+        assert tool["description"].startswith("Stop the goal")
+        assert tool["parameters"]["properties"] == {}
+
+
+class TestTheWaitTool:
+    """The planner has no other way to dwell. The wait runs in slices, so a
+    cancelled task does not sit it out"""
+
+    def _cortex(self, mock_model_client, name):
+        comp = _make_cortex([], mock_model_client, name)
+        mock_component_internals(comp)
+        comp.config.monitoring_interval = 0.01
+        return comp
+
+    def test_it_is_an_execution_tool(self, rclpy_init, mock_model_client):
+        comp = self._cortex(mock_model_client, "test_cortex_wait_tool")
+        comp._action_registry = _registry()
+
+        comp._register_system_tools()
+
+        assert "wait" in comp._execution_tools
+
+    def test_it_waits_the_duration(self, rclpy_init, mock_model_client):
+        comp = self._cortex(mock_model_client, "test_cortex_wait_duration")
+        started = time.monotonic()
+
+        result = comp._execute_system_tool("wait", {"duration": 0.05})
+
+        assert time.monotonic() - started >= 0.05
+        assert result.startswith("Waited")
+
+    def test_a_cancelled_task_cuts_it_short(self, rclpy_init, mock_model_client):
+        comp = self._cortex(mock_model_client, "test_cortex_wait_cancelled")
+        comp._main_goal_handle = MagicMock(is_cancel_requested=True)
+        started = time.monotonic()
+
+        result = comp._execute_system_tool("wait", {"duration": 30})
+
+        assert time.monotonic() - started < 1
+        assert "cancelled" in result
+
+    def test_a_bad_duration_is_refused(self, rclpy_init, mock_model_client):
+        comp = self._cortex(mock_model_client, "test_cortex_wait_bad")
+
+        assert comp._wait("soon").startswith("Error:")
+        assert comp._wait(-1).startswith("Error:")
 
 
 class TestToolsFromTheRegistry:

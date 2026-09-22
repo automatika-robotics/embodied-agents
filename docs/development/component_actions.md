@@ -145,11 +145,19 @@ A goal is dispatched asynchronously. The tool returns once the server accepts th
 
 ### One Goal at a Time
 
-A component's main action server runs one goal at a time. While a goal is ongoing, a new goal request is rejected: the running goal has to finish or be canceled first, either through the action's own cancel request or through the component's `<node_name>/cancel_main_action` service (`std_srvs/Trigger`). A goal counts as ongoing until `main_action_callback()` returns, not only until it reaches a terminal state, so a new goal never starts while the previous one is still cleaning up.
+A component's main action server runs one goal at a time. While a goal is ongoing, a new goal request is rejected: the running goal has to finish or be canceled first, through the action's own cancel request, the inherited `cancel_main_goal` component action, or the component's `<node_name>/cancel_main_action` service (`std_srvs/Trigger`). A goal counts as ongoing until `main_action_callback()` returns, not only until it reaches a terminal state, so a new goal never starts while the previous one is still cleaning up.
 
-When Cortex sends a goal through a tool that still has a goal of its own running, it replaces that goal: it cancels it, waits for the server to return the result, and then sends the new one. The wait is bounded by the action client's `feedback_check_timeout`. If the goal has not returned by then, the tool reports that it could not be canceled and the new goal is not sent. Cortex never cancels a goal that another client started, so that rejection reaches the planner as the server being busy.
+When Cortex sends a goal through a tool that still has a goal of its own running, it replaces that goal: it cancels it, waits for the server to return the result, and then sends the new one. The wait is bounded by the action client's `feedback_check_timeout`. If the goal has not returned by then, the tool reports that it could not be canceled and the new goal is not sent. Cortex never cancels a goal that another client started on its own: that rejection reaches the planner as the server being busy and names the component's `cancel_main_goal` tool, so the planner can stop that goal and send its own.
 
 This puts one requirement on a component implementing `main_action_callback()`: check `goal_handle.is_cancel_requested` inside the loop, transition the goal with `goal_handle.canceled()`, and return promptly. A callback that keeps running after a cancel request blocks every new goal, including the one Cortex is waiting to send.
+
+## Cortex's Own Tools
+
+| Tool | Phase | Description |
+|---|---|---|
+| `inspect_component(component)` | planning | A component's topics, configuration, model clients and tools |
+| `update_parameter(component, param_name, new_value)` | execution | Change one configuration parameter |
+| `wait(duration)` | execution | Hold for a number of seconds. Not for waiting on a running goal, whose progress the planner is shown. Cut short if the task is cancelled |
 
 ## Built-in Component Actions
 
@@ -169,6 +177,8 @@ All `ModelComponent` subclasses also inherit:
 |---|---|
 | `fallback_to_local()` | Switch from remote client to built-in local model |
 | `change_model_client(model_client_name)` | Hot-swap to a registered additional model client |
+
+Action server components also inherit `cancel_main_goal()`, which stops the goal their main action server is running.
 
 ## Example: Custom Action on a Component
 
