@@ -25,11 +25,7 @@ from ..ros import (
     get_methods_with_decorator,
     ros_msg_to_str,
 )
-from ..utils import (
-    execute_method_response_to_str,
-    strip_think_tokens,
-    validate_func_args,
-)
+from ..utils import strip_think_tokens, validate_func_args
 from ..utils.actions import goal_type_to_json_properties
 from .model_component import ModelComponent
 
@@ -756,11 +752,15 @@ class Cortex(ModelComponent, Monitor):
             return f"Error: Could not parse tool name for {tool_name}: {e}"
 
         try:
-            response = self.execute_component_method(comp_name, method_name, args)
+            success, message = self.execute_component_method(
+                comp_name, method_name, args
+            )
         except Exception as e:
             return f"Error calling {tool_name}: {e}"
 
-        return execute_method_response_to_str(tool_name, response)
+        if not success:
+            return f"Error: {tool_name} failed with error: {message}"
+        return message or f"{tool_name} executed successfully"
 
     def _send_action_goal_from_dict(
         self,
@@ -1611,14 +1611,14 @@ class Cortex(ModelComponent, Monitor):
                 self.get_logger().info(
                     f"Calling component action {tool_name} with args: {args}"
                 )
-                response = self.update_parameter(
+                success, message = self.update_parameter(
                     args.get("component", ""),
                     args.get("param_name", ""),
                     args.get("new_value", ""),
                 )
-                if response.success:
+                if success:
                     return f"{tool_name} executed successfully"
-                return f"Error: {tool_name} failed with error: {response.error_msg}"
+                return f"Error: {tool_name} failed with error: {message}"
             elif tool_name in self._action_goal_tools:
                 comp_name, action_name, action_type = self._action_goal_tools[tool_name]
                 return self._send_action_goal_from_dict(

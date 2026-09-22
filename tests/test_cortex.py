@@ -1073,3 +1073,65 @@ class TestActionServerTools:
         assert names.count("send_goal_to_run") == 1
         assert comp._action_goal_tools["send_goal_to_run"][0] == "planner"
         comp.get_logger().warning.assert_called_once()
+
+
+class TestCallingAComponentAction:
+    """Cortex reaches a component's actions through the Monitor, which reads
+    the service response into the (success, message) action contract. What
+    the LLM sees as the tool result is that message, or an error line"""
+
+    def _call(self, comp, returns):
+        mock_component_internals(comp)
+        comp.execute_component_method = MagicMock(return_value=returns)
+        return comp._call_component_action("memory.start_episode", {"name": "tidy"})
+
+    def test_the_actions_message_is_the_tool_result(
+        self, rclpy_init, mock_model_client
+    ):
+        comp = _make_cortex([], mock_model_client, "test_cortex_call_message")
+
+        result = self._call(comp, (True, "Episode 'tidy' started"))
+
+        comp.execute_component_method.assert_called_once_with(
+            "memory", "start_episode", {"name": "tidy"}
+        )
+        assert result == "Episode 'tidy' started"
+
+    def test_a_failure_is_an_error_line(self, rclpy_init, mock_model_client):
+        comp = _make_cortex([], mock_model_client, "test_cortex_call_failure")
+
+        result = self._call(comp, (False, "no such layer"))
+
+        assert result.startswith("Error:")
+        assert "no such layer" in result
+
+    def test_an_empty_message_is_a_confirmation(self, rclpy_init, mock_model_client):
+        comp = _make_cortex([], mock_model_client, "test_cortex_call_empty")
+
+        assert "executed successfully" in self._call(comp, (True, ""))
+
+    def test_a_raised_error_is_reported_not_raised(self, rclpy_init, mock_model_client):
+        comp = _make_cortex([], mock_model_client, "test_cortex_call_raises")
+        mock_component_internals(comp)
+        comp.execute_component_method = MagicMock(side_effect=KeyError("memory"))
+
+        result = comp._call_component_action("memory.start_episode", {})
+
+        assert result.startswith("Error calling memory.start_episode")
+
+    def test_the_parameter_tool_reads_the_contract_too(
+        self, rclpy_init, mock_model_client
+    ):
+        comp = _make_cortex([], mock_model_client, "test_cortex_call_parameter")
+        mock_component_internals(comp)
+        comp.update_parameter = MagicMock(return_value=(True, "updated"))
+        args = {"component": "vision", "param_name": "threshold", "new_value": "0.5"}
+
+        assert "executed successfully" in comp._execute_system_tool(
+            "update_parameter", args
+        )
+        comp.update_parameter.assert_called_once_with("vision", "threshold", "0.5")
+
+        comp.update_parameter.return_value = (False, "unknown parameter")
+        result = comp._execute_system_tool("update_parameter", args)
+        assert result.startswith("Error:") and "unknown parameter" in result
