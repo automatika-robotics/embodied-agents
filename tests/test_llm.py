@@ -298,3 +298,41 @@ class TestDetections3DContext:
         result = llm._create_input(topic=trigger)
 
         assert "orange at (2.00, 3.00, 0.05)" in result["query"][-1]["content"]
+
+
+class TestComponentActionToolResults:
+    """The LLM component calls a component action over its ExecuteMethod
+    service and turns the response into the tool result the model sees"""
+
+    def _call(self, llm, response):
+        client = MagicMock()
+        client.send_request.return_value = response
+        llm._component_clients = {"memory": client}
+        return llm._execute_component_method("memory", "start_episode", name="tidy")
+
+    def _response(self, success, message=""):
+        response = MagicMock()
+        response.success = success
+        response.response_json = '"' + message + '"' if success and message else ""
+        response.error_msg = "" if success else message
+        return response
+
+    def test_the_actions_message_is_the_tool_result(self, llm):
+        result = self._call(llm, self._response(True, "Episode 'tidy' started"))
+
+        assert result == "Episode 'tidy' started"
+
+    def test_an_empty_message_is_a_confirmation(self, llm):
+        assert "executed successfully" in self._call(llm, self._response(True))
+
+    def test_a_failure_is_an_error_line(self, llm):
+        result = self._call(llm, self._response(False, "no such layer"))
+
+        assert result.startswith("Error:") and "no such layer" in result
+
+    def test_no_response_is_an_error_line(self, llm):
+        """The client returns None when the service is unavailable or the call
+        times out. That used to raise inside the result decoding"""
+        result = self._call(llm, None)
+
+        assert result.startswith("Error:") and "no response" in result

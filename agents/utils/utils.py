@@ -342,24 +342,6 @@ def strip_think_tokens(text: str) -> str:
     return re.sub(r"<think>.*?(?:</think>|\Z)", "", text, flags=re.DOTALL).strip()
 
 
-def execute_method_response_to_str(tool_name: str, response) -> str:
-    """Turn an ``ExecuteMethod`` service response into an LLM tool-call result.
-
-    Under the action contract a successful call carries the action's message
-    as a JSON string in ``response_json`` and a failed one carries it in
-    ``error_msg``.
-
-    :param tool_name: The tool the call was made for, named in the result
-    :param response: The service response
-    :return: The action's message, an error line on failure, or a
-        confirmation when the message is empty
-    """
-    if not response.success:
-        return f"Error: {tool_name} failed with error: {response.error_msg}"
-    message = json.loads(response.response_json) if response.response_json else ""
-    return message or f"{tool_name} executed successfully"
-
-
 class VADStatus(Enum):
     """VAD Status for start and end of detected speech"""
 

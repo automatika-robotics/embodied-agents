@@ -64,7 +64,7 @@ The same contract applies wherever sugarcoat runs a method as an action: through
 
 Actions are executed through the component's `ExecuteMethod` service, so they run in the component's own process and can access its internal state. On success the message is JSON-encoded into the response's `response_json`; on failure it is placed in `error_msg`.
 
-Cortex and the `LLM` component turn that response into the tool result the model sees, with `agents.utils.execute_method_response_to_str`:
+Cortex reaches actions through the Monitor, which reads that response back into the `(success, message)` pair. The `LLM` component calls the service directly and decodes the response itself. Either way, the tool result the model sees is:
 
 | Response | Tool result |
 |---|---|
@@ -106,15 +106,18 @@ See [Model-Specific Fallbacks](./advanced_component.md#model-specific-fallbacks)
 
 ## How Actions Are Discovered
 
-When the Cortex component activates, it scans all managed components for methods decorated with `@component_action` or `@component_fallback`. Each discovered method is registered as an execution tool with the tool description from the decorator.
+Cortex does not scan components itself. The `Launcher` builds a `SystemActionRegistry`, sugarcoat's catalogue of everything the stack can be asked to do by name, from every component in the recipe, whatever process it runs in, and hands it to Cortex. When Cortex activates, it walks that registry and turns its entries into tools:
 
-Tool names are namespaced as `{component_name}.{method_name}` (e.g. `vision.take_picture`, `tts.say`).
+- A method decorated with `@component_action` or `@component_fallback` becomes a tool when its decorator carries a description. The description is used whole, so what the planner sees is exactly what the component author wrote. A method without a description is not offered.
+- An action server becomes a `send_goal_to_<server_name>` tool and a service a `send_request_to_<service_name>` tool, see [Action Servers as Tools](#action-servers-as-tools).
 
-Lifecycle methods (`start`, `stop`, `restart`, `reconfigure`, `set_param`, `set_params`, `broadcast_status`) are filtered out — they are managed by the Monitor, not by the planner.
+Tool names for methods are namespaced as `{component_name}.{method_name}` (e.g. `vision.take_picture`, `tts.say`). Cortex keeps the registry reference behind every tool, `{component_name}/{name}`, and dispatches a call by what the entry is: a method runs through the Monitor's own resolver over the component's `ExecuteMethod` service, a goal goes to the action server, a request to the service.
+
+Lifecycle methods (`start`, `stop`, `restart`, `reconfigure`, `set_param`, `set_params`, `broadcast_status`) are filtered out — they are managed by the Monitor, not by the planner. Cortex's own actions and the Monitor's methods are left out as well.
 
 ### Planning and Execution Phases
 
-Cortex keeps two tool sets: the planner's, used while it builds a plan, and the executor's, used while it carries the plan out. The `phase` argument of `agents.ros.component_action` decides where an action is registered. Sugarcoat's own decorator has no such argument, and fallbacks are always execution tools.
+Cortex keeps two tool sets: the planner's, used while it builds a plan, and the executor's, used while it carries the plan out. The `phase` argument of `agents.ros.component_action` decides where an action is registered. The wrapper writes the phase into the description dict the decorator stores, beside `type` and `function`, which is how it reaches Cortex through the registry. Sugarcoat's own decorator has no such argument, and fallbacks are always execution tools.
 
 | `phase` | Registered with | Use for |
 |---|---|---|
@@ -131,10 +134,12 @@ def locate(self, **kwargs) -> ActionReturnType: ...
 
 ## Action Servers as Tools
 
-Cortex also exposes action servers as execution tools, named `send_goal_to_<action_name>` with slashes replaced by underscores. The goal message's fields become the tool parameters. Two sources feed this:
+Cortex also exposes action servers as execution tools, named `send_goal_to_<component>_<server>` from the registry reference: the component's node name, then the server's name with that node name prefix removed and slashes replaced by underscores. A server `vla/run` on component `vla` gives `send_goal_to_vla_run`. The goal message's fields become the tool parameters. The registry lists two kinds of server:
 
 - the main action server of every managed component running as `ComponentRunType.ACTION_SERVER` (e.g. `VLA`, `MoveIt`)
-- any additional action servers a component reports through `get_ros_entrypoints()`. Services reported there become `send_request_to_<service_name>` tools the same way.
+- any additional action servers a component reports through `get_ros_entrypoints()`.
+
+Services become `send_request_to_<component>_<service>` tools the same way, both the main service of a component running as `ComponentRunType.SERVER` and the additional ones reported through `get_ros_entrypoints()`. Because the name carries the component, two components whose servers share a bare name get two tools.
 
 A goal is dispatched asynchronously. The tool returns once the server accepts the goal, and Cortex keeps reporting the goal's status, latest feedback and result to the model while the plan continues.
 

@@ -27,7 +27,6 @@ from ..utils import (
     get_prompt_template,
     validate_func_args,
     strip_think_tokens,
-    execute_method_response_to_str,
 )
 from .model_component import ModelComponent
 from .component_base import ComponentRunType
@@ -250,7 +249,12 @@ class LLM(ModelComponent):
             response = srv_client.send_request(req_msg=srv_request)
         except Exception as e:
             return f"Error calling {tool_name}: {e}"
-        return execute_method_response_to_str(tool_name, response)
+        if response is None:
+            return f"Error: {tool_name} got no response from the component"
+        if not response.success:
+            return f"Error: {tool_name} failed with error: {response.error_msg}"
+        message = json.loads(response.response_json) if response.response_json else ""
+        return message or f"{tool_name} executed successfully"
 
     @validate_func_args
     def add_documents(
