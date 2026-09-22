@@ -50,6 +50,8 @@ from ros_sugar.core import (
     BaseComponent,
     Monitor,
     RegisteredAction,
+    Routine,
+    RoutineStatus,
     SystemActionRegistry,
 )
 from ros_sugar.core.component import MutuallyExclusiveCallbackGroup
@@ -158,6 +160,8 @@ __all__ = [
     "component_action",
     "ActionReturnType",
     "SystemActionRegistry",
+    "Routine",
+    "RoutineStatus",
     "RegisteredAction",
     "COMPONENT_METHOD",
     "COMPONENT_ACTION_SERVER",

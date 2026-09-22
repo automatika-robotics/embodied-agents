@@ -1,6 +1,7 @@
 """Tests for Cortex component — requires rclpy."""
 
 import json
+import threading
 import time
 import pytest
 from typing import Tuple
@@ -23,6 +24,8 @@ from agents.ros import (
     Action,
     ComponentRunType,
     RegisteredAction,
+    Routine,
+    RoutineStatus,
     SystemActionRegistry,
     VisionLanguageAction,
     component_action,
@@ -1110,6 +1113,7 @@ class TestTheStopTool:
         worker = BaseComponent(component_name="test_cortex_stop_worker")
         mock_component_internals(comp)
         comp._action_registry = SystemActionRegistry.from_components([arm, worker])
+        comp.get_routines = MagicMock(return_value=[])
 
         comp._register_system_tools()
 
@@ -1124,6 +1128,194 @@ class TestTheStopTool:
         assert tool["parameters"]["properties"] == {}
 
 
+def _noop(**_):
+    return True, ""
+
+
+class TestRoutinesAsTools:
+    """Routines the Monitor hosts are skills for the planner: a start tool
+    each, in the recipe author's words, plus pause, resume and abort"""
+
+    CURSOR = {
+        "name": "pick_object",
+        "description": "Pick the object in front.",
+        "steps": ["detect", "grasp"],
+        "status": RoutineStatus.RUNNING,
+        "index": 1,
+        "active_step": "grasp",
+        "step_message": "found it",
+        "abort_reason": "",
+        "elapsed": 4.3,
+    }
+
+    def _cortex(self, mock_model_client, name, cursors):
+        comp = _make_cortex([], mock_model_client, name)
+        mock_component_internals(comp)
+        comp._action_registry = _registry()
+        comp.get_routines = MagicMock(return_value=cursors)
+        return comp
+
+    def test_a_routine_given_to_cortex_is_hosted(self, rclpy_init, mock_model_client):
+        routine = Routine("tidy", steps=[Action(_noop)], description="Tidy")
+        comp = _make_cortex(
+            [], mock_model_client, "test_cortex_routine_hosted", routines=[routine]
+        )
+        comp.host_routines = MagicMock()
+
+        comp._init_internal_monitor(components_names=[])
+
+        comp.host_routines.assert_called_once_with([routine])
+
+    def test_a_routine_without_a_description_is_refused(
+        self, rclpy_init, mock_model_client
+    ):
+        routine = Routine("tidy", steps=[Action(_noop)])
+
+        with pytest.raises(ValueError, match="description"):
+            _make_cortex(
+                [],
+                mock_model_client,
+                "test_cortex_routine_undescribed",
+                routines=[routine],
+            )
+
+    def test_each_hosted_routine_is_a_start_tool(self, rclpy_init, mock_model_client):
+        comp = self._cortex(
+            mock_model_client,
+            "test_cortex_routine_tool",
+            [dict(self.CURSOR, status=RoutineStatus.IDLE)],
+        )
+
+        comp._register_system_tools()
+
+        tool = next(
+            t["function"]
+            for t in comp._execution_tool_descriptions
+            if t["function"]["name"] == "routine.pick_object"
+        )
+        assert "Pick the object in front. Steps: detect, grasp." in tool["description"]
+        assert tool["parameters"]["properties"] == {}
+        for control in ("pause_routine", "resume_routine", "abort_routine"):
+            assert control in comp._execution_tools
+
+    def test_no_routines_means_no_control_tools(self, rclpy_init, mock_model_client):
+        comp = self._cortex(mock_model_client, "test_cortex_routine_none", [])
+
+        comp._register_system_tools()
+
+        assert not comp._routine_tools
+        assert "pause_routine" not in comp._execution_tools
+
+    def test_starting_a_routine_tracks_it(self, rclpy_init, mock_model_client):
+        comp = self._cortex(
+            mock_model_client, "test_cortex_routine_start", [self.CURSOR]
+        )
+        comp._register_system_tools()
+        comp.start_routine = MagicMock(return_value=(True, "Routine started"))
+
+        result = comp._execute_system_tool("routine.pick_object", {})
+
+        comp.start_routine.assert_called_once_with("pick_object")
+        assert "started" in result
+        assert comp._active_routines == {"pick_object"}
+
+    def test_a_routine_that_will_not_start_is_an_error(
+        self, rclpy_init, mock_model_client
+    ):
+        comp = self._cortex(
+            mock_model_client, "test_cortex_routine_busy", [self.CURSOR]
+        )
+        comp._register_system_tools()
+        comp.start_routine = MagicMock(return_value=(False, "already running"))
+
+        result = comp._execute_system_tool("routine.pick_object", {})
+
+        assert result.startswith("Error:") and "already running" in result
+        assert not comp._active_routines
+
+    def test_control_tools_reach_the_monitor(self, rclpy_init, mock_model_client):
+        comp = self._cortex(
+            mock_model_client, "test_cortex_routine_pause", [self.CURSOR]
+        )
+        comp._register_system_tools()
+        comp.pause_routine = MagicMock(return_value=(True, "paused at grasp"))
+
+        result = comp._execute_system_tool(
+            "pause_routine", {"routine_name": "pick_object"}
+        )
+
+        comp.pause_routine.assert_called_once_with("pick_object")
+        assert result == "paused at grasp"
+
+    def test_the_status_block_follows_a_routine_to_its_end(
+        self, rclpy_init, mock_model_client
+    ):
+        comp = self._cortex(
+            mock_model_client, "test_cortex_routine_status", [self.CURSOR]
+        )
+        comp._active_routines = {"pick_object"}
+
+        status = comp._monitor_active_clients()
+
+        assert "routine.pick_object: running at step 'grasp'" in status
+        assert "found it" in status
+        assert comp._active_routines == {"pick_object"}
+
+        comp.get_routines.return_value = [
+            dict(self.CURSOR, status=RoutineStatus.COMPLETED, step_message="lifted")
+        ]
+        status = comp._monitor_active_clients()
+
+        assert "routine.pick_object: COMPLETED | lifted" in status
+        assert not comp._active_routines
+        assert comp._monitor_active_clients() is None
+
+    def test_ending_the_task_aborts_its_routines(self, rclpy_init, mock_model_client):
+        comp = self._cortex(
+            mock_model_client, "test_cortex_routine_abort", [self.CURSOR]
+        )
+        comp._active_routines = {"pick_object"}
+        comp.abort_routine = MagicMock(return_value=(True, "aborted"))
+
+        comp._cancel_all_active_clients()
+
+        assert comp.abort_routine.call_args.args == ("pick_object",)
+        assert not comp._active_routines
+
+    def test_a_real_routine_runs_and_is_reported(self, rclpy_init, mock_model_client):
+        """In process, through the Monitor: hosted, offered, started by its
+        tool and followed to completion"""
+        comp = _make_cortex([], mock_model_client, "test_cortex_routine_real")
+        mock_component_internals(comp)
+        comp._init_internal_monitor(components_names=[])
+        comp.create_publisher = MagicMock()
+        grasped = threading.Event()
+
+        def detect(**_):
+            return True, "detected"
+
+        def grasp(**_):
+            grasped.set()
+            return True, "grasped"
+
+        routine = Routine(
+            "pick", steps=[Action(detect), Action(grasp)], description="Pick it up"
+        )
+        assert comp.add_routine(routine)[0]
+        comp._register_system_tools()
+
+        assert "started" in comp._execute_system_tool("routine.pick", {})
+        assert grasped.wait(2.0)
+        deadline = time.monotonic() + 2.0
+        status = comp._monitor_active_clients()
+        while comp._active_routines and time.monotonic() < deadline:
+            time.sleep(0.02)
+            status = comp._monitor_active_clients()
+
+        assert "routine.pick: COMPLETED | grasped" in status
+        assert not comp._active_routines
+
+
 class TestTheWaitTool:
     """The planner has no other way to dwell. The wait runs in slices, so a
     cancelled task does not sit it out"""
@@ -1132,6 +1324,7 @@ class TestTheWaitTool:
         comp = _make_cortex([], mock_model_client, name)
         mock_component_internals(comp)
         comp.config.monitoring_interval = 0.01
+        comp.get_routines = MagicMock(return_value=[])
         return comp
 
     def test_it_is_an_execution_tool(self, rclpy_init, mock_model_client):
@@ -1176,6 +1369,7 @@ class TestToolsFromTheRegistry:
     def _register(self, comp, *entries):
         mock_component_internals(comp)
         comp._action_registry = _registry(*entries)
+        comp.get_routines = MagicMock(return_value=[])
         comp._register_system_tools()
 
     def _tool(self, comp, name, phase="execution"):

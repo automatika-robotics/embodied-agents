@@ -151,6 +151,12 @@ When Cortex sends a goal through a tool that still has a goal of its own running
 
 This puts one requirement on a component implementing `main_action_callback()`: check `goal_handle.is_cancel_requested` inside the loop, transition the goal with `goal_handle.canceled()`, and return promptly. A callback that keeps running after a cancel request blocks every new goal, including the one Cortex is waiting to send.
 
+## Routines as Tools
+
+A `Routine` the Monitor hosts is a skill for the planner. Routines reach the Monitor when an event triggers them, when they are given to `enable_ui(routines=...)`, or when they are passed to `Cortex(routines=[...])`, which needs neither an event nor a UI. A routine given to Cortex must have a description, since that is what the planner reads.
+
+Each hosted routine becomes a `routine.<name>` execution tool with no parameters, described by the routine's description and step names. Starting one returns at once. Cortex then follows its cursor and reports its status, active step and last step message to the planner alongside running goals, until it completes, fails or is aborted. `pause_routine`, `resume_routine` and `abort_routine` take the routine name. When the task ends, routines it started are aborted, as running goals are cancelled.
+
 ## Cortex's Own Tools
 
 | Tool | Phase | Description |

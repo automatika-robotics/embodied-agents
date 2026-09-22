@@ -20,6 +20,8 @@ from ..ros import (
     Event,
     Monitor,
     RegisteredAction,
+    Routine,
+    RoutineStatus,
     ServiceClientHandler,
     StreamingString,
     String,
@@ -66,6 +68,11 @@ class Cortex(ModelComponent, Monitor):
     :type model_client: Optional[ModelClient]
     :param db_client: Optional database client for RAG context during planning.
     :type db_client: Optional[DBClient]
+    :param routines: Routines to host and offer to the planner as skills, for a
+        recipe where no event triggers them and no UI is enabled. Each needs a
+        description that the planner can read. Routines triggered by
+        events or given to the UI are given to cortex and don't have to be listed here.
+    :type routines: Optional[List[Routine]]
     :param config: Configuration for the Cortex component.
     :type config: Optional[CortexConfig]
     :param component_name: The name of this component.
@@ -139,12 +146,20 @@ class Cortex(ModelComponent, Monitor):
         output: Optional[Topic] = None,
         model_client: Optional[ModelClient] = None,
         db_client: Optional[DBClient] = None,
+        routines: Optional[List[Routine]] = None,
         config: Optional[CortexConfig] = None,
         component_name: str,
         **kwargs,
     ):
         self.handled_outputs = [String, StreamingString]
         self._validate_actions(actions)
+        for routine in routines or []:
+            if not routine.description:
+                raise ValueError(
+                    "Each routine given to Cortex must have a description for the "
+                    f"planner. Routine '{routine.name}' is missing one."
+                )
+        self._routines = routines or []
 
         self.config: CortexConfig = config or CortexConfig()
 
@@ -188,9 +203,11 @@ class Cortex(ModelComponent, Monitor):
 
         # The action registry reference behind each tool built from it
         self._tool_refs: Dict[str, str] = {}
+
+        # Routine tools: tool name -> routine name
+        self._routine_tools: Dict[str, str] = {}
         # Plugin action tools: tool name -> (plugin, action name, tool parameters)
         self._plugin_action_tools: Dict[str, Tuple[Any, str, Dict]] = {}
-
         # Behavioral actions: dispatched via internal event system
         self._behavioral_actions = actions
         self._pure_internal_events = []
@@ -198,6 +215,8 @@ class Cortex(ModelComponent, Monitor):
 
         # Planning output buffer for failed plans
         self._planning_output: Optional[str] = None
+        # Started routines which are followed till the end
+        self._active_routines: Set[str] = set()
 
         # Monitor-side: Launcher populates these when it detects Cortex
         self._components_to_monitor: List[str] = []
@@ -282,6 +301,9 @@ class Cortex(ModelComponent, Monitor):
         )
         self.config = _config
         self._setup_internal_action_events(self._behavioral_actions)
+        if self._routines:
+            # Hosted by the Monitor (similar to when no UI is given)
+            self.host_routines(self._routines)
 
     # =========================================================================
     # Tools: recipe actions (dispatched via internal events)
@@ -540,6 +562,74 @@ class Cortex(ModelComponent, Monitor):
 
         # Register all the tools the monitor has gathered from components
         self._register_component_tools()
+        self._register_routine_tools()
+
+    # Tools that control a hosted routine by name. Each is the Monitor method
+    # of the same name.
+    _ROUTINE_CONTROLS = {
+        "pause_routine": "Pause a running routine at its current step",
+        "resume_routine": "Resume a paused routine from that step",
+        "abort_routine": "Abort a running or paused routine",
+    }
+
+    def _register_routine_tools(self) -> None:
+        """Offer every routine the Monitor hosts as a skill.
+
+        Each routine becomes a start tool, described in the recipe author's
+        words, plus generic pause, resume and abort tools taking the routine
+        name.
+        """
+        routines = self.get_routines()
+        for routine in routines:
+            self._register_routine(routine)
+        if not routines or "pause_routine" in self._execution_tools:
+            return
+        names = ", ".join(routine["name"] for routine in routines)
+        for tool_name, text in self._ROUTINE_CONTROLS.items():
+            self._execution_tools.add(tool_name)
+            self._execution_tool_descriptions.append({
+                "type": "function",
+                "function": {
+                    "name": tool_name,
+                    "description": f"{text}. Routines: {names}",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "routine_name": {
+                                "type": "string",
+                                "description": "Name of the routine",
+                            },
+                        },
+                        "required": ["routine_name"],
+                    },
+                },
+            })
+
+    def _register_routine(self, routine: Dict) -> None:
+        """One start tool for one hosted routine, named ``routine.<name>``.
+
+        :param routine: The routine's cursor and description, as the Monitor
+            lists them
+        """
+        name = routine["name"]
+        tool_name = f"routine.{name}"
+        if tool_name in self._routine_tools:
+            return
+        self._routine_tools[tool_name] = name
+        described = (routine.get("description") or f"Runs routine '{name}'").rstrip(".")
+        self._execution_tools.add(tool_name)
+        self._execution_tool_descriptions.append({
+            "type": "function",
+            "function": {
+                "name": tool_name,
+                "description": (
+                    f"{described}. Steps: {', '.join(routine['steps'])}. Starts "
+                    "the routine and returns; its progress is reported to you "
+                    "as it runs."
+                ),
+                "parameters": {"type": "object", "properties": {}, "required": []},
+            },
+        })
 
     # Lifecycle management methods that should not be exposed as LLM tools.
     # These are handled by the Monitor / Launcher
@@ -1561,6 +1651,8 @@ class Cortex(ModelComponent, Monitor):
                 return f"Error: {tool_name} failed with error: {message}"
             if tool_name == "wait":
                 return self._wait(args.get("duration"))
+            if tool_name in self._routine_tools or tool_name in self._ROUTINE_CONTROLS:
+                return self._run_routine_tool(tool_name, args)
             if tool_name in self._plugin_action_tools:
                 return self._call_plugin_action(tool_name, args)
             ref = self._tool_refs.get(tool_name)
@@ -1579,6 +1671,26 @@ class Cortex(ModelComponent, Monitor):
             return self._call_component_action(tool_name, args)
         except Exception as e:
             return f"Error calling {tool_name}: {e}"
+
+    def _run_routine_tool(self, tool_name: str, args: Dict) -> str:
+        """Start, pause, resume or abort a routine.
+
+        A started routine is followed by `_monitor_active_routines` until it
+        ends, and aborted with the task if it is still running then.
+        """
+        if tool_name in self._routine_tools:
+            name = self._routine_tools[tool_name]
+            success, message = self.start_routine(name)
+            if not success:
+                return f"Error: {tool_name} failed with error: {message}"
+            self._active_routines.add(name)
+            return (
+                f"Routine '{name}' started; its progress is reported to you as it runs."
+            )
+        success, message = getattr(self, tool_name)(args.get("routine_name", ""))
+        return (
+            message if success else f"Error: {tool_name} failed with error: {message}"
+        )
 
     def _wait(self, duration: Any) -> str:
         """The wait tool dwells before the next step."""
@@ -1698,12 +1810,13 @@ class Cortex(ModelComponent, Monitor):
 
     def _monitor_active_clients(self) -> Optional[str]:
         """Helper method to get a status update on the ongoing Action clients
+        and routines
 
         :return: Active tools status feedback
         :rtype: Optional[str]
         """
-        if not self._active_action_clients:
-            # Not active clients -> Nothing to monitor
+        if not self._active_action_clients and not self._active_routines:
+            # Nothing to monitor
             return None
         completed_actions = []
         feedback_lines = "[Active Tools Status]\n"
@@ -1726,18 +1839,60 @@ class Cortex(ModelComponent, Monitor):
             if updates_dict["feedback_timeout"]:
                 feedback_lines += " [WARNING: No new feedback received — the tool may be stalled or waiting on an external process.]"
             feedback_lines += "\n"
+        feedback_lines += self._monitor_active_routines()
         feedback_lines += "[End Of Tools Status Update]\n"
         # Remove completed actions from the active clients registry
         for tool in completed_actions:
             self._active_action_clients.pop(tool)
         return feedback_lines
 
+    def _monitor_active_routines(self) -> str:
+        """Status lines for the routines this task started, from their
+        cursors. A routine that has ended is reported once and dropped.
+
+        :rtype: str
+        """
+        if not self._active_routines:
+            return ""
+        cursors = {routine["name"]: routine for routine in self.get_routines()}
+        lines = ""
+        for name in sorted(self._active_routines):
+            cursor = cursors.get(name)
+            if cursor is None:
+                self._active_routines.discard(name)
+                lines += f"- routine.{name}: GONE | The routine was removed\n"
+                continue
+            status = RoutineStatus(cursor["status"])
+            if status.is_terminal():
+                self._active_routines.discard(name)
+                detail = (
+                    cursor["abort_reason"]
+                    if status == RoutineStatus.ABORTED
+                    else cursor["step_message"]
+                )
+                lines += f"- routine.{name}: {status.upper()} | {detail}\n"
+                continue
+            lines += (
+                f"- routine.{name}: {status} at step '{cursor['active_step']}' "
+                f"(running for {cursor['elapsed']}s)"
+            )
+            if cursor["step_message"]:
+                lines += f" | Last step said: {cursor['step_message']}"
+            lines += "\n"
+        return lines
+
     def _cancel_all_active_clients(self):
-        """Helper method to cancel all action Action clients
+        """Helper method to cancel all action Action clients and abort the
+        routines this task started
 
         :return: Cancellation error message if errors occurred
         :rtype: Optional[str]
         """
+        for name in list(self._active_routines):
+            aborted, why = self.abort_routine(name, reason="the task ended")
+            if not aborted:
+                self.get_logger().info(f"Routine '{name}' was not aborted: {why}")
+        self._active_routines.clear()
         if not self._active_action_clients:
             # Not active clients to cancel
             return
