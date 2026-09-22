@@ -41,7 +41,17 @@ from ros_sugar.config import (
     BaseAttrs,
     base_validators,
 )
-from ros_sugar.core import BaseComponent, Monitor, SystemActionRegistry
+from ros_sugar.core import (
+    COMPONENT_ACTION_SERVER,
+    COMPONENT_METHOD,
+    COMPONENT_SERVICE,
+    MONITOR_METHOD,
+    MONITOR_OWNER,
+    BaseComponent,
+    Monitor,
+    RegisteredAction,
+    SystemActionRegistry,
+)
 from ros_sugar.core.component import MutuallyExclusiveCallbackGroup
 from ros_sugar import UI_EXTENSIONS
 from ros_sugar.utils import (
@@ -148,6 +158,12 @@ __all__ = [
     "component_action",
     "ActionReturnType",
     "SystemActionRegistry",
+    "RegisteredAction",
+    "COMPONENT_METHOD",
+    "COMPONENT_ACTION_SERVER",
+    "COMPONENT_SERVICE",
+    "MONITOR_METHOD",
+    "MONITOR_OWNER",
     "VisionLanguageAction",
     "MoveManipulator",
     "GetParameters",
@@ -206,9 +222,11 @@ def component_action(
     """Wrapper around sugarcoat's ``component_action`` decorator.
 
     Delegates to ``ros_sugar.utils.component_action`` for the core
-    behavior and additionally tags the method with ``_action_phase``
-    — a hint to Cortex about whether the tool is a planning tool,
-    an execution tool, or both.
+    behavior and additionally writes the ``phase`` into the tool
+    description — a hint to Cortex about whether the tool is a planning
+    tool, an execution tool, or both. It travels inside the description
+    so that it reaches Cortex with the tool schema, through the action
+    registry, whatever process the component runs in.
 
     Can be used the same way as sugarcoat's decorator. An action must be
     annotated to return ``ActionReturnType`` and return ``(success, message)``,
@@ -233,11 +251,12 @@ def component_action(
     phase_value = phase.value if isinstance(phase, ActionPhase) else str(phase)
 
     def _wrap(func: Callable) -> Callable:
-        wrapped = _sugar_component_action(
-            function=func, description=description, active=active
+        described = (
+            {**description, "phase": phase_value} if description is not None else None
         )
-        wrapped._action_phase = phase_value
-        return wrapped
+        return _sugar_component_action(
+            function=func, description=described, active=active
+        )
 
     if function is not None:
         return _wrap(function)

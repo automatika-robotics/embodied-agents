@@ -8,6 +8,10 @@ from ..clients.db_base import DBClient
 from ..clients.model_base import ModelClient
 from ..config import CortexConfig
 from ..ros import (
+    COMPONENT_ACTION_SERVER,
+    COMPONENT_METHOD,
+    COMPONENT_SERVICE,
+    MONITOR_OWNER,
     Action,
     ActionClientHandler,
     BaseComponent,
@@ -15,6 +19,7 @@ from ..ros import (
     ComponentRunType,
     Event,
     Monitor,
+    RegisteredAction,
     ServiceClientHandler,
     StreamingString,
     String,
@@ -22,7 +27,6 @@ from ..ros import (
     Topic,
     VisionLanguageAction,
     get_logger,
-    get_methods_with_decorator,
     ros_msg_to_str,
 )
 from ..utils import strip_think_tokens, validate_func_args
@@ -176,9 +180,8 @@ class Cortex(ModelComponent, Monitor):
         self._execution_tools: Set = set()
         self._execution_tool_descriptions: List[Dict] = []
 
-        # Action server goals and Service request tools
-        self._action_goal_tools: Dict[str, Tuple[str, str, Any]] = {}
-        self._service_request_tools: Dict[str, Tuple[str, str, Any]] = {}
+        # The action registry reference behind each tool built from it
+        self._tool_refs: Dict[str, str] = {}
         # Plugin action tools: tool name -> (plugin, action name, tool parameters)
         self._plugin_action_tools: Dict[str, Tuple[Any, str, Dict]] = {}
 
@@ -433,8 +436,8 @@ class Cortex(ModelComponent, Monitor):
         """Register system management capabilities and component actions as LLM tools.
 
         Called during activation after Monitor.activate() has created service
-        clients. Discovers all @component_action and @component_fallback methods
-        on managed components and registers them as callable tools.
+        clients. Everything a component offers is read from the action
+        registry the Launcher built.
 
         Tools are separated into two categories:
         - **Planning tools** (``inspect_component``): used during the planning
@@ -503,16 +506,8 @@ class Cortex(ModelComponent, Monitor):
         self._execution_tools.add("update_parameter")
         self._execution_tool_descriptions.append(update_param_desc)
 
-        # Per-component action goal tools: execution tools
-        for comp_name, action_client in self._main_action_clients.items():
-            self.__register_action_client_as_tool(
-                component_name=comp_name,
-                action_name=action_client.config.name,
-                action_type=action_client.config.action_type,
-            )
-
-        # Discover and register component actions from all managed components
-        self._register_component_actions()
+        # Register all the tools the monitor has gathered from components
+        self._register_component_tools()
 
     # Lifecycle management methods that should not be exposed as LLM tools.
     # These are handled by the Monitor / Launcher
@@ -526,176 +521,83 @@ class Cortex(ModelComponent, Monitor):
         "broadcast_status",
     })
 
-    def _register_component_actions(self):
-        """Discover LLM tools on managed components.
+    def _register_component_tools(self) -> None:
+        """Register what the action registry lists, as LLM tools.
 
-        For each managed component, registers:
-          1. Its ``@component_action`` / ``@component_fallback`` methods
-             (routed to the planning or execution toolset based on the
-             ``_action_phase`` tag from ``agents.ros.component_action``).
-          2. Its additional ROS services as tools.
-          3. Its additional ROS action servers as tools.
-
-        Lifecycle management methods (start, stop, restart, ...) are
-        excluded. Tool names are namespaced as ``{component_name}.{method_name}``.
+        The registry is the Launcher's catalogue of everything the stack can
+        be asked to do by name, built from every component whatever process
+        it runs in. Cortex's own entries are left out (no spooky behaviour).
         """
-        for comp_name, comp in self._managed_components.items():
-            self._register_component_methods_as_tools(comp_name, comp)
-            self._register_component_entrypoints_as_tools(comp_name, comp)
-
-    def _register_component_methods_as_tools(self, comp_name: str, comp: Any) -> None:
-        """Register decorated action/fallback methods on one component.
-
-        For each method:
-          1. Parse the raw ``_action_description`` into OpenAI tool format
-             (falling back to a docstring stub if not valid JSON).
-          2. Read the ``_action_phase`` tag (default ``execution``) and
-             add the tool to the planning set, execution set, or both.
-        """
-        action_methods = get_methods_with_decorator(comp, "component_action")
-        fallback_methods = get_methods_with_decorator(comp, "component_fallback")
-
-        for attr_name in action_methods + fallback_methods:
-            if attr_name in self._LIFECYCLE_METHODS:
+        for entry in self._action_registry.list():
+            # Skip monitors own methods
+            if entry.owner in (self.node_name, MONITOR_OWNER):
                 continue
-
-            class_attr = getattr(type(comp), attr_name, None)
-            desc_raw = (
-                getattr(class_attr, "_action_description", None) if class_attr else None
-            )
-            if not desc_raw:
+            # Create tools for component methods, action servers and service requests
+            tool = self._tool_from_entry(entry)
+            if tool is None:
                 continue
-
-            tool_name = f"{comp_name}.{attr_name}"
-            try:
-                parsed = json.loads(desc_raw)
-                tool_desc = {
-                    "type": "function",
-                    "function": {**parsed["function"], "name": tool_name},
-                }
-            except (json.JSONDecodeError, TypeError, KeyError):
-                tool_desc = {
-                    "type": "function",
-                    "function": {
-                        "name": tool_name,
-                        "description": desc_raw[:200],
-                        "parameters": {
-                            "type": "object",
-                            "properties": {},
-                            "required": [],
-                        },
-                    },
-                }
-
-            phase = getattr(class_attr, "_action_phase", "execution")
-            if phase in ("planning", "both") and tool_name not in self._planning_tools:
+            tool_name, function, phase = tool
+            if tool_name in self._tool_refs:
+                # Registered on an earlier activation
+                continue
+            self._tool_refs[tool_name] = entry.ref
+            description = {
+                "type": "function",
+                "function": {**function, "name": tool_name},
+            }
+            # segregate by planning and execution
+            if phase in ("planning", "both"):
                 self._planning_tools.add(tool_name)
-                self._planning_tool_descriptions.append(tool_desc)
-            if (
-                phase in ("execution", "both")
-                and tool_name not in self._execution_tools
-            ):
+                self._planning_tool_descriptions.append(description)
+            if phase in ("execution", "both"):
                 self._execution_tools.add(tool_name)
-                self._execution_tool_descriptions.append(tool_desc)
+                self._execution_tool_descriptions.append(description)
 
-    def _register_component_entrypoints_as_tools(
-        self, comp_name: str, comp: Any
-    ) -> None:
-        """Register a component's additional ROS services and action servers."""
-        entrypoints: Dict[str, Dict] = comp.get_ros_entrypoints()
-
-        for srv_name, srv_type in entrypoints.get("services", {}).items():
-            self.__register_service_client_as_tool(
-                component_name=comp_name, srv_name=srv_name, srv_type=srv_type
+    def _tool_from_entry(
+        self, entry: RegisteredAction
+    ) -> Optional[Tuple[str, Dict, str]]:
+        """The tool a registry entry becomes with its name, its function
+        description and the phase it is registered in. None for an entry
+        that is not offered to the planner."""
+        if entry.kind == COMPONENT_METHOD:
+            # Skip lifecycle methods
+            if entry.name in self._LIFECYCLE_METHODS or not entry.schema:
+                return None
+            function = entry.schema.get("function", entry.schema)
+            return (
+                f"{entry.owner}.{entry.name}",
+                function,
+                entry.schema.get("phase", "execution"),
             )
 
-        # NOTE: Additional action servers, on top of the component's main one that
-        # _register_system_tools has already registered
-        for action_name, action_type in entrypoints.get("actions", {}).items():
-            self.__register_action_client_as_tool(
-                component_name=comp_name,
-                action_name=action_name,
-                action_type=action_type,
+        interface = self._action_registry.interface_for(entry.ref)
+        if interface is None or not entry.server_name:
+            return None
+        # NOTE: The short name has the owner prefix stripped, so putting the owner
+        # back keeps the name a node-prefixed server had before
+        name = f"{entry.owner}_{entry.name}"
+        if entry.kind == COMPONENT_ACTION_SERVER:
+            verb, message = "goal", interface.Goal
+            text = (
+                f"Send an action goal to the '{entry.owner}' component's "
+                f"action server ({entry.server_name})."
             )
-
-    def __register_action_client_as_tool(
-        self, component_name: str, action_name: str, action_type: Any
-    ) -> None:
-        """Helper method to register a component Action Server as a system tool
-
-        :param component_name: Component name
-        :type component_name: str
-        :param action_name: Action server name
-        :type action_name: str
-        :param action_type: Action server type
-        :type action_type: Any
-        """
-        name = action_name.replace("/", "_")
-        tool_name = f"send_goal_to_{name}"
-        server = (component_name, action_name, action_type)
-        if (registered := self._action_goal_tools.get(tool_name)) is not None:
-            # A component's main action server can also be listed among its
-            # additional ones. Check for duplicates
-            if registered != server:
-                self.get_logger().warning(
-                    f"Action server '{action_name}' on '{component_name}' maps "
-                    f"to tool '{tool_name}', already registered for "
-                    f"'{registered[1]}' on '{registered[0]}'; skipping."
-                )
-            return
-        goal_type = action_type.Goal
-        properties, required = goal_type_to_json_properties(goal_type)
-        self._execution_tools.add(tool_name)
-        self._action_goal_tools[tool_name] = server
-        self._execution_tool_descriptions.append({
-            "type": "function",
-            "function": {
-                "name": tool_name,
-                "description": (
-                    f"Send an action goal to the '{component_name}' component's "
-                    f"action server ({name})."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": properties,
-                    "required": required,
-                },
+        else:
+            verb, message = "request", interface.Request
+            text = (
+                f"Send a service request to the '{entry.owner}' component's "
+                f"server ({entry.server_name})."
+            )
+        properties, required = goal_type_to_json_properties(message)
+        function = {
+            "description": text,
+            "parameters": {
+                "type": "object",
+                "properties": properties,
+                "required": required,
             },
-        })
-
-    def __register_service_client_as_tool(
-        self, component_name: str, srv_name: str, srv_type: Any
-    ) -> None:
-        """Helper method to register a component Service as a system tool
-
-        :param component_name: Component name
-        :type component_name: str
-        :param srv_name: Server name
-        :type srv_name: str
-        :param srv_type: Server type
-        :type srv_type: Any
-        """
-        name = srv_name.replace("/", "_")
-        tool_name = f"send_request_to_{name}"
-        req_type = srv_type.Request
-        properties, required = goal_type_to_json_properties(req_type)
-        self._execution_tools.add(tool_name)
-        self._service_request_tools[tool_name] = (component_name, srv_name, srv_type)
-        self._execution_tool_descriptions.append({
-            "type": "function",
-            "function": {
-                "name": tool_name,
-                "description": (
-                    f"Send a service request to the '{component_name}' component's "
-                    f"server ({name})."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": properties,
-                    "required": required,
-                },
-            },
-        })
+        }
+        return f"send_{verb}_to_{name}", function, "execution"
 
     def _inspect_component(self, component_name: str) -> str:
         """Return a text description of a component's structure.
@@ -737,24 +639,24 @@ class Cortex(ModelComponent, Monitor):
         return result
 
     def _call_component_action(self, tool_name: str, args: Dict) -> str:
-        """Call a component action method via its ExecuteMethod service.
+        """Run a component action through the Monitor.
 
-        Returns the action's message as a string, suitable to feed back to
-        an LLM as a tool result, prefixed with ``"Error: ..."`` when the
-        action failed.
+        The registry entry behind the tool is resolved to the Monitor's own
+        callable for it, which sends the call over the component's
+        ExecuteMethod service and reads the response back into the action
+        contract. Returns the action's message, suitable to feed back to an
+        LLM as a tool result, prefixed with ``"Error:"`` when the action failed.
         """
         self.get_logger().info(
             f"Calling component action {tool_name} with args: {args}"
         )
+        ref = self._tool_refs.get(tool_name)
+        if ref is None:
+            return f"Error: Unknown tool '{tool_name}'"
         try:
-            comp_name, method_name = tool_name.split(".", 1)
-        except ValueError as e:
-            return f"Error: Could not parse tool name for {tool_name}: {e}"
-
-        try:
-            success, message = self.execute_component_method(
-                comp_name, method_name, args
-            )
+            entry = self._action_registry.get(ref)
+            # execute via the monitor
+            success, message = self._executable_for(entry)(**args)
         except Exception as e:
             return f"Error calling {tool_name}: {e}"
 
@@ -1419,7 +1321,7 @@ class Cortex(ModelComponent, Monitor):
         """
         if tool_name == "inspect_component":
             return self._inspect_component(args.get("component", ""))
-        if tool_name in self._planning_tools and "." in tool_name:
+        if tool_name in self._planning_tools and tool_name in self._tool_refs:
             parsed_args = self._parse_tool_args(args)
             return self._call_component_action(tool_name, parsed_args)
         return f"Error: Unknown planning tool '{tool_name}'."
@@ -1605,7 +1507,12 @@ class Cortex(ModelComponent, Monitor):
             return f"Error: Unknown tool '{fn_name}'. Available: {all_tools}"
 
     def _execute_system_tool(self, tool_name: str, args: Dict) -> str:
-        """Execute an execution-phase system tool or a component action."""
+        """Execute an execution-phase system tool or a component action.
+
+        A tool built from the action registry is dispatched by the kind of
+        its entry: a goal to an action server, a request to a service, and
+        anything else as a component method run through the Monitor.
+        """
         try:
             if tool_name == "update_parameter":
                 self.get_logger().info(
@@ -1619,19 +1526,21 @@ class Cortex(ModelComponent, Monitor):
                 if success:
                     return f"{tool_name} executed successfully"
                 return f"Error: {tool_name} failed with error: {message}"
-            elif tool_name in self._action_goal_tools:
-                comp_name, action_name, action_type = self._action_goal_tools[tool_name]
-                return self._send_action_goal_from_dict(
-                    tool_name, comp_name, action_name, action_type, args
-                )
-            elif tool_name in self._service_request_tools:
-                comp_name, srv_name, srv_type = self._service_request_tools[tool_name]
-                return self._send_service_request_from_dict(
-                    comp_name, srv_name, srv_type, args
-                )
-            elif tool_name in self._plugin_action_tools:
+            if tool_name in self._plugin_action_tools:
                 return self._call_plugin_action(tool_name, args)
-            # else: the tool is a component action
+            ref = self._tool_refs.get(tool_name)
+            if ref is None:
+                return f"Error: Unknown tool '{tool_name}'"
+            entry = self._action_registry.get(ref)
+            interface = self._action_registry.interface_for(ref)
+            if entry.kind == COMPONENT_ACTION_SERVER:
+                return self._send_action_goal_from_dict(
+                    tool_name, entry.owner, entry.server_name, interface, args
+                )
+            if entry.kind == COMPONENT_SERVICE:
+                return self._send_service_request_from_dict(
+                    entry.owner, entry.server_name, interface, args
+                )
             return self._call_component_action(tool_name, args)
         except Exception as e:
             return f"Error calling {tool_name}: {e}"

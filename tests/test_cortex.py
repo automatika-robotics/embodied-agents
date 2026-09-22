@@ -1,21 +1,83 @@
 """Tests for Cortex component — requires rclpy."""
 
+import json
 import pytest
 from typing import Tuple
 from unittest.mock import MagicMock
 
 from ros_sugar.robot import ActionRegistry, PluginMetadata, SensorPlugin, plugin_action
+from std_srvs.srv import SetBool
 
 from agents.config import CortexConfig
 from agents.ros import (
+    COMPONENT_ACTION_SERVER,
+    COMPONENT_METHOD,
+    COMPONENT_SERVICE,
+    MONITOR_METHOD,
+    MONITOR_OWNER,
+    ActionPhase,
+    ActionReturnType,
     Topic,
     Action,
     ComponentRunType,
+    RegisteredAction,
     SystemActionRegistry,
     VisionLanguageAction,
+    component_action,
 )
 from agents.components.cortex import Cortex
 from tests.conftest import mock_component_internals
+
+
+def _registry(*entries):
+    """A registry holding the given (entry, interface) pairs"""
+    registry = SystemActionRegistry()
+    for entry, interface in entries:
+        registry.add(entry, interface=interface)
+    return registry
+
+
+def _method(owner, name, described=True, phase=None):
+    """A component method entry, described the way the decorator stores it"""
+    schema = None
+    if described:
+        schema = {
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": f"{name} on {owner}",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"topic": {"type": "string"}},
+                    "required": ["topic"],
+                },
+            },
+        }
+        if phase:
+            schema["phase"] = phase
+    entry = RegisteredAction(
+        ref=f"{owner}/{name}",
+        owner=owner,
+        name=name,
+        kind=COMPONENT_METHOD,
+        schema=schema,
+    )
+    return entry, None
+
+
+def _server(owner, server_name, kind=COMPONENT_ACTION_SERVER, interface=None):
+    """An action server or service entry, named as the registry shortens it"""
+    short = server_name.strip("/")
+    if short.startswith(f"{owner}/"):
+        short = short[len(owner) + 1 :]
+    entry = RegisteredAction(
+        ref=f"{owner}/{short.replace('/', '_')}",
+        owner=owner,
+        name=short.replace("/", "_"),
+        kind=kind,
+        server_name=server_name,
+    )
+    return entry, interface or VisionLanguageAction
 
 
 def _make_mock_action(name="test_action", description="A test action"):
@@ -1029,70 +1091,188 @@ class TestDispatchingAGoal:
         assert self.TOOL not in comp._active_action_clients
 
 
-class _ExtraActionServers:
-    """A managed component that lists additional action servers."""
+class TestToolsFromTheRegistry:
+    """Everything a component offers reaches Cortex through the action
+    registry the Launcher built: described methods with their schema whole,
+    action servers and services with their message fields"""
 
-    def __init__(self, actions):
-        self._actions = actions
-
-    def get_ros_entrypoints(self):
-        return {"services": {}, "actions": self._actions}
-
-
-class TestActionServerTools:
-    """Action servers are registered as tools twice over: each component's
-    main server, then the additional servers components list. One server must
-    still become one tool."""
-
-    def _register(self, comp, main_servers, components):
+    def _register(self, comp, *entries):
         mock_component_internals(comp)
-        comp._main_action_clients = {}
-        for comp_name, (action_name, action_type) in main_servers.items():
-            client = MagicMock()
-            client.config.name = action_name
-            client.config.action_type = action_type
-            comp._main_action_clients[comp_name] = client
-        comp._managed_components = components
+        comp._action_registry = _registry(*entries)
         comp._register_system_tools()
 
-    def test_a_main_server_also_listed_as_additional_is_one_tool(
+    def _tool(self, comp, name, phase="execution"):
+        described = (
+            comp._execution_tool_descriptions
+            if phase == "execution"
+            else comp._planning_tool_descriptions
+        )
+        return next(t["function"] for t in described if t["function"]["name"] == name)
+
+    def test_a_described_method_is_a_tool_with_its_schema(
         self, rclpy_init, mock_model_client
     ):
-        """A Kompass Controller in vision mode makes track_vision_target its
-        main action server, and lists it as an additional one as well."""
-        comp = _make_cortex([], mock_model_client, "test_cortex_goal_tools_same")
+        comp = _make_cortex([], mock_model_client, "test_cortex_registry_method")
+
+        self._register(comp, _method("vision", "take_picture"))
+
+        tool = self._tool(comp, "vision.take_picture")
+        assert tool["description"] == "take_picture on vision"
+        assert tool["parameters"]["required"] == ["topic"]
+        assert comp._tool_refs["vision.take_picture"] == "vision/take_picture"
+
+    def test_the_phase_in_the_schema_routes_the_tool(
+        self, rclpy_init, mock_model_client
+    ):
+        comp = _make_cortex([], mock_model_client, "test_cortex_registry_phase")
 
         self._register(
             comp,
-            main_servers={"controller": ("track_vision_target", VisionLanguageAction)},
-            components={
-                "controller": _ExtraActionServers(
-                    {"track_vision_target": VisionLanguageAction}
-                )
-            },
+            _method("memory", "recall", phase="planning"),
+            _method("memory", "body_status", phase="both"),
+            _method("memory", "start_episode"),
         )
 
-        names = [t["function"]["name"] for t in comp._execution_tool_descriptions]
-        assert names.count("send_goal_to_track_vision_target") == 1
-        comp.get_logger().warning.assert_not_called()
+        assert "memory.recall" in comp._planning_tools
+        assert "memory.recall" not in comp._execution_tools
+        assert "memory.body_status" in comp._planning_tools
+        assert "memory.body_status" in comp._execution_tools
+        assert "memory.start_episode" not in comp._planning_tools
+        assert "memory.start_episode" in comp._execution_tools
+        # The phase is Cortex's business, not the model's
+        assert "phase" not in self._tool(comp, "memory.recall", "planning")
 
-    def test_a_different_server_under_a_taken_tool_name_is_skipped_loudly(
-        self, rclpy_init, mock_model_client
-    ):
-        """Tool names carry only the action name, so two components can map to
-        the same one. The first keeps it, and the clash is reported."""
-        comp = _make_cortex([], mock_model_client, "test_cortex_goal_tools_clash")
+    def test_what_is_not_offered(self, rclpy_init, mock_model_client):
+        """Lifecycle methods, methods without a description, Cortex's own
+        actions and the Monitor's methods are not tools"""
+        comp = _make_cortex([], mock_model_client, "test_cortex_registry_filter")
+        monitor_entry = RegisteredAction(
+            ref=f"{MONITOR_OWNER}/start_routine",
+            owner=MONITOR_OWNER,
+            name="start_routine",
+            kind=MONITOR_METHOD,
+        )
 
         self._register(
             comp,
-            main_servers={"planner": ("run", VisionLanguageAction)},
-            components={"vla": _ExtraActionServers({"run": VisionLanguageAction})},
+            _method("vision", "restart"),
+            _method("vision", "undescribed", described=False),
+            _method(comp.node_name, "cancel_main_goal"),
+            (monitor_entry, None),
+            _method("vision", "track"),
         )
 
+        assert comp._tool_refs == {"vision.track": "vision/track"}
+
+    def test_an_action_server_is_a_goal_tool(self, rclpy_init, mock_model_client):
+        comp = _make_cortex([], mock_model_client, "test_cortex_registry_server")
+
+        self._register(comp, _server("vla", "vla/run"))
+
+        tool = self._tool(comp, "send_goal_to_vla_run")
+        assert "task" in tool["parameters"]["properties"]
+        assert "'vla' component's action server" in tool["description"]
+        assert comp._tool_refs["send_goal_to_vla_run"] == "vla/run"
+
+    def test_a_service_is_a_request_tool(self, rclpy_init, mock_model_client):
+        """Any service the registry lists, a component's main one included"""
+        comp = _make_cortex([], mock_model_client, "test_cortex_registry_service")
+
+        self._register(
+            comp, _server("planner", "save_plan", COMPONENT_SERVICE, SetBool)
+        )
+
+        tool = self._tool(comp, "send_request_to_planner_save_plan")
+        assert "data" in tool["parameters"]["properties"]
+        assert (
+            comp._tool_refs["send_request_to_planner_save_plan"] == "planner/save_plan"
+        )
+
+    def test_two_components_with_one_server_name_get_two_tools(
+        self, rclpy_init, mock_model_client
+    ):
+        """A server tool is named from its registry reference, owner and
+        server, so a bare server name two components share cannot collide"""
+        comp = _make_cortex([], mock_model_client, "test_cortex_registry_shared")
+
+        self._register(comp, _server("planner", "run"), _server("vla", "run"))
+
+        assert comp._tool_refs["send_goal_to_planner_run"] == "planner/run"
+        assert comp._tool_refs["send_goal_to_vla_run"] == "vla/run"
+
+    def test_registering_twice_registers_once(self, rclpy_init, mock_model_client):
+        """A component activated again must not offer every tool twice"""
+        comp = _make_cortex([], mock_model_client, "test_cortex_registry_twice")
+
+        self._register(comp, _server("vla", "vla/run"), _method("vision", "track"))
+        comp._register_system_tools()
+
         names = [t["function"]["name"] for t in comp._execution_tool_descriptions]
-        assert names.count("send_goal_to_run") == 1
-        assert comp._action_goal_tools["send_goal_to_run"][0] == "planner"
-        comp.get_logger().warning.assert_called_once()
+        assert names.count("send_goal_to_vla_run") == 1
+        assert names.count("vision.track") == 1
+
+    def test_a_goal_tool_is_dispatched_by_its_entry(
+        self, rclpy_init, mock_model_client
+    ):
+        comp = _make_cortex([], mock_model_client, "test_cortex_registry_goal")
+        self._register(comp, _server("vla", "vla/run"))
+        comp._send_action_goal_from_dict = MagicMock(return_value="sent")
+
+        result = comp._execute_system_tool("send_goal_to_vla_run", {"task": "go"})
+
+        assert result == "sent"
+        comp._send_action_goal_from_dict.assert_called_once_with(
+            "send_goal_to_vla_run",
+            "vla",
+            "vla/run",
+            VisionLanguageAction,
+            {"task": "go"},
+        )
+
+    def test_a_request_tool_is_dispatched_by_its_entry(
+        self, rclpy_init, mock_model_client
+    ):
+        comp = _make_cortex([], mock_model_client, "test_cortex_registry_request")
+        self._register(
+            comp, _server("planner", "save_plan", COMPONENT_SERVICE, SetBool)
+        )
+        comp._send_service_request_from_dict = MagicMock(return_value="done")
+
+        result = comp._execute_system_tool(
+            "send_request_to_planner_save_plan", {"data": True}
+        )
+
+        assert result == "done"
+        comp._send_service_request_from_dict.assert_called_once_with(
+            "planner", "save_plan", SetBool, {"data": True}
+        )
+
+
+class TestThePhaseTravelsWithTheDescription:
+    """The wrapper writes the phase into the description the decorator
+    stores, so it reaches Cortex with the schema through the registry"""
+
+    def test_a_given_phase_and_the_default(self):
+        described = {
+            "type": "function",
+            "function": {"name": "probe", "description": "Probe", "parameters": {}},
+        }
+
+        class Probe:
+            @component_action(description=described, phase=ActionPhase.PLANNING)
+            def probe(self) -> ActionReturnType:
+                return True, "probed"
+
+            @component_action(description=described)
+            def act(self) -> ActionReturnType:
+                return True, "acted"
+
+        probe = json.loads(Probe.probe._action_description)
+        act = json.loads(Probe.act._action_description)
+        assert probe["phase"] == "planning"
+        assert act["phase"] == "execution"
+        # The description itself is untouched
+        assert probe["function"] == described["function"]
 
 
 class TestCallingAComponentAction:
@@ -1100,9 +1280,15 @@ class TestCallingAComponentAction:
     the service response into the (success, message) action contract. What
     the LLM sees as the tool result is that message, or an error line"""
 
-    def _call(self, comp, returns):
+    def _call(self, comp, returns=None, raises=None):
+        """Through the real resolver, down to the method service call"""
         mock_component_internals(comp)
-        comp.execute_component_method = MagicMock(return_value=returns)
+        comp._action_registry = _registry(_method("memory", "start_episode"))
+        comp._tool_refs["memory.start_episode"] = "memory/start_episode"
+        comp._execute_component_method_srv_client = {"memory": MagicMock()}
+        comp.execute_component_method = MagicMock(
+            return_value=returns, side_effect=raises
+        )
         return comp._call_component_action("memory.start_episode", {"name": "tidy"})
 
     def test_the_actions_message_is_the_tool_result(
@@ -1112,9 +1298,8 @@ class TestCallingAComponentAction:
 
         result = self._call(comp, (True, "Episode 'tidy' started"))
 
-        comp.execute_component_method.assert_called_once_with(
-            "memory", "start_episode", {"name": "tidy"}
-        )
+        called = comp.execute_component_method.call_args.args
+        assert called[:3] == ("memory", "start_episode", {"name": "tidy"})
         assert result == "Episode 'tidy' started"
 
     def test_a_failure_is_an_error_line(self, rclpy_init, mock_model_client):
@@ -1132,12 +1317,20 @@ class TestCallingAComponentAction:
 
     def test_a_raised_error_is_reported_not_raised(self, rclpy_init, mock_model_client):
         comp = _make_cortex([], mock_model_client, "test_cortex_call_raises")
-        mock_component_internals(comp)
-        comp.execute_component_method = MagicMock(side_effect=KeyError("memory"))
 
-        result = comp._call_component_action("memory.start_episode", {})
+        result = self._call(comp, raises=KeyError("memory"))
 
         assert result.startswith("Error calling memory.start_episode")
+
+    def test_a_tool_the_registry_does_not_know_is_refused(
+        self, rclpy_init, mock_model_client
+    ):
+        comp = _make_cortex([], mock_model_client, "test_cortex_call_unknown")
+        mock_component_internals(comp)
+
+        result = comp._call_component_action("ghost.action", {})
+
+        assert result.startswith("Error: Unknown tool")
 
     def test_the_parameter_tool_reads_the_contract_too(
         self, rclpy_init, mock_model_client
