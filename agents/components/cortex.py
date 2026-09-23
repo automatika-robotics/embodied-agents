@@ -396,9 +396,7 @@ class Cortex(ModelComponent, Monitor):
 
         Works for the robot plugin and for sensor plugins alike. Each
         `robot.ActionRegistry` factory on ``plugin`` is registered as
-        ``{plugin_id}.{action_name}``. Nothing is built here: when the tool is
-        called, the factory builds the action from the call's arguments and
-        cortex runs it (see `_call_plugin_action`).
+        ``{plugin_id}.{action_name}``.
 
         :param plugin: A `robot.Plugin` instance with an ``actions`` registry.
             Plugins without actions are a no-op.
@@ -470,8 +468,48 @@ class Cortex(ModelComponent, Monitor):
         return message or f"{tool_name} executed successfully"
 
     # =========================================================================
-    # Tools: components (reached through the Monitor)
+    # Tools: registration
     # =========================================================================
+
+    # Tools that install, remove and list runtime events. Each is the Monitor
+    # method of the same name
+    _EVENT_TOOLS = ("add_event", "remove_event", "list_events")
+
+    # The comparisons a planner may write in an event condition
+    _CONDITION_OPERATORS = (
+        "equals",
+        "not_equals",
+        "greater_than",
+        "greater_or_equal",
+        "less_than",
+        "less_or_equal",
+        "contains",
+        "not_contains",
+        "is_in",
+        "not_in",
+        "contains_any",
+        "contains_all",
+    )
+
+    # Tools that control a hosted routine by name. Each is the Monitor method
+    # of the same name.
+    _ROUTINE_CONTROLS = {
+        "pause_routine": "Pause a running routine at its current step",
+        "resume_routine": "Resume a paused routine from that step",
+        "abort_routine": "Abort a running or paused routine",
+    }
+
+    # Lifecycle management methods that should not be exposed as LLM tools.
+    # These are handled by the Monitor / Launcher
+    _LIFECYCLE_METHODS = frozenset({
+        "start",
+        "stop",
+        "restart",
+        "reconfigure",
+        "set_param",
+        "set_params",
+        "broadcast_status",
+    })
 
     def _register_system_tools(self):
         """Register system management capabilities and component actions as LLM tools.
@@ -580,34 +618,6 @@ class Cortex(ModelComponent, Monitor):
         self._register_component_tools()
         # Register all routines
         self._register_routine_tools()
-
-    # Tools that install, remove and list runtime events. Each is the Monitor
-    # method of the same name
-    _EVENT_TOOLS = ("add_event", "remove_event", "list_events")
-
-    # The comparisons a planner may write in an event condition
-    _CONDITION_OPERATORS = (
-        "equals",
-        "not_equals",
-        "greater_than",
-        "greater_or_equal",
-        "less_than",
-        "less_or_equal",
-        "contains",
-        "not_contains",
-        "is_in",
-        "not_in",
-        "contains_any",
-        "contains_all",
-    )
-
-    # Tools that control a hosted routine by name. Each is the Monitor method
-    # of the same name.
-    _ROUTINE_CONTROLS = {
-        "pause_routine": "Pause a running routine at its current step",
-        "resume_routine": "Resume a paused routine from that step",
-        "abort_routine": "Abort a running or paused routine",
-    }
 
     def _register_event_tools(self) -> None:
         """Offer the runtime events as tools, and tell the planner about
@@ -772,18 +782,6 @@ class Cortex(ModelComponent, Monitor):
             },
         })
 
-    # Lifecycle management methods that should not be exposed as LLM tools.
-    # These are handled by the Monitor / Launcher
-    _LIFECYCLE_METHODS = frozenset({
-        "start",
-        "stop",
-        "restart",
-        "reconfigure",
-        "set_param",
-        "set_params",
-        "broadcast_status",
-    })
-
     def _register_component_tools(self) -> None:
         """Register what the action registry lists, as LLM tools.
 
@@ -870,6 +868,10 @@ class Cortex(ModelComponent, Monitor):
             },
         }
         return f"send_{verb}_to_{name}", function, "execution"
+
+    # =========================================================================
+    # Tools: components (reached through the Monitor)
+    # =========================================================================
 
     def _inspect_component(self, component_name: str) -> str:
         """Return a text description of a component's structure.
@@ -1028,6 +1030,232 @@ class Cortex(ModelComponent, Monitor):
 
         except Exception as e:
             return f"Error sending service request to '{component_name}' service {srv_name}: {e}"
+
+    # =========================================================================
+    # Tools: Cortex's own (parameter updates, routine control, wait)
+    # =========================================================================
+
+    def _update_parameter_tool(self, args: Dict) -> str:
+        """The update_parameter tool, through the Monitor"""
+        self.get_logger().info(
+            f"Calling component action update_parameter with args: {args}"
+        )
+        success, message = self.update_parameter(
+            args.get("component", ""),
+            args.get("param_name", ""),
+            args.get("new_value", ""),
+        )
+        if success:
+            return "update_parameter executed successfully"
+        return f"Error: update_parameter failed with error: {message}"
+
+    def _run_routine_tool(self, tool_name: str, args: Dict) -> str:
+        """Start, pause, resume or abort a routine.
+
+        A started routine is followed by `_monitor_active_routines` until it
+        ends, and aborted with the task if it is still running then.
+        """
+        if tool_name in self._routine_tools:
+            name = self._routine_tools[tool_name]
+            success, message = self.start_routine(name)
+            if not success:
+                return f"Error: {tool_name} failed with error: {message}"
+            self._active_routines.add(name)
+            return (
+                f"Routine '{name}' started; its progress is reported to you as it runs."
+            )
+        success, message = getattr(self, tool_name)(args.get("routine_name", ""))
+        return (
+            message if success else f"Error: {tool_name} failed with error: {message}"
+        )
+
+    def _wait(self, duration: Any) -> str:
+        """The wait tool dwells before the next step."""
+        try:
+            seconds = float(duration)
+        except (TypeError, ValueError):
+            return f"Error: wait takes a number of seconds, got {duration!r}"
+        if seconds < 0:
+            return f"Error: cannot wait for {seconds} seconds"
+        deadline = time.monotonic() + seconds
+        while (remaining := deadline - time.monotonic()) > 0:
+            handle = self._main_goal_handle
+            if handle is not None and handle.is_cancel_requested:
+                return (
+                    f"Wait stopped after {seconds - remaining:.1f}s: the task "
+                    "was cancelled"
+                )
+            time.sleep(min(self.config.monitoring_interval, remaining))
+        return f"Waited {seconds:g}s"
+
+    # =========================================================================
+    # Tools: runtime events (standing instructions kept by the Monitor)
+    # =========================================================================
+
+    @staticmethod
+    def _message_fields(topic: Topic) -> Dict:
+        """The fields of a topic's message, nested as the message is"""
+        ros_type = getattr(topic.msg_type, "_ros_type", None)
+        return get_ros_msg_fields_dict(ros_type) if ros_type else {}
+
+    @classmethod
+    def _field_paths(cls, fields: Dict, prefix: str = "") -> List[str]:
+        """Dotted field paths with their types, out of the nested fields"""
+        paths: List[str] = []
+        for name, kind in fields.items():
+            path = f"{prefix}{name}"
+            if isinstance(kind, dict):
+                paths.extend(cls._field_paths(kind, f"{path}."))
+            elif isinstance(kind, list):
+                paths.extend(cls._field_paths(kind[0], f"{path}[]."))
+            else:
+                paths.append(f"{path}: {kind}")
+        return paths
+
+    def _topic_fields(self, comp: Any) -> str:
+        """The fields of each of a component's topics, for inspection"""
+        topics = [
+            *(getattr(comp, "in_topics", None) or []),
+            *(getattr(comp, "out_topics", None) or []),
+        ]
+        described = []
+        for topic in topics:
+            fields = self._message_fields(topic)
+            if fields:
+                type_name = getattr(topic.msg_type, "__name__", str(topic.msg_type))
+                described.append(
+                    f"  - {topic.name} ({type_name}): "
+                    + ", ".join(self._field_paths(fields))
+                )
+        if not described:
+            return ""
+        return "\nTopic fields, for event conditions:\n" + "\n".join(described)
+
+    def _condition_spec(self, condition: Dict) -> Dict:
+        """One structured condition as the JSON leaf sugarcoat reads.
+
+        The topic must be one a managed component reads or writes, and the
+        field one the message has.
+
+        :raises ValueError: Naming what was wrong and what is available
+        """
+        topics = {
+            topic.name: topic
+            for comp in self._managed_components.values()
+            for topic in [
+                *(getattr(comp, "in_topics", None) or []),
+                *(getattr(comp, "out_topics", None) or []),
+            ]
+        }
+        topic = topics.get(condition.get("topic", ""))
+        if topic is None:
+            raise ValueError(
+                f"Unknown topic '{condition.get('topic', '')}'. Known topics: "
+                f"{sorted(topics)}"
+            )
+        fields = self._message_fields(topic)
+        path = [part for part in str(condition.get("field") or "").split(".") if part]
+        node: Any = fields
+        for part in path:
+            if isinstance(node, list):
+                node = node[0]
+            if not isinstance(node, dict) or part not in node:
+                raise ValueError(
+                    f"Topic '{topic.name}' has no field '{'.'.join(path)}'. Fields: "
+                    f"{', '.join(self._field_paths(fields))}"
+                )
+            node = node[part]
+        operator = condition.get("operator") if path else None
+        if path and operator not in self._CONDITION_OPERATORS:
+            raise ValueError(
+                f"A condition on a field needs an operator, one of "
+                f"{', '.join(self._CONDITION_OPERATORS)}; got {operator!r}"
+            )
+        return {
+            "type": "simple",
+            "topic_name": topic.name,
+            "topic_msg_type": getattr(topic.msg_type, "__name__", str(topic.msg_type)),
+            "topic_qos_config": topic.qos_profile.to_dict(),
+            "topic_use_plugin": topic.use_plugin,
+            "attribute_path": path,
+            "operator": operator or "none",
+            "ref_value": condition.get("value") if path else None,
+        }
+
+    def _event_action_spec(self, call: Dict) -> Dict:
+        """One of an event's actions, a tool call, as an action spec by
+        registry reference.
+
+        :raises ValueError: For a tool an event cannot run
+        """
+        tool = call.get("tool", "")
+        args = self._parse_tool_args(call.get("arguments", {}))
+        if tool in self._routine_tools:
+            return {
+                "ref": f"{MONITOR_OWNER}/start_routine",
+                "kwargs": {"routine_name": self._routine_tools[tool]},
+            }
+        if tool in self._ROUTINE_CONTROLS:
+            return {
+                "ref": f"{MONITOR_OWNER}/{tool}",
+                "kwargs": {"routine_name": args.get("routine_name", "")},
+            }
+        ref = self._tool_refs.get(tool)
+        if ref is None:
+            raise ValueError(
+                f"An event cannot run '{tool}'. It runs component actions, "
+                "send_goal_to_* tools and routine tools"
+            )
+        return self._action_spec(ref, args)
+
+    def _event_spec(self, args: Dict) -> Tuple[Dict, List[Dict]]:
+        """The event and its actions as the Monitor's registration reads them.
+
+        :raises ValueError: If anything in the call cannot be installed
+        """
+        if not args.get("event_id"):
+            raise ValueError("An event needs an event_id")
+        conditions = [self._condition_spec(c) for c in args.get("conditions") or []]
+        if not conditions:
+            raise ValueError("An event needs at least one condition")
+        actions = [self._event_action_spec(call) for call in args.get("actions") or []]
+        if not actions:
+            raise ValueError("An event needs at least one action")
+        condition = conditions[0]
+        if len(conditions) > 1:
+            # NOTE: sugarcoat's logic operators: AND is 1, OR is 2
+            condition = {
+                "type": "composite",
+                "logic_operator": 2 if args.get("match") == "any" else 1,
+                "sub_conditions": conditions,
+            }
+        once = bool(args.get("once", True))
+        event = {
+            "name": args["event_id"],
+            "condition": condition,
+            "handle_once": once,
+            # A kept event fires when the condition becomes true, not on
+            # every message that satisfies it
+            "on_change": not once,
+            "keep_event_delay": 0.0,
+        }
+        return event, actions
+
+    def _run_event_tool(self, tool_name: str, args: Dict) -> str:
+        """Install, remove or list runtime events through the Monitor"""
+        if tool_name == "list_events":
+            return self.list_events()[1]
+        if tool_name == "remove_event":
+            success, message = self.remove_event(args.get("event_id", ""))
+            return message if success else f"Error: {message}"
+        try:
+            event, event_actions = self._event_spec(args)
+        except ValueError as e:
+            return f"Error: {e}"
+        success, message = self._add_event_from_spec(
+            event=event, actions=event_actions, event_id=args["event_id"]
+        )
+        return message if success else f"Error: {message}"
 
     # =========================================================================
     # Planning prompt
@@ -1786,59 +2014,6 @@ class Cortex(ModelComponent, Monitor):
             )
             return f"Error: Unknown tool '{fn_name}'. Available: {all_tools}"
 
-    def _update_parameter_tool(self, args: Dict) -> str:
-        """The update_parameter tool, through the Monitor"""
-        self.get_logger().info(
-            f"Calling component action update_parameter with args: {args}"
-        )
-        success, message = self.update_parameter(
-            args.get("component", ""),
-            args.get("param_name", ""),
-            args.get("new_value", ""),
-        )
-        if success:
-            return "update_parameter executed successfully"
-        return f"Error: update_parameter failed with error: {message}"
-
-    def _run_routine_tool(self, tool_name: str, args: Dict) -> str:
-        """Start, pause, resume or abort a routine.
-
-        A started routine is followed by `_monitor_active_routines` until it
-        ends, and aborted with the task if it is still running then.
-        """
-        if tool_name in self._routine_tools:
-            name = self._routine_tools[tool_name]
-            success, message = self.start_routine(name)
-            if not success:
-                return f"Error: {tool_name} failed with error: {message}"
-            self._active_routines.add(name)
-            return (
-                f"Routine '{name}' started; its progress is reported to you as it runs."
-            )
-        success, message = getattr(self, tool_name)(args.get("routine_name", ""))
-        return (
-            message if success else f"Error: {tool_name} failed with error: {message}"
-        )
-
-    def _wait(self, duration: Any) -> str:
-        """The wait tool dwells before the next step."""
-        try:
-            seconds = float(duration)
-        except (TypeError, ValueError):
-            return f"Error: wait takes a number of seconds, got {duration!r}"
-        if seconds < 0:
-            return f"Error: cannot wait for {seconds} seconds"
-        deadline = time.monotonic() + seconds
-        while (remaining := deadline - time.monotonic()) > 0:
-            handle = self._main_goal_handle
-            if handle is not None and handle.is_cancel_requested:
-                return (
-                    f"Wait stopped after {seconds - remaining:.1f}s: the task "
-                    "was cancelled"
-                )
-            time.sleep(min(self.config.monitoring_interval, remaining))
-        return f"Waited {seconds:g}s"
-
     def _execute_system_tool(self, tool_name: str, args: Dict) -> str:
         """Execute an execution-phase system tool or a component action.
 
@@ -1876,175 +2051,6 @@ class Cortex(ModelComponent, Monitor):
             return self._call_component_action(tool_name, args)
         except Exception as e:
             return f"Error calling {tool_name}: {e}"
-
-    # =========================================================================
-    # Tools: runtime events (standing instructions kept by the Monitor)
-    # =========================================================================
-
-    @staticmethod
-    def _message_fields(topic: Topic) -> Dict:
-        """The fields of a topic's message, nested as the message is"""
-        ros_type = getattr(topic.msg_type, "_ros_type", None)
-        return get_ros_msg_fields_dict(ros_type) if ros_type else {}
-
-    @classmethod
-    def _field_paths(cls, fields: Dict, prefix: str = "") -> List[str]:
-        """Dotted field paths with their types, out of the nested fields"""
-        paths: List[str] = []
-        for name, kind in fields.items():
-            path = f"{prefix}{name}"
-            if isinstance(kind, dict):
-                paths.extend(cls._field_paths(kind, f"{path}."))
-            elif isinstance(kind, list):
-                paths.extend(cls._field_paths(kind[0], f"{path}[]."))
-            else:
-                paths.append(f"{path}: {kind}")
-        return paths
-
-    def _topic_fields(self, comp: Any) -> str:
-        """The fields of each of a component's topics, for inspection"""
-        topics = [
-            *(getattr(comp, "in_topics", None) or []),
-            *(getattr(comp, "out_topics", None) or []),
-        ]
-        described = []
-        for topic in topics:
-            fields = self._message_fields(topic)
-            if fields:
-                type_name = getattr(topic.msg_type, "__name__", str(topic.msg_type))
-                described.append(
-                    f"  - {topic.name} ({type_name}): "
-                    + ", ".join(self._field_paths(fields))
-                )
-        if not described:
-            return ""
-        return "\nTopic fields, for event conditions:\n" + "\n".join(described)
-
-    def _condition_spec(self, condition: Dict) -> Dict:
-        """One structured condition as the JSON leaf sugarcoat reads.
-
-        The topic must be one a managed component reads or writes, and the
-        field one the message has.
-
-        :raises ValueError: Naming what was wrong and what is available
-        """
-        topics = {
-            topic.name: topic
-            for comp in self._managed_components.values()
-            for topic in [
-                *(getattr(comp, "in_topics", None) or []),
-                *(getattr(comp, "out_topics", None) or []),
-            ]
-        }
-        topic = topics.get(condition.get("topic", ""))
-        if topic is None:
-            raise ValueError(
-                f"Unknown topic '{condition.get('topic', '')}'. Known topics: "
-                f"{sorted(topics)}"
-            )
-        fields = self._message_fields(topic)
-        path = [part for part in str(condition.get("field") or "").split(".") if part]
-        node: Any = fields
-        for part in path:
-            if isinstance(node, list):
-                node = node[0]
-            if not isinstance(node, dict) or part not in node:
-                raise ValueError(
-                    f"Topic '{topic.name}' has no field '{'.'.join(path)}'. Fields: "
-                    f"{', '.join(self._field_paths(fields))}"
-                )
-            node = node[part]
-        operator = condition.get("operator") if path else None
-        if path and operator not in self._CONDITION_OPERATORS:
-            raise ValueError(
-                f"A condition on a field needs an operator, one of "
-                f"{', '.join(self._CONDITION_OPERATORS)}; got {operator!r}"
-            )
-        return {
-            "type": "simple",
-            "topic_name": topic.name,
-            "topic_msg_type": getattr(topic.msg_type, "__name__", str(topic.msg_type)),
-            "topic_qos_config": topic.qos_profile.to_dict(),
-            "topic_use_plugin": topic.use_plugin,
-            "attribute_path": path,
-            "operator": operator or "none",
-            "ref_value": condition.get("value") if path else None,
-        }
-
-    def _event_action_spec(self, call: Dict) -> Dict:
-        """One of an event's actions, a tool call, as an action spec by
-        registry reference.
-
-        :raises ValueError: For a tool an event cannot run
-        """
-        tool = call.get("tool", "")
-        args = self._parse_tool_args(call.get("arguments", {}))
-        if tool in self._routine_tools:
-            return {
-                "ref": f"{MONITOR_OWNER}/start_routine",
-                "kwargs": {"routine_name": self._routine_tools[tool]},
-            }
-        if tool in self._ROUTINE_CONTROLS:
-            return {
-                "ref": f"{MONITOR_OWNER}/{tool}",
-                "kwargs": {"routine_name": args.get("routine_name", "")},
-            }
-        ref = self._tool_refs.get(tool)
-        if ref is None:
-            raise ValueError(
-                f"An event cannot run '{tool}'. It runs component actions, "
-                "send_goal_to_* tools and routine tools"
-            )
-        return self._action_spec(ref, args)
-
-    def _event_spec(self, args: Dict) -> Tuple[Dict, List[Dict]]:
-        """The event and its actions as the Monitor's registration reads them.
-
-        :raises ValueError: If anything in the call cannot be installed
-        """
-        if not args.get("event_id"):
-            raise ValueError("An event needs an event_id")
-        conditions = [self._condition_spec(c) for c in args.get("conditions") or []]
-        if not conditions:
-            raise ValueError("An event needs at least one condition")
-        actions = [self._event_action_spec(call) for call in args.get("actions") or []]
-        if not actions:
-            raise ValueError("An event needs at least one action")
-        condition = conditions[0]
-        if len(conditions) > 1:
-            # NOTE: sugarcoat's logic operators: AND is 1, OR is 2
-            condition = {
-                "type": "composite",
-                "logic_operator": 2 if args.get("match") == "any" else 1,
-                "sub_conditions": conditions,
-            }
-        once = bool(args.get("once", True))
-        event = {
-            "name": args["event_id"],
-            "condition": condition,
-            "handle_once": once,
-            # A kept event fires when the condition becomes true, not on
-            # every message that satisfies it
-            "on_change": not once,
-            "keep_event_delay": 0.0,
-        }
-        return event, actions
-
-    def _run_event_tool(self, tool_name: str, args: Dict) -> str:
-        """Install, remove or list runtime events through the Monitor"""
-        if tool_name == "list_events":
-            return self.list_events()[1]
-        if tool_name == "remove_event":
-            success, message = self.remove_event(args.get("event_id", ""))
-            return message if success else f"Error: {message}"
-        try:
-            event, event_actions = self._event_spec(args)
-        except ValueError as e:
-            return f"Error: {e}"
-        success, message = self._add_event_from_spec(
-            event=event, actions=event_actions, event_id=args["event_id"]
-        )
-        return message if success else f"Error: {message}"
 
     # =========================================================================
     # Compiled execution: a run of known steps as one routine
@@ -2293,9 +2299,6 @@ class Cortex(ModelComponent, Monitor):
 
         The confirmation call includes execution tools so the LLM can
         return a tool call with arguments resolved from prior step results.
-        For example, if step 1 (vlm.describe) returns a description, the
-        LLM can fill step 2 (tts.say) with that text instead of the
-        placeholder from the original plan.
 
         :returns: (executed_results, aborted)
         """
@@ -2405,7 +2408,7 @@ class Cortex(ModelComponent, Monitor):
             goal_handle.canceled()
 
     # =========================================================================
-    # Running action goals
+    # Following running goals and routines
     # =========================================================================
 
     def _monitor_active_clients(self) -> Optional[str]:
@@ -2685,7 +2688,7 @@ class Cortex(ModelComponent, Monitor):
                 planning_messages, plan, executed_results
             )
 
-        # Loop exited — either voluntarily (LLM stopped) or exhausted
+        # Loop exited voluntarily (LLM stopped) or exhausted
         self._finalize_goal(
             goal_handle,
             feedback_msg,
