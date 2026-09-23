@@ -116,16 +116,15 @@ def _cortex_launcher(*plugins):
 
 
 class TestCortexGetsEveryPlugin:
-    """Sensor plugins carry actions too, such as aiming a camera, so Cortex is
-    given every attached plugin, not only the robot's"""
+    """Cortex is told about every attached plugin for its planning prompt: the
+    robot's identity and the sensors. Their actions reach it through the
+    action registry, not through the launcher"""
 
     def test_robot_and_sensor_plugins(self):
         robot, camera = _Robot(), _Camera(id="front_cam")
 
         cortex = _cortex_launcher(robot, camera)
 
-        registered = [c.args[0] for c in cortex.add_plugin_actions.call_args_list]
-        assert registered == [robot, camera]
         cortex.set_robot_description.assert_called_once_with(robot)
         cortex.set_sensor_descriptions.assert_called_once_with([camera])
 
@@ -134,7 +133,6 @@ class TestCortexGetsEveryPlugin:
 
         cortex = _cortex_launcher(camera)
 
-        cortex.add_plugin_actions.assert_called_once_with(camera)
         cortex.set_robot_description.assert_not_called()
         cortex.set_sensor_descriptions.assert_called_once_with([camera])
 
@@ -143,5 +141,4 @@ class TestCortexGetsEveryPlugin:
 
         cortex = _cortex_launcher(robot)
 
-        cortex.add_plugin_actions.assert_called_once_with(robot)
         cortex.set_sensor_descriptions.assert_not_called()

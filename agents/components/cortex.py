@@ -14,6 +14,7 @@ from ..ros import (
     COMPONENT_METHOD,
     COMPONENT_SERVICE,
     MONITOR_OWNER,
+    PLUGIN_ACTION,
     Action,
     ActionClientHandler,
     BaseComponent,
@@ -219,8 +220,6 @@ class Cortex(ModelComponent, Monitor):
 
         # Routine tools: tool name -> routine name
         self._routine_tools: Dict[str, str] = {}
-        # Plugin action tools: tool name -> (plugin, action name, tool parameters)
-        self._plugin_action_tools: Dict[str, Tuple[Any, str, Dict]] = {}
         # Behavioral actions: dispatched via internal event system
         self._behavioral_actions = actions
         self._pure_internal_events = []
@@ -372,100 +371,6 @@ class Cortex(ModelComponent, Monitor):
             return f"Action '{name}' dispatched."
         except Exception as e:
             return f"Error dispatching action '{name}': {e}"
-
-    # =========================================================================
-    # Tools: plugin actions (run in the launcher process)
-    # =========================================================================
-
-    @staticmethod
-    def _plugin_namespace(plugin: Any) -> str:
-        """Namespace a plugin's actions are registered under: the plugin's id.
-
-        The id is unique within a recipe, so two sensors of the same kind get
-        distinct tools. An object without one falls back to its metadata name
-        and to "robot" if that is empty.
-        """
-        plugin_id = getattr(plugin, "id", None)
-        if isinstance(plugin_id, str) and plugin_id:
-            return plugin_id
-        metadata_name = getattr(getattr(plugin, "metadata", None), "name", "") or ""
-        return metadata_name.strip().lower().replace(" ", "_") or "robot"
-
-    def add_plugin_actions(self, plugin: Any) -> None:
-        """Expose a plugin's actions to cortex as execution tools.
-
-        Works for the robot plugin and for sensor plugins alike. Each
-        `robot.ActionRegistry` factory on ``plugin`` is registered as
-        ``{plugin_id}.{action_name}``.
-
-        :param plugin: A `robot.Plugin` instance with an ``actions`` registry.
-            Plugins without actions are a no-op.
-        """
-        if plugin is None or not getattr(plugin, "actions", None):
-            return
-
-        ns = self._plugin_namespace(plugin)
-
-        tool_descriptions = plugin.actions.tool_descriptions(namespace=ns)
-        if not tool_descriptions:
-            return
-
-        registered: List[str] = []
-        for tool_desc in tool_descriptions:
-            tool_name = tool_desc["function"]["name"]
-            if tool_name in self._execution_tools:
-                get_logger("cortex").warning(
-                    f"Plugin action '{tool_name}' collides with an existing "
-                    "tool; skipping."
-                )
-                continue
-
-            local_name = tool_name.split(".", 1)[1]
-            parameters = tool_desc["function"].get("parameters") or {}
-            self._plugin_action_tools[tool_name] = (plugin, local_name, parameters)
-            self._execution_tools.add(tool_name)
-            self._execution_tool_descriptions.append(tool_desc)
-            registered.append(tool_name)
-
-        if registered:
-            get_logger("cortex").info(
-                f"Registered {len(registered)} plugin action(s) from '{ns}' "
-                f"as Cortex execution tools: {registered}"
-            )
-
-    def _call_plugin_action(self, tool_name: str, args: Dict) -> str:
-        """Build a plugin action from the call's arguments and run it.
-
-        Only the arguments the tool declares reach the factory. Anything else
-        would land in the ``Action``'s own keyword arguments. A call missing a
-        required argument is refused.
-
-        :param tool_name: The plugin tool, ``{plugin_id}.{action_name}``
-        :param args: Parsed tool-call arguments
-        :return: The action's message, or an error line on failure
-        """
-        plugin, local_name, parameters = self._plugin_action_tools[tool_name]
-        declared = parameters.get("properties") or {}
-        if missing := [k for k in parameters.get("required", []) if k not in args]:
-            return (
-                f"Error: {tool_name} failed with error: missing required "
-                f"argument(s) {missing}"
-            )
-        if ignored := sorted(set(args) - set(declared)):
-            self.get_logger().warning(
-                f"Ignoring arguments {ignored} that {tool_name} does not declare"
-            )
-        call_args = {k: v for k, v in args.items() if k in declared}
-
-        self.get_logger().info(
-            f"Calling plugin action {tool_name} with args: {call_args}"
-        )
-        action = getattr(plugin.actions, local_name)(**call_args)
-        action.action_name = tool_name
-        success, message = action()
-        if not success:
-            return f"Error: {tool_name} failed with error: {message}"
-        return message or f"{tool_name} executed successfully"
 
     # =========================================================================
     # Tools: registration
@@ -820,9 +725,12 @@ class Cortex(ModelComponent, Monitor):
         """The tool a registry entry becomes with its name, its function
         description and the phase it is registered in. None for an entry
         that is not offered to the planner."""
-        if entry.kind == COMPONENT_METHOD:
-            # Skip lifecycle methods
-            if entry.name in self._LIFECYCLE_METHODS or not entry.schema:
+        if entry.kind in (COMPONENT_METHOD, PLUGIN_ACTION):
+            # Lifecycle actions are the Monitor's to call. Skip from component actions
+            lifecycle = (
+                entry.kind == COMPONENT_METHOD and entry.name in self._LIFECYCLE_METHODS
+            )
+            if lifecycle or not entry.schema:
                 return None
             function = entry.schema.get("function", entry.schema)
             return (
@@ -933,14 +841,38 @@ class Cortex(ModelComponent, Monitor):
             return f"Error: Unknown tool '{tool_name}'"
         try:
             entry = self._action_registry.get(ref)
+            if entry.kind == PLUGIN_ACTION:
+                args = self._plugin_arguments(entry, args)
             # execute via the monitor
             success, message = self._executable_for(entry)(**args)
+        except ValueError as e:
+            return f"Error: {tool_name} failed with error: {e}"
         except Exception as e:
             return f"Error calling {tool_name}: {e}"
 
         if not success:
             return f"Error: {tool_name} failed with error: {message}"
         return message or f"{tool_name} executed successfully"
+
+    def _plugin_arguments(self, entry: RegisteredAction, args: Dict) -> Dict:
+        """A plugin action's arguments, kept to what its tool declares.
+
+        Its factory forwards unknown keyword arguments to the Action it builds
+        and defaults missing ones, so both are caught here.
+
+        :raises ValueError: If a required argument is missing
+        """
+        parameters = entry.schema.get("function", entry.schema).get("parameters") or {}
+        declared = parameters.get("properties") or {}
+        if missing := [
+            key for key in parameters.get("required", []) if key not in args
+        ]:
+            raise ValueError(f"missing required argument(s) {missing}")
+        if ignored := sorted(set(args) - set(declared)):
+            self.get_logger().warning(
+                f"Ignoring arguments {ignored} that {entry.ref} does not declare"
+            )
+        return {key: value for key, value in args.items() if key in declared}
 
     def _send_action_goal_from_dict(
         self,
@@ -1203,8 +1135,8 @@ class Cortex(ModelComponent, Monitor):
         ref = self._tool_refs.get(tool)
         if ref is None:
             raise ValueError(
-                f"An event cannot run '{tool}'. It runs component actions, "
-                "send_goal_to_* tools and routine tools"
+                f"An event cannot run '{tool}'. It runs component actions, plugin "
+                "actions, send_goal_to_* tools and routine tools"
             )
         return self._action_spec(ref, args)
 
@@ -1290,8 +1222,8 @@ class Cortex(ModelComponent, Monitor):
         command_keys = [c["key"] for c in desc.get("commands", [])]
         action_names = [a["name"] for a in desc.get("actions", [])]
 
-        # Namespace the plugin actions get registered under as execution tools
-        ns = self._plugin_namespace(plugin)
+        # Namespace the plugin's actions by its id as the registry does
+        ns = plugin.id
 
         def _join(items: List[str]) -> str:
             return ", ".join(items) if items else "(none)"
@@ -1343,7 +1275,7 @@ class Cortex(ModelComponent, Monitor):
                     f"Failed to read sensor plugin description: {e}"
                 )
                 continue
-            ns = self._plugin_namespace(plugin)
+            ns = plugin.id
             meta = desc.get("metadata", {})
             entry = f"  - {ns}: {meta.get('name', '') or ns}"
             if vendor := meta.get("vendor", ""):
@@ -2030,8 +1962,6 @@ class Cortex(ModelComponent, Monitor):
                 return self._wait(args.get("duration"))
             if tool_name in self._routine_tools or tool_name in self._ROUTINE_CONTROLS:
                 return self._run_routine_tool(tool_name, args)
-            if tool_name in self._plugin_action_tools:
-                return self._call_plugin_action(tool_name, args)
             ref = self._tool_refs.get(tool_name)
             if ref is None:
                 return f"Error: Unknown tool '{tool_name}'"

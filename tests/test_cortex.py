@@ -488,183 +488,6 @@ class TestNoLLMMethods:
         assert not hasattr(comp, "set_component_prompt")
 
 
-def _make_mock_plugin(name="Lite3", action_names=("sit_stand", "stop")):
-    """Mock a `~ros_sugar.robot.RobotPlugin` exposing two zero-arg actions.
-
-    Mirrors the real surface that `Cortex.add_plugin_actions` consumes:
-    ``plugin.metadata.name`` for the namespace, ``plugin.actions`` with a
-    ``tool_descriptions(namespace=...)`` method and per-name factories
-    accessed via ``getattr(plugin.actions, name)``.
-    """
-    plugin = MagicMock()
-    plugin.metadata = MagicMock()
-    plugin.metadata.name = name
-
-    plugin.actions = MagicMock()
-    plugin.actions.tool_descriptions.side_effect = lambda namespace=None: [
-        {
-            "type": "function",
-            "function": {
-                "name": f"{namespace}.{n}" if namespace else n,
-                "description": f"Do {n}",
-                "parameters": {
-                    "type": "object",
-                    "properties": {},
-                    "required": [],
-                },
-            },
-        }
-        for n in action_names
-    ]
-    # Each factory call returns a fresh mock Action (so action_name can be set
-    # independently per registration).
-    plugin.actions.configure_mock(**{
-        n: MagicMock(return_value=_make_mock_action(name=n, description=f"Do {n}"))
-        for n in action_names
-    })
-    return plugin
-
-
-class TestCortexPluginActions:
-    """The plugin-action bridge: factories on a plugin registered as
-    namespaced execution tools, built from the tool call's arguments and run
-    by cortex when called."""
-
-    def test_register_plugin_actions(self, rclpy_init, mock_model_client):
-        plugin = _make_mock_plugin(name="Lite3", action_names=("sit_stand", "stop"))
-        comp = Cortex(
-            outputs=[Topic(name="out", msg_type="String")],
-            actions=[],
-            model_client=mock_model_client,
-            config=CortexConfig(),
-            component_name="test_cortex_plugin",
-        )
-
-        mock_component_internals(comp)
-        comp.add_plugin_actions(plugin)
-
-        assert "lite3.sit_stand" in comp._execution_tools
-        assert "lite3.stop" in comp._execution_tools
-        assert "lite3.sit_stand" in comp._plugin_action_tools
-        # Run by cortex itself, not dispatched through an internal event that
-        # could carry no arguments
-        assert "lite3.sit_stand" not in comp._additional_internal_actions
-        names = [t["function"]["name"] for t in comp._execution_tool_descriptions]
-        assert "lite3.sit_stand" in names
-        assert "lite3.stop" in names
-
-    def test_namespace_falls_back_to_robot_when_metadata_name_empty(
-        self, rclpy_init, mock_model_client
-    ):
-        plugin = _make_mock_plugin(name="", action_names=("dock",))
-        comp = Cortex(
-            outputs=[Topic(name="out", msg_type="String")],
-            actions=[],
-            model_client=mock_model_client,
-            config=CortexConfig(),
-            component_name="test_cortex_plugin_default_ns",
-        )
-
-        mock_component_internals(comp)
-        comp.add_plugin_actions(plugin)
-
-        assert "robot.dock" in comp._execution_tools
-
-    def test_namespace_normalizes_whitespace(self, rclpy_init, mock_model_client):
-        plugin = _make_mock_plugin(name="My Robot", action_names=("dock",))
-        comp = Cortex(
-            outputs=[Topic(name="out", msg_type="String")],
-            actions=[],
-            model_client=mock_model_client,
-            config=CortexConfig(),
-            component_name="test_cortex_plugin_ns_norm",
-        )
-
-        mock_component_internals(comp)
-        comp.add_plugin_actions(plugin)
-
-        assert "my_robot.dock" in comp._execution_tools
-
-    def test_does_not_double_register_on_collision(
-        self, rclpy_init, mock_model_client
-    ):
-        plugin = _make_mock_plugin(name="Lite3", action_names=("stop",))
-        comp = Cortex(
-            outputs=[Topic(name="out", msg_type="String")],
-            actions=[],
-            model_client=mock_model_client,
-            config=CortexConfig(),
-            component_name="test_cortex_plugin_collision",
-        )
-
-        mock_component_internals(comp)
-        comp.add_plugin_actions(plugin)
-        comp.add_plugin_actions(plugin)  # second call should skip with a warning
-
-        assert sum(
-            1
-            for t in comp._execution_tool_descriptions
-            if t["function"]["name"] == "lite3.stop"
-        ) == 1
-
-    def test_none_plugin_is_noop(self, rclpy_init, mock_model_client):
-        comp = Cortex(
-            outputs=[Topic(name="out", msg_type="String")],
-            actions=[],
-            model_client=mock_model_client,
-            config=CortexConfig(),
-            component_name="test_cortex_plugin_none",
-        )
-
-        comp.add_plugin_actions(None)
-
-        assert len(comp._execution_tools) == 0
-        assert len(comp._execution_tool_descriptions) == 0
-
-    def test_plugin_without_actions_is_noop(self, rclpy_init, mock_model_client):
-        plugin = MagicMock()
-        plugin.actions = None
-        comp = Cortex(
-            outputs=[Topic(name="out", msg_type="String")],
-            actions=[],
-            model_client=mock_model_client,
-            config=CortexConfig(),
-            component_name="test_cortex_plugin_no_actions",
-        )
-
-        mock_component_internals(comp)
-        comp.add_plugin_actions(plugin)
-
-        assert len(comp._execution_tools) == 0
-        assert len(comp._execution_tool_descriptions) == 0
-
-    def test_factory_failure_is_reported_as_a_tool_error(
-        self, rclpy_init, mock_model_client
-    ):
-        """Factories are only called when the tool is, with its arguments, so
-        one that cannot build its action fails that call, not registration."""
-        plugin = _make_mock_plugin(name="Lite3", action_names=("ok", "broken"))
-        plugin.actions.broken.side_effect = RuntimeError("boom")
-        comp = Cortex(
-            outputs=[Topic(name="out", msg_type="String")],
-            actions=[],
-            model_client=mock_model_client,
-            config=CortexConfig(),
-            component_name="test_cortex_plugin_factory_fail",
-        )
-
-        mock_component_internals(comp)
-        # Simulate what Monitor.__init__ would populate
-        comp.emit_internal_event_methods = {}
-        comp.add_plugin_actions(plugin)
-
-        assert "lite3.ok" in comp._execution_tools
-        assert "lite3.broken" in comp._execution_tools
-        result = comp._execute_action_step(_tool_call("lite3.broken"))
-        assert result.startswith("Error")
-        assert "boom" in result
-
-
 class _PtzCamera(SensorPlugin):
     """A sensor plugin with a parametric action and one that takes nothing."""
 
@@ -718,8 +541,9 @@ def _tool_call(name, arguments=None):
 
 
 class TestCortexRunsPluginActions:
-    """A plugin tool builds its action from the LLM's arguments and reports
-    the action's real outcome."""
+    """A plugin's actions reach Cortex through the action registry like a
+    component's: named by the plugin id, built by the plugin's own factory
+    from the LLM's arguments, and run in Cortex's process"""
 
     def _cortex(self, mock_model_client, component_name, *plugins):
         comp = Cortex(
@@ -732,11 +556,21 @@ class TestCortexRunsPluginActions:
         mock_component_internals(comp)
         # Simulate what Monitor.__init__ would populate
         comp.emit_internal_event_methods = {}
-        for plugin in plugins:
-            comp.add_plugin_actions(plugin)
+        comp._action_registry = SystemActionRegistry.from_components(
+            [], plugins=plugins
+        )
+        comp.get_routines = MagicMock(return_value=[])
+        comp._register_system_tools()
         return comp
 
-    def test_tools_are_namespaced_by_plugin_id(self, rclpy_init, mock_model_client):
+    def _tool(self, comp, name):
+        return next(
+            t["function"]
+            for t in comp._execution_tool_descriptions
+            if t["function"]["name"] == name
+        )
+
+    def test_tools_are_named_by_plugin_id(self, rclpy_init, mock_model_client):
         """Two sensors of the same kind share a metadata name; their ids tell
         their tools apart."""
         front, rear = _PtzCamera(id="front_cam"), _PtzCamera(id="rear_cam")
@@ -750,6 +584,22 @@ class TestCortexRunsPluginActions:
         assert rear.aimed == [(10, 0)]
         assert front.aimed == []
 
+    def test_the_tool_carries_the_plugins_own_schema(
+        self, rclpy_init, mock_model_client
+    ):
+        """Described with a dict or with a string, every plugin action has a
+        whole schema in the registry, and a name a lifecycle method shares is
+        still the plugin's own"""
+        comp = self._cortex(
+            mock_model_client, "test_cortex_plugin_schema", _PtzCamera(id="front_cam")
+        )
+
+        look_at = self._tool(comp, "front_cam.look_at")
+        assert look_at["parameters"]["required"] == ["pan_deg", "tilt_deg"]
+        stop = self._tool(comp, "front_cam.stop")
+        assert stop["description"] == "Stop moving the camera."
+        assert stop["parameters"]["properties"] == {}
+
     def test_the_llms_arguments_reach_the_action(self, rclpy_init, mock_model_client):
         camera = _PtzCamera(id="front_cam")
         comp = self._cortex(mock_model_client, "test_cortex_plugin_args", camera)
@@ -760,48 +610,46 @@ class TestCortexRunsPluginActions:
         )
 
         assert camera.aimed == [(90, 30)]
-        # The action's own message, not a bare "dispatched"
         assert result == "aimed at pan 90, tilt 30"
 
     def test_a_call_missing_a_required_argument_is_refused(
         self, rclpy_init, mock_model_client
     ):
-        """The factory would otherwise fill the gap with its default, which
-        for an aiming action is a real position."""
+        """The factory would default it silently; the tool said it is required"""
         camera = _PtzCamera(id="front_cam")
-        comp = self._cortex(mock_model_client, "test_cortex_plugin_required", camera)
+        comp = self._cortex(mock_model_client, "test_cortex_plugin_missing", camera)
 
         result = comp._execute_action_step(
             _tool_call("front_cam.look_at", {"pan_deg": 90})
         )
 
-        assert result.startswith("Error")
-        assert "tilt_deg" in result
+        assert result.startswith("Error:") and "missing required" in result
         assert camera.aimed == []
 
     def test_undeclared_arguments_are_ignored(self, rclpy_init, mock_model_client):
-        """An argument the tool does not declare would otherwise land in the
-        Action's own keyword arguments."""
+        """An argument the tool never declared would reach the factory as the
+        Action's own keyword argument"""
         camera = _PtzCamera(id="front_cam")
         comp = self._cortex(mock_model_client, "test_cortex_plugin_extra", camera)
 
         result = comp._execute_action_step(
-            _tool_call("front_cam.stop", {"max_retries": 3, "speed": "fast"})
+            _tool_call("front_cam.look_at", {"pan_deg": 1, "tilt_deg": 2, "speed": 9})
         )
 
-        assert result == "stopped"
+        assert camera.aimed == [(1, 2)]
+        assert result == "aimed at pan 1, tilt 2"
+        comp.get_logger().warning.assert_called()
 
     def test_a_failed_action_is_an_error_result(self, rclpy_init, mock_model_client):
         camera = _PtzCamera(id="front_cam")
         camera.refuse = True
-        comp = self._cortex(mock_model_client, "test_cortex_plugin_refused", camera)
+        comp = self._cortex(mock_model_client, "test_cortex_plugin_failed", camera)
 
         result = comp._execute_action_step(
-            _tool_call("front_cam.look_at", {"pan_deg": 90, "tilt_deg": 30})
+            _tool_call("front_cam.look_at", {"pan_deg": 0, "tilt_deg": 0})
         )
 
-        assert result.startswith("Error")
-        assert "the camera refused the move" in result
+        assert result.startswith("Error:") and "refused" in result
 
 
 class TestCortexSensorDescriptions:
@@ -870,6 +718,7 @@ def _make_mock_plugin_with_describe(
     """Mock a `RobotPlugin` exposing the ``describe()`` surface that
     ``Cortex.set_robot_description`` consumes."""
     plugin = MagicMock()
+    plugin.id = name.lower()
     plugin.describe.return_value = {
         "metadata": {
             "name": name,
