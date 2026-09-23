@@ -2018,9 +2018,17 @@ class Cortex(ModelComponent, Monitor):
             return None
         kind = self._action_registry.get(ref).kind
         if kind == COMPONENT_ACTION_SERVER:
-            # A goal the planner does not wait is not dispatched as a routine, and
-            # the steps after it run alongside it
+            # An action goal the planner does not wait is not dispatched as a routine,
+            # and the steps after it run alongside it
             return ref if args.get("wait_to_finish", True) else None
+        if kind == PLUGIN_ACTION:
+            # A call the factory would have to guess at is not dispatched as a routine,
+            # so that its error reaches the planner
+            try:
+                self._plugin_arguments(self._action_registry.get(ref), args)
+            except ValueError:
+                return None
+            return ref
         return ref if kind == COMPONENT_METHOD else None
 
     def _compilable_run(self, plan: List[Dict], start: int) -> Dict[int, str]:
@@ -2069,11 +2077,15 @@ class Cortex(ModelComponent, Monitor):
         """An action by registry reference with its arguments, as the Monitor's
         spec builder reads it.
         """
-        if self._action_registry.get(ref).kind == COMPONENT_ACTION_SERVER:
+        entry = self._action_registry.get(ref)
+        if entry.kind == COMPONENT_ACTION_SERVER:
             goal = {
                 key: value for key, value in args.items() if key != "wait_to_finish"
             }
             return {"ref": ref, "goal": goal}
+        if entry.kind == PLUGIN_ACTION:
+            # Drop arguments the tool does not declare
+            args = self._plugin_arguments(entry, args)
         return {"ref": ref, "kwargs": args}
 
     def _routine_spec(self, plan: List[Dict], run: Dict[int, str]) -> Dict:
@@ -2084,7 +2096,7 @@ class Cortex(ModelComponent, Monitor):
             args = self._parse_tool_args(function.get("arguments", {}))
             spec = self._action_spec(ref, args)
             spec["name"] = f"{index + 1}_{function['name']}"
-            if self._action_registry.get(ref).kind == COMPONENT_METHOD:
+            if self._action_registry.get(ref).kind in (COMPONENT_METHOD, PLUGIN_ACTION):
                 spec["timeout"] = self.config.step_timeout
                 spec["on_timeout"] = "fail"
             steps.append(spec)

@@ -1471,6 +1471,58 @@ class TestCompilingPlans:
         comp._execute_compiled.assert_not_called()
         assert results[0]["result"] == "ran stepwise"
 
+    def _with_camera(self, comp):
+        """The fixture's Cortex, with a plugin's actions in its registry"""
+        camera = _PtzCamera(id="front_cam")
+        plugins = SystemActionRegistry.from_components([], plugins=[camera])
+        for entry in plugins.list():
+            comp._action_registry.add(entry, interface=plugins.interface_for(entry.ref))
+        comp._register_system_tools()
+        return camera
+
+    def test_plugin_actions_compile(self, rclpy_init, mock_model_client):
+        comp = self._cortex(mock_model_client, "test_cortex_compile_plugin_ref")
+        self._with_camera(comp)
+        ref = comp._compiled_ref
+
+        look = _step("front_cam.look_at", pan_deg=1, tilt_deg=2)
+        assert ref(look) == "front_cam/look_at"
+        # A required argument missing: step by step, where the error is reported
+        assert ref(_step("front_cam.look_at", pan_deg=1)) is None
+        # Alone, a plugin action runs directly, like a component action
+        assert comp._compilable_run([look], 0) == {}
+
+        spec = comp._routine_spec(
+            [_step("front_cam.look_at", pan_deg=1, tilt_deg=2, speed=9)],
+            {0: "front_cam/look_at"},
+        )
+        assert spec["steps"][0] == {
+            "ref": "front_cam/look_at",
+            "name": "1_front_cam.look_at",
+            "kwargs": {"pan_deg": 1, "tilt_deg": 2},
+            "timeout": 60.0,
+            "on_timeout": "fail",
+        }
+
+    def test_a_run_of_plugin_actions_executes(self, rclpy_init, mock_model_client):
+        """End to end: built by the plugin's factory, run by the Monitor"""
+        comp = self._cortex(mock_model_client, "test_cortex_compile_plugin_run")
+        camera = self._with_camera(comp)
+        plan = [
+            _step("front_cam.look_at", pan_deg=1, tilt_deg=2),
+            _step("front_cam.look_at", pan_deg=3, tilt_deg=4),
+        ]
+
+        results, aborted = comp._execute_plan(plan, _Handle(), MagicMock())
+
+        assert not aborted
+        assert camera.aimed == [(1, 2), (3, 4)]
+        assert [r["result"] for r in results] == [
+            "aimed at pan 1, tilt 2",
+            "aimed at pan 3, tilt 4",
+        ]
+        comp._execute_action_step.assert_not_called()
+
     def test_the_prompt_mandates_the_placeholder_spelling(self):
         assert '"<output from step N>"' in Cortex._PLANNING_PROMPT
         assert "wait_to_finish=false" in Cortex._PLANNING_PROMPT
