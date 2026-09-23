@@ -141,7 +141,7 @@ Cortex also exposes action servers as execution tools, named `send_goal_to_<comp
 
 Services become `send_request_to_<component>_<service>` tools the same way, both the main service of a component running as `ComponentRunType.SERVER` and the additional ones reported through `get_ros_entrypoints()`. Because the name carries the component, two components whose servers share a bare name get two tools.
 
-A goal is dispatched asynchronously. The tool returns once the server accepts the goal, and Cortex keeps reporting the goal's status, latest feedback and result to the model while the plan continues.
+Every goal tool takes a `wait_to_finish` flag, true by default: the step ends when the server returns, and the server's outcome is the step's result. With `wait_to_finish=false` the goal is dispatched asynchronously: the tool returns once the server accepts the goal, Cortex keeps reporting its status, latest feedback and result to the model while the plan continues, and the goal is cancelled when the task ends. Concurrency is therefore the planner's explicit choice.
 
 ### One Goal at a Time
 
@@ -156,6 +156,10 @@ This puts one requirement on a component implementing `main_action_callback()`: 
 A `Routine` the Monitor hosts is a skill for the planner. Routines reach the Monitor when an event triggers them, when they are given to `enable_ui(routines=...)`, or when they are passed to `Cortex(routines=[...])`, which needs neither an event nor a UI. A routine given to Cortex must have a description, since that is what the planner reads.
 
 Each hosted routine becomes a `routine.<name>` execution tool with no parameters, described by the routine's description and step names. Starting one returns at once. Cortex then follows its cursor and reports its status, active step and last step message to the planner alongside running goals, until it completes, fails or is aborted. `pause_routine`, `resume_routine` and `abort_routine` take the routine name. When the task ends, routines it started are aborted, as running goals are cancelled.
+
+### Compiled Execution
+
+Cortex runs two or more consecutive compilable steps of a plan, or a lone awaited goal, as one routine hosted by the Monitor instead of one at a time. A step compiles when it is a component action, an awaited action goal or a wait and all its arguments are known. A goal sent with `wait_to_finish=false` breaks the run and runs asynchronously while the following steps proceed. A step whose argument is a placeholder for an earlier result, written `<output from step N>`, breaks the run and is resolved by the confirmation call as before; so do services, plugin actions and routine tools. Inside the routine a goal is awaited and cancelled natively, a component action gets `step_timeout`, and the routine can be paused, resumed or aborted like any other. Each step's message reaches the planner as its result. A failed step ends the run, the steps not reached are reported as not run, and the planner replans. A routine aborted from outside ends the task. `compile_routines=False` restores step-by-step execution.
 
 ## Cortex's Own Tools
 

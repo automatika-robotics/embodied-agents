@@ -1,6 +1,8 @@
 import json
 import os
+import re
 import time
+import uuid
 from copy import copy
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -28,6 +30,7 @@ from ..ros import (
     SystemActionRegistry,
     Topic,
     VisionLanguageAction,
+    actions,
     get_logger,
     ros_msg_to_str,
 )
@@ -106,8 +109,9 @@ class Cortex(ModelComponent, Monitor):
         "single response. Each tool call is one step. Order them in execution "
         "sequence. Fill in arguments you already know (e.g. topic names from "
         "inspection). For arguments that depend on the output of a previous "
-        'step, use a placeholder like "<output from step 1>" — this is '
-        "expected and correct. The arguments will be automatically resolved "
+        'step, write the placeholder exactly as "<output from step N>", with N '
+        "the number of that step — this is expected and correct. The arguments "
+        "will be automatically resolved "
         "at execution time using actual results from prior steps. "
         "Never return fewer tool calls than needed — always include every "
         "step in the plan even if some arguments are not yet known. "
@@ -117,6 +121,9 @@ class Cortex(ModelComponent, Monitor):
         "calls for it, then send yours. Use the wait tool to hold for a number "
         "of seconds when a step needs time to take effect, not to wait for a "
         "running action goal: its progress is reported to you as it runs. "
+        "A send_goal_to_* tool waits for the goal to finish before the next "
+        "step. Pass wait_to_finish=false only when the following steps should be "
+        "carried out while the goal runs, such as speaking while navigating. "
         "If the task requires no actions, respond with text only."
     )
 
@@ -711,6 +718,15 @@ class Cortex(ModelComponent, Monitor):
                 f"server ({entry.server_name})."
             )
         properties, required = goal_type_to_json_properties(message)
+        if verb == "goal" and "wait_to_finish" not in properties:
+            # Planner can explicitly choose concurrent execution for action servers
+            properties["wait_to_finish"] = {
+                "type": "boolean",
+                "description": (
+                    "Wait for the goal to finish before the next step. Default "
+                    "true. False carries out the next steps in the plan while it runs."
+                ),
+            }
         function = {
             "description": text,
             "parameters": {
@@ -1456,7 +1472,7 @@ class Cortex(ModelComponent, Monitor):
     def _parse_tool_args(self, fn_args) -> Dict:
         """Parse tool arguments, deserializing JSON strings where needed."""
         # OpenAI-compatible endpoints return tool-call arguments as a
-        # JSON string; Ollama returns a dict. Normalize to a dict first.
+        # JSON string and Ollama returns a dict. Normalize to a dict first.
         if isinstance(fn_args, str):
             fn_args = fn_args.strip()
             try:
@@ -1661,8 +1677,11 @@ class Cortex(ModelComponent, Monitor):
             entry = self._action_registry.get(ref)
             interface = self._action_registry.interface_for(ref)
             if entry.kind == COMPONENT_ACTION_SERVER:
+                goal_fields = {
+                    key: value for key, value in args.items() if key != "wait_to_finish"
+                }
                 return self._send_action_goal_from_dict(
-                    tool_name, entry.owner, entry.server_name, interface, args
+                    tool_name, entry.owner, entry.server_name, interface, goal_fields
                 )
             if entry.kind == COMPONENT_SERVICE:
                 return self._send_service_request_from_dict(
@@ -1711,8 +1730,248 @@ class Cortex(ModelComponent, Monitor):
             time.sleep(min(self.config.monitoring_interval, remaining))
         return f"Waited {seconds:g}s"
 
+    # =========================================================================
+    # Compiled execution: a run of known steps as one routine
+    # =========================================================================
+
+    # How the planner marks an argument that depends on an earlier result
+    _PLACEHOLDER = re.compile(r"<output from step \d+>")
+
+    @classmethod
+    def _has_placeholder(cls, value: Any) -> bool:
+        """Whether an argument waits for an earlier step's output"""
+        if isinstance(value, str):
+            return cls._PLACEHOLDER.search(value) is not None
+        if isinstance(value, dict):
+            return any(cls._has_placeholder(item) for item in value.values())
+        if isinstance(value, list):
+            return any(cls._has_placeholder(item) for item in value)
+        return False
+
+    def _compiled_ref(self, step: Dict) -> Optional[str]:
+        """The registry reference a plan step compiles to, or None.
+
+        A step compiles when it is a component action, an action goal or a
+        wait, and every argument is known now.
+        """
+        function = step["function"]
+        args = self._parse_tool_args(function.get("arguments", {}))
+        if self._has_placeholder(args):
+            return None
+        if function["name"] == "wait":
+            ref = f"{MONITOR_OWNER}/wait"
+            return ref if ref in self._action_registry else None
+        ref = self._tool_refs.get(function["name"])
+        if ref is None:
+            return None
+        kind = self._action_registry.get(ref).kind
+        if kind == COMPONENT_ACTION_SERVER:
+            # A goal the planner does not wait is not dispatched as a routine, and
+            # the steps after it run alongside it
+            return ref if args.get("wait_to_finish", True) else None
+        return ref if kind == COMPONENT_METHOD else None
+
+    def _compilable_run(self, plan: List[Dict], start: int) -> Dict[int, str]:
+        """The consecutive compilable steps from `start`, as plan index to
+        registry reference, maybe none.
+
+        A single step is a run only when it is a goal: awaited, cancellable
+        and with the server's outcome as the planner's result, that is worth
+        a routine. A lone component action runs directly, since a routine of
+        one would buy it nothing but a registration and a wait for its cursor.
+        """
+        run: Dict[int, str] = {}
+        if not self.config.compile_routines:
+            return run
+        for index in range(start, len(plan)):
+            ref = self._compiled_ref(plan[index])
+            if ref is None:
+                break
+            run[index] = ref
+        # Only an action server call can be a one step routine, that too if its
+        # wait_to_finish param is True
+        if len(run) == 1:
+            ((_, ref),) = run.items()
+            if self._action_registry.get(ref).kind != COMPONENT_ACTION_SERVER:
+                return {}
+        return run
+
+    def _compilable_runs(self, plan: List[Dict]) -> Dict[int, Dict[int, str]]:
+        """Every run in a plan, keyed by the index of its first step.
+
+        Decided once, before anything runs: a run is decided by the planned
+        arguments, which execution does not change. A run that later cannot
+        be built has no run recorded inside it, so its steps run directly
+        without the routine being attempted again from each of them.
+        """
+        runs: Dict[int, Dict[int, str]] = {}
+        index = 0
+        while index < len(plan):
+            run = self._compilable_run(plan, index)
+            if run:
+                runs[index] = run
+            index += len(run) or 1
+        return runs
+
+    def _routine_spec(self, plan: List[Dict], run: Dict[int, str]) -> Dict:
+        """Create a routine spec from a run of plan steps."""
+        steps = []
+        for index, ref in run.items():
+            function = plan[index]["function"]
+            args = self._parse_tool_args(function.get("arguments", {}))
+            spec: Dict[str, Any] = {
+                "ref": ref,
+                "name": f"{index + 1}_{function['name']}",
+            }
+            kind = self._action_registry.get(ref).kind
+            if kind == COMPONENT_ACTION_SERVER:
+                spec["goal"] = {
+                    key: value for key, value in args.items() if key != "wait_to_finish"
+                }
+            else:
+                spec["kwargs"] = args
+            if kind == COMPONENT_METHOD:
+                spec["timeout"] = self.config.step_timeout
+                spec["on_timeout"] = "fail"
+            steps.append(spec)
+        return {
+            "name": f"cortex_plan_{uuid.uuid4().hex[:8]}",
+            "description": f"Steps {min(run) + 1} to {max(run) + 1} of the current task",
+            "steps": steps,
+        }
+
+    def _compiled_step(self, spec: Dict) -> Action:
+        """Build one step of a compiled routine."""
+        if spec["ref"] == f"{MONITOR_OWNER}/wait":
+            return actions.wait(
+                duration=float(spec["kwargs"]["duration"]), name=spec["name"]
+            )
+        return self._action_from_spec(spec)
+
+    def _execute_compiled(
+        self, plan, run, goal_handle, feedback_msg, executed_results
+    ) -> Optional[Tuple[int, Optional[bool]]]:
+        """Run a compilable run of plan steps as one routine.
+
+        :returns: None when the routine could not be built or started. Otherwise
+            the plan index to go on from and the verdict: None to carry on, True
+            when the task is aborted, False to return to planning with a result
+            for every step
+        """
+        first, last = min(run), max(run)
+        spec = self._routine_spec(plan, run)
+        name = spec["name"]
+        try:
+            routine = Routine.from_spec(spec, self._compiled_step)
+            added, why = self.add_routine(routine, replace=True)
+            if not added:
+                raise RuntimeError(why)
+            started, why = self.start_routine(name)
+            if not started:
+                raise RuntimeError(why)
+        except Exception as e:
+            self.get_logger().warning(
+                f"Steps {first + 1} to {last + 1} run one at a time, their "
+                f"routine could not be started: {e}"
+            )
+            self.remove_routine(name, force=True)
+            return None
+
+        self._send_feedback(
+            goal_handle,
+            feedback_msg,
+            first + 1,
+            f"Steps {first + 1}-{last + 1}/{len(plan)}: running as routine '{name}'",
+        )
+        status = self._follow_routine(routine, first, goal_handle, feedback_msg)
+        executed_results.extend(self._compiled_results(plan, run, routine, status))
+        self.remove_routine(name, force=True)
+
+        next_index = last + 1
+        if status == RoutineStatus.COMPLETED:
+            return next_index, None
+        if goal_handle.is_cancel_requested:
+            self._cancel_task(goal_handle)
+            return next_index, True
+        if status == RoutineStatus.ABORTED:
+            # Stopped from outside, by the UI or an event (operator intervention)
+            self._send_feedback(
+                goal_handle,
+                feedback_msg,
+                next_index,
+                f"Plan aborted: {executed_results[-1]['result']}",
+            )
+            return next_index, True
+        # Failed at a step. Back to planning with the failure in view
+        for index in range(next_index, len(plan)):
+            executed_results.append({
+                "step": index,
+                "action": plan[index]["function"]["name"],
+                "result": "NOT RUN: an earlier step failed",
+                "failed": False,
+            })
+        return len(plan), False
+
+    def _follow_routine(
+        self, routine: Routine, first: int, goal_handle, feedback_msg
+    ) -> RoutineStatus:
+        """Report a compiled routine's cursor as task feedback until it ends.
+        A cancelled task aborts it.
+
+        :param first: Plan index of the routine's first step; the steps are
+            consecutive, so the cursor's index counts on from it
+        """
+        while True:
+            state = routine.state
+            status = RoutineStatus(state["status"])
+            if status.is_terminal():
+                return status
+            if goal_handle.is_cancel_requested:
+                self.abort_routine(routine.name, reason="the task was cancelled")
+                continue
+            plan_step = first + state["index"] + 1
+            text = f"Routine step '{state['active_step']}' {status}"
+            if state["step_message"]:
+                text += f": {state['step_message']}"
+            self._send_feedback(goal_handle, feedback_msg, plan_step, text)
+            time.sleep(self.config.monitoring_interval)
+
+    @staticmethod
+    def _compiled_results(
+        plan, run: Dict[int, str], routine: Routine, status: RoutineStatus
+    ) -> List[Dict]:
+        """One result per step of the run, from what the steps returned"""
+        messages = {entry["step"]: entry for entry in routine.step_messages()}
+        results = []
+        for index in run:
+            name = plan[index]["function"]["name"]
+            entry = messages.get(f"{index + 1}_{name}")
+            if entry is None:
+                why = (
+                    f"the routine was aborted ({routine.state['abort_reason']})"
+                    if status == RoutineStatus.ABORTED
+                    else "an earlier step failed"
+                )
+                result = f"NOT RUN: {why}"
+            elif entry["succeeded"]:
+                result = entry["message"] or f"{name} executed successfully"
+            else:
+                result = f"Error: {name} failed with error: {entry['message']}"
+            results.append({
+                "step": index,
+                "action": name,
+                "result": result,
+                "failed": result.startswith("Error"),
+            })
+        return results
+
+    # =========================================================================
+    # Executing a plan
+    # =========================================================================
+
     def _execute_plan(self, plan, goal_handle, feedback_msg) -> Tuple[List[Dict], bool]:
-        """Execute plan steps with per-step confirmation.
+        """Execute a plan: compilable runs as routines, the rest step by step
+        with a confirmation call each.
 
         The confirmation call includes execution tools so the LLM can
         return a tool call with arguments resolved from prior step results.
@@ -1724,15 +1983,29 @@ class Cortex(ModelComponent, Monitor):
         """
         executed_results: List[Dict] = []
         total = len(plan)
-
-        for i, step in enumerate(plan):
+        # Check for compilable routines
+        runs = self._compilable_runs(plan)
+        i = 0
+        while i < total:
             if goal_handle.is_cancel_requested:
-                self.get_logger().info("Task cancelled by client.")
-                with self._main_goal_lock:
-                    self._cancel_all_active_clients()
-                    goal_handle.canceled()
+                self._cancel_task(goal_handle)
                 return executed_results, True
 
+            run = runs.get(i)
+            compiled = (
+                self._execute_compiled(
+                    plan, run, goal_handle, feedback_msg, executed_results
+                )
+                if run
+                else None
+            )
+            if compiled is not None:
+                i, verdict = compiled
+                if verdict is None:
+                    continue
+                return executed_results, verdict
+
+            step = plan[i]
             fn_name = step["function"]["name"]
             label = f"Step {i + 1}/{total} ({fn_name})"
 
@@ -1758,6 +2031,7 @@ class Cortex(ModelComponent, Monitor):
                 self._send_feedback(
                     goal_handle, feedback_msg, i + 1, f"{label}: skipped."
                 )
+                i += 1
                 continue
 
             # Use resolved arguments from the confirmation call if available,
@@ -1782,6 +2056,7 @@ class Cortex(ModelComponent, Monitor):
                 goal_handle, feedback_msg, i + 1, f"{label} completed: {step_result}"
             )
             self.get_logger().info(f"[{label}] {step_result}")
+            i += 1
 
         # Wait for any remaining async actions after the last step
         if self._monitor_active_clients():
@@ -1803,6 +2078,13 @@ class Cortex(ModelComponent, Monitor):
                 return executed_results, True
 
         return executed_results, False
+
+    def _cancel_task(self, goal_handle) -> None:
+        """End the task as cancelled, stopping everything it started"""
+        self.get_logger().info("Task cancelled by client.")
+        with self._main_goal_lock:
+            self._cancel_all_active_clients()
+            goal_handle.canceled()
 
     # =========================================================================
     # Running action goals

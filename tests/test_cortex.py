@@ -1316,6 +1316,317 @@ class TestRoutinesAsTools:
         assert not comp._active_routines
 
 
+def _step(name, **args):
+    """A planned tool call"""
+    return {"function": {"name": name, "arguments": args}}
+
+
+class _Handle:
+    """A task goal handle whose cancellation arrives after a few reads"""
+
+    def __init__(self, cancel_after=None):
+        self.reads = 0
+        self.cancel_after = cancel_after
+        self.publish_feedback = MagicMock()
+        self.canceled = MagicMock()
+
+    @property
+    def is_cancel_requested(self):
+        self.reads += 1
+        return self.cancel_after is not None and self.reads > self.cancel_after
+
+
+class TestCompilingPlans:
+    """A run of plan steps whose arguments are all known becomes one routine
+    hosted by the Monitor, with no confirmation call between its steps"""
+
+    def _cortex(self, mock_model_client, name):
+        comp = _make_cortex([], mock_model_client, name)
+        mock_component_internals(comp)
+        comp.config.monitoring_interval = 0.01
+        # The Monitor side: the registry with the Monitor's own actions, and
+        # the routine machinery
+        comp._init_internal_monitor(components_names=[])
+        comp._action_registry.add(*_method("vision", "take_picture"))
+        comp._action_registry.add(*_server("vla", "vla/run"))
+        comp._action_registry.add(
+            *_server("planner", "save_plan", COMPONENT_SERVICE, SetBool)
+        )
+        comp.create_publisher = MagicMock()
+        comp.destroy_publisher = MagicMock()
+        # The Monitor's wait checks the node context, which an unstarted node
+        # does not have
+        comp._context = MagicMock()
+        comp._register_system_tools()
+        # The stepwise engine, so a test sees when it is used
+        comp._wait_for_active_clients = MagicMock(return_value=("EXECUTE", None))
+        comp._execute_action_step = MagicMock(return_value="ran stepwise")
+        return comp
+
+    def _picture_taken(self, comp, returns=(True, "saved to /tmp/x.png")):
+        comp._execute_component_method_srv_client = {"vision": MagicMock()}
+        comp.execute_component_method = MagicMock(return_value=returns)
+
+    def test_which_steps_compile(self, rclpy_init, mock_model_client):
+        comp = self._cortex(mock_model_client, "test_cortex_compile_which")
+        ref = comp._compiled_ref
+
+        assert (
+            ref(_step("vision.take_picture", topic_name="/cam"))
+            == "vision/take_picture"
+        )
+        assert ref(_step("send_goal_to_vla_run", task="go")) == "vla/run"
+        assert (
+            ref(_step("send_goal_to_vla_run", task="go", wait_to_finish=True))
+            == "vla/run"
+        )
+        assert ref(_step("wait", duration=2)) == "monitor/wait"
+        # A goal the planner does not wait for runs alongside what follows
+        assert (
+            ref(_step("send_goal_to_vla_run", task="go", wait_to_finish=False)) is None
+        )
+        assert (
+            ref(_step("send_goal_to_vla_run", task="go", wait_to_finish="false"))
+            is None
+        )
+        # Services, Cortex's other tools and unknown tools run step by step
+        assert ref(_step("send_request_to_planner_save_plan", data=True)) is None
+        assert ref(_step("update_parameter", component="vision")) is None
+        assert ref(_step("tts.say", text="hi")) is None
+        # So does anything waiting for an earlier result, however deep
+        assert (
+            ref(_step("vision.take_picture", topic_name="<output from step 1>")) is None
+        )
+        assert (
+            ref(
+                _step(
+                    "vision.take_picture", save_path={"dir": ["<output from step 2>"]}
+                )
+            )
+            is None
+        )
+        as_json = {
+            "function": {
+                "name": "vision.take_picture",
+                "arguments": '{"topic_name": "<output from step 1>"}',
+            }
+        }
+        assert ref(as_json) is None
+
+    def test_a_run_breaks_at_a_placeholder_or_a_stepwise_tool(
+        self, rclpy_init, mock_model_client
+    ):
+        comp = self._cortex(mock_model_client, "test_cortex_compile_runs")
+        plan = [
+            _step("vision.take_picture", topic_name="/cam"),
+            _step("send_goal_to_vla_run", task="go"),
+            _step("vision.take_picture", topic_name="<output from step 1>"),
+            _step("vision.take_picture", topic_name="/cam2"),
+            _step("send_request_to_planner_save_plan", data=True),
+        ]
+
+        assert comp._compilable_run(plan, 0) == {
+            0: "vision/take_picture",
+            1: "vla/run",
+        }
+        assert comp._compilable_run(plan, 2) == {}
+        # A lone component action is not worth a routine, a lone goal is
+        assert comp._compilable_run(plan, 3) == {}
+        assert comp._compilable_run(plan, 4) == {}
+        goal = _step("send_goal_to_vla_run", task="go")
+        assert comp._compilable_run([goal], 0) == {0: "vla/run"}
+        # Decided once for the whole plan, keyed by where each run starts
+        assert comp._compilable_runs(plan) == {
+            0: {0: "vision/take_picture", 1: "vla/run"},
+        }
+        assert comp._compilable_runs(plan + [goal]) == {
+            0: {0: "vision/take_picture", 1: "vla/run"},
+            5: {5: "vla/run"},
+        }
+        concurrent = [
+            _step("send_goal_to_vla_run", task="go", wait_to_finish=False),
+            _step("vision.take_picture", topic_name="/cam"),
+            _step("vision.take_picture", topic_name="/cam2"),
+        ]
+        assert comp._compilable_run(concurrent, 0) == {}
+        assert comp._compilable_run(concurrent, 1) == {
+            1: "vision/take_picture",
+            2: "vision/take_picture",
+        }
+        comp.config.compile_routines = False
+        assert comp._compilable_run(plan, 0) == {}
+
+    def test_the_spec_of_a_run(self, rclpy_init, mock_model_client):
+        comp = self._cortex(mock_model_client, "test_cortex_compile_spec")
+        plan = [
+            _step("vision.take_picture", topic_name="/cam"),
+            _step("send_goal_to_vla_run", task="go", wait_to_finish=True),
+            _step("wait", duration=1),
+        ]
+
+        spec = comp._routine_spec(
+            plan, {0: "vision/take_picture", 1: "vla/run", 2: "monitor/wait"}
+        )
+
+        assert spec["name"].startswith("cortex_plan_")
+        assert "1 to 3" in spec["description"]
+        assert spec["steps"][0] == {
+            "ref": "vision/take_picture",
+            "name": "1_vision.take_picture",
+            "kwargs": {"topic_name": "/cam"},
+            "timeout": 60.0,
+            "on_timeout": "fail",
+        }
+        assert spec["steps"][1] == {
+            "ref": "vla/run",
+            "name": "2_send_goal_to_vla_run",
+            "goal": {"task": "go"},
+        }
+        assert spec["steps"][2] == {
+            "ref": "monitor/wait",
+            "name": "3_wait",
+            "kwargs": {"duration": 1},
+        }
+
+    def test_a_compiled_run_executes_and_reports_each_step(
+        self, rclpy_init, mock_model_client
+    ):
+        """End to end, in process: built through the Monitor, run by it,
+        each step's message the planner's result, the routine gone after"""
+        comp = self._cortex(mock_model_client, "test_cortex_compile_run")
+        self._picture_taken(comp)
+        handle = _Handle()
+        plan = [
+            _step("vision.take_picture", topic_name="/cam"),
+            _step("wait", duration=0.05),
+        ]
+
+        results, aborted = comp._execute_plan(plan, handle, MagicMock())
+
+        assert not aborted
+        assert [r["result"] for r in results] == ["saved to /tmp/x.png", "Waited 0.05s"]
+        assert not any(r["failed"] for r in results)
+        called = comp.execute_component_method.call_args.args
+        assert called[:3] == ("vision", "take_picture", {"topic_name": "/cam"})
+        comp._wait_for_active_clients.assert_not_called()
+        assert comp.get_routines() == []
+        assert handle.publish_feedback.called
+
+    def test_a_failed_step_ends_the_run_and_returns_to_planning(
+        self, rclpy_init, mock_model_client
+    ):
+        comp = self._cortex(mock_model_client, "test_cortex_compile_failed")
+        self._picture_taken(comp, returns=(False, "no camera"))
+        plan = [
+            _step("vision.take_picture", topic_name="/cam"),
+            _step("vision.take_picture", topic_name="/cam2"),
+            _step("vision.take_picture", topic_name="<output from step 2>"),
+        ]
+
+        results, aborted = comp._execute_plan(plan, _Handle(), MagicMock())
+
+        assert not aborted
+        assert len(results) == len(plan)
+        assert results[0]["failed"] and "no camera" in results[0]["result"]
+        assert results[1]["result"] == "NOT RUN: an earlier step failed"
+        assert results[2]["result"] == "NOT RUN: an earlier step failed"
+        comp._execute_action_step.assert_not_called()
+
+    def test_cancelling_the_task_aborts_the_routine(
+        self, rclpy_init, mock_model_client
+    ):
+        comp = self._cortex(mock_model_client, "test_cortex_compile_cancel")
+        self._picture_taken(comp)
+        handle = _Handle(cancel_after=2)
+        started = time.monotonic()
+        plan = [
+            _step("vision.take_picture", topic_name="/cam"),
+            _step("wait", duration=30),
+        ]
+
+        results, aborted = comp._execute_plan(plan, handle, MagicMock())
+
+        assert aborted
+        assert time.monotonic() - started < 5
+        handle.canceled.assert_called_once()
+        assert results[1]["result"].startswith("NOT RUN: the routine was aborted")
+        assert comp.get_routines() == []
+
+    def test_a_run_that_cannot_be_built_runs_step_by_step(
+        self, rclpy_init, mock_model_client
+    ):
+        """A goal with a field its message does not have is refused when the
+        routine is built, so the step falls back to the stepwise engine"""
+        comp = self._cortex(mock_model_client, "test_cortex_compile_fallback")
+
+        plan = [
+            _step("vision.take_picture", topic_name="/cam"),
+            _step("send_goal_to_vla_run", nope=1),
+        ]
+
+        results, aborted = comp._execute_plan(plan, _Handle(), MagicMock())
+
+        assert not aborted
+        assert [r["result"] for r in results] == ["ran stepwise"] * 2
+        # Once for the run, not again from each of its remaining steps
+        comp.get_logger().warning.assert_called_once()
+        assert comp.get_routines() == []
+
+    def test_a_single_compilable_step_runs_directly(
+        self, rclpy_init, mock_model_client
+    ):
+        """A routine of one step would only add overhead"""
+        comp = self._cortex(mock_model_client, "test_cortex_compile_single")
+        comp.add_routine = MagicMock()
+
+        results, _ = comp._execute_plan(
+            [_step("vision.take_picture", topic_name="/cam")], _Handle(), MagicMock()
+        )
+
+        assert results[0]["result"] == "ran stepwise"
+        comp.add_routine.assert_not_called()
+
+    def test_compilation_can_be_switched_off(self, rclpy_init, mock_model_client):
+        comp = self._cortex(mock_model_client, "test_cortex_compile_off")
+        comp.config.compile_routines = False
+        comp.add_routine = MagicMock()
+
+        results, _ = comp._execute_plan(
+            [_step("vision.take_picture", topic_name="/cam")], _Handle(), MagicMock()
+        )
+
+        assert results[0]["result"] == "ran stepwise"
+        comp.add_routine.assert_not_called()
+
+    def test_a_lone_awaited_goal_is_compiled(self, rclpy_init, mock_model_client):
+        comp = self._cortex(mock_model_client, "test_cortex_compile_lone_goal")
+        comp._execute_compiled = MagicMock(return_value=(1, None))
+
+        comp._execute_plan(
+            [_step("send_goal_to_vla_run", task="go")], _Handle(), MagicMock()
+        )
+
+        comp._execute_compiled.assert_called_once()
+        comp._execute_action_step.assert_not_called()
+
+    def test_a_goal_not_waited_for_runs_as_before(self, rclpy_init, mock_model_client):
+        comp = self._cortex(mock_model_client, "test_cortex_compile_async_goal")
+        comp._execute_compiled = MagicMock()
+
+        results, _ = comp._execute_plan(
+            [_step("send_goal_to_vla_run", task="go", wait_to_finish=False)],
+            _Handle(),
+            MagicMock(),
+        )
+
+        comp._execute_compiled.assert_not_called()
+        assert results[0]["result"] == "ran stepwise"
+
+    def test_the_prompt_mandates_the_placeholder_spelling(self):
+        assert '"<output from step N>"' in Cortex._PLANNING_PROMPT
+        assert "wait_to_finish=false" in Cortex._PLANNING_PROMPT
+
+
 class TestTheWaitTool:
     """The planner has no other way to dwell. The wait runs in slices, so a
     cancelled task does not sit it out"""
@@ -1442,6 +1753,8 @@ class TestToolsFromTheRegistry:
 
         tool = self._tool(comp, "send_goal_to_vla_run")
         assert "task" in tool["parameters"]["properties"]
+        assert tool["parameters"]["properties"]["wait_to_finish"]["type"] == "boolean"
+        assert "wait_to_finish" not in tool["parameters"]["required"]
         assert "'vla' component's action server" in tool["description"]
         assert comp._tool_refs["send_goal_to_vla_run"] == "vla/run"
 
@@ -1489,8 +1802,11 @@ class TestToolsFromTheRegistry:
         self._register(comp, _server("vla", "vla/run"))
         comp._send_action_goal_from_dict = MagicMock(return_value="sent")
 
-        result = comp._execute_system_tool("send_goal_to_vla_run", {"task": "go"})
+        result = comp._execute_system_tool(
+            "send_goal_to_vla_run", {"task": "go", "wait_to_finish": False}
+        )
 
+        # The wait flag is Cortex's, not a field of the goal message
         assert result == "sent"
         comp._send_action_goal_from_dict.assert_called_once_with(
             "send_goal_to_vla_run",

@@ -215,6 +215,19 @@ class CortexConfig(LLMConfig):
         Must be large enough to accommodate a tool call with resolved arguments
         when the LLM returns EXECUTE. Default is 500.
     :type confirmation_max_tokens: int
+    :param monitoring_interval: Seconds between checks on running goals and
+        routines while a plan executes. Default is 2.0.
+    :type monitoring_interval: float
+    :param compile_routines: Run two or more consecutive compilable steps of
+        a plan, component actions, awaited action goals and waits whose
+        arguments are all known, or a lone awaited goal, as one routine hosted
+        by the Monitor, with no confirmation call between them.
+        When False every step is confirmed and run one at a time. Default is True.
+    :type compile_routines: bool
+    :param step_timeout: Seconds a compiled component action step may take
+        before its routine fails at it. Goal steps wait for their server.
+        Default is 60.0.
+    :type step_timeout: float
     :param temperature: Temperature used for the planning LLM call.
         Default is 0.8 and must be greater than 0.0.
     :type temperature: float
@@ -254,6 +267,8 @@ class CortexConfig(LLMConfig):
     )
     confirmation_max_tokens: int = field(default=500, validator=base_validators.gt(0))
     monitoring_interval: float = field(default=2.0, validator=base_validators.gt(0.0))
+    compile_routines: bool = field(default=True)
+    step_timeout: float = field(default=60.0, validator=base_validators.gt(0.0))
 
     def _get_inference_params(self) -> Dict:
         """get_inference_params.
