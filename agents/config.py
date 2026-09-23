@@ -228,6 +228,11 @@ class CortexConfig(LLMConfig):
         before its routine fails at it. Goal steps wait for their server.
         Default is 60.0.
     :type step_timeout: float
+    :param enable_events: Offer the planner the add_event, remove_event and
+        list_events tools, with the prompt guidance on standing instructions.
+        Off by default: the tools are the most complex Cortex has, and a small
+        planning model does better without them. Default is False.
+    :type enable_events: bool
     :param temperature: Temperature used for the planning LLM call.
         Default is 0.8 and must be greater than 0.0.
     :type temperature: float
@@ -269,6 +274,7 @@ class CortexConfig(LLMConfig):
     monitoring_interval: float = field(default=2.0, validator=base_validators.gt(0.0))
     compile_routines: bool = field(default=True)
     step_timeout: float = field(default=60.0, validator=base_validators.gt(0.0))
+    enable_events: bool = field(default=False)
 
     def _get_inference_params(self) -> Dict:
         """get_inference_params.

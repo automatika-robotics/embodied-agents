@@ -1627,6 +1627,253 @@ class TestCompilingPlans:
         assert "wait_to_finish=false" in Cortex._PLANNING_PROMPT
 
 
+class _Watched:
+    """A managed component with topics, as inspection and events see it"""
+
+    def __init__(self, name):
+        self.node_name = name
+        self.in_topics = []
+        self.out_topics = [Topic(name="detections", msg_type="Detections")]
+
+    def inspect_component(self):
+        return f"Component {self.node_name}"
+
+
+class TestEventsAsTools:
+    """A standing instruction becomes a runtime event on the Monitor: a
+    condition on a topic field the planner has seen in inspection, and
+    actions by registry reference"""
+
+    PERSON = {
+        "topic": "detections",
+        "field": "labels",
+        "operator": "contains",
+        "value": "person",
+    }
+    TAKE = {"tool": "vision.take_picture", "arguments": {"topic_name": "/cam"}}
+
+    def _cortex(self, mock_model_client, name):
+        comp = _make_cortex([], mock_model_client, name)
+        mock_component_internals(comp)
+        comp._init_internal_monitor(
+            components_names=[], components=[_Watched("vision")]
+        )
+        comp._action_registry.add(*_method("vision", "take_picture"))
+        comp._action_registry.add(*_server("vla", "vla/run"))
+        comp.create_subscription = MagicMock()
+        comp.create_publisher = MagicMock()
+        # The event lists a Monitor creates when it activates, which needs a
+        # live node. A runtime event is added to them
+        comp._Monitor__events = []
+        comp._Monitor__event_listeners = {}
+        comp.config.enable_events = True
+        comp._register_system_tools()
+        comp._routine_tools["routine.patrol"] = "patrol"
+        return comp
+
+    def _add(self, comp, **overrides):
+        call = {
+            "event_id": "spot_person",
+            "conditions": [self.PERSON],
+            "actions": [self.TAKE],
+        }
+        call.update(overrides)
+        return comp._execute_system_tool("add_event", call)
+
+    def test_inspection_lists_the_fields_of_each_topic(
+        self, rclpy_init, mock_model_client
+    ):
+        comp = self._cortex(mock_model_client, "test_cortex_events_inspect")
+
+        text = comp._inspect_component("vision")
+
+        assert "Topic fields, for event conditions:" in text
+        assert "detections (Detections):" in text
+        assert "labels: sequence<string>" in text
+        assert "header.frame_id: string" in text
+
+    def test_the_tools_are_registered(self, rclpy_init, mock_model_client):
+        comp = self._cortex(mock_model_client, "test_cortex_events_tools")
+
+        assert {"add_event", "remove_event", "list_events"} <= comp._execution_tools
+        assert "list_events" in comp._planning_tools
+        assert "add_event" not in comp._planning_tools
+
+    def test_an_event_is_installed_listed_and_removed(
+        self, rclpy_init, mock_model_client
+    ):
+        """Through the Monitor, in process"""
+        comp = self._cortex(mock_model_client, "test_cortex_events_round_trip")
+
+        result = self._add(comp)
+
+        assert not result.startswith("Error"), result
+        assert "spot_person" in json.loads(
+            comp._execute_planning_tool("list_events", {})
+        )
+        removed = comp._execute_system_tool("remove_event", {"event_id": "spot_person"})
+        assert not removed.startswith("Error"), removed
+        assert json.loads(comp._execute_system_tool("list_events", {})) == {}
+
+    def test_the_condition_is_written_as_sugarcoat_reads_it(
+        self, rclpy_init, mock_model_client
+    ):
+        comp = self._cortex(mock_model_client, "test_cortex_events_condition")
+
+        event, actions = comp._event_spec({
+            "event_id": "e",
+            "conditions": [self.PERSON],
+            "actions": [self.TAKE],
+        })
+
+        condition = event["condition"]
+        assert condition["type"] == "simple"
+        assert condition["topic_name"] == "detections"
+        assert condition["topic_msg_type"] == "Detections"
+        assert condition["attribute_path"] == ["labels"]
+        assert condition["operator"] == "contains"
+        assert condition["ref_value"] == "person"
+        assert "topic_qos_config" in condition
+        assert event["name"] == "e"
+        assert event["handle_once"] is True and event["on_change"] is False
+        assert actions == [
+            {"ref": "vision/take_picture", "kwargs": {"topic_name": "/cam"}}
+        ]
+
+    def test_several_conditions_are_grouped(self, rclpy_init, mock_model_client):
+        comp = self._cortex(mock_model_client, "test_cortex_events_group")
+        frame = {
+            "topic": "detections",
+            "field": "header.frame_id",
+            "operator": "equals",
+            "value": "cam",
+        }
+        call = {
+            "event_id": "e",
+            "conditions": [self.PERSON, frame],
+            "actions": [self.TAKE],
+        }
+
+        event, _ = comp._event_spec({**call, "match": "any"})
+        assert event["condition"]["type"] == "composite"
+        assert event["condition"]["logic_operator"] == 2
+        assert len(event["condition"]["sub_conditions"]) == 2
+
+        event, _ = comp._event_spec(call)
+        assert event["condition"]["logic_operator"] == 1
+
+    def test_no_field_means_any_message(self, rclpy_init, mock_model_client):
+        comp = self._cortex(mock_model_client, "test_cortex_events_any")
+
+        event, _ = comp._event_spec({
+            "event_id": "e",
+            "conditions": [{"topic": "detections"}],
+            "actions": [self.TAKE],
+        })
+
+        assert event["condition"]["attribute_path"] == []
+        assert event["condition"]["operator"] == "none"
+        assert event["condition"]["ref_value"] is None
+
+    def test_a_kept_event_fires_on_the_transition(self, rclpy_init, mock_model_client):
+        comp = self._cortex(mock_model_client, "test_cortex_events_kept")
+
+        event, _ = comp._event_spec({
+            "event_id": "e",
+            "conditions": [self.PERSON],
+            "actions": [self.TAKE],
+            "once": False,
+        })
+
+        assert event["handle_once"] is False and event["on_change"] is True
+
+    def test_what_an_event_may_run(self, rclpy_init, mock_model_client):
+        comp = self._cortex(mock_model_client, "test_cortex_events_actions")
+
+        _, specs = comp._event_spec({
+            "event_id": "e",
+            "conditions": [self.PERSON],
+            "actions": [
+                {
+                    "tool": "send_goal_to_vla_run",
+                    "arguments": {"task": "go", "wait_to_finish": True},
+                },
+                {"tool": "routine.patrol"},
+                {"tool": "abort_routine", "arguments": {"routine_name": "patrol"}},
+            ],
+        })
+
+        assert specs == [
+            {"ref": "vla/run", "goal": {"task": "go"}},
+            {"ref": "monitor/start_routine", "kwargs": {"routine_name": "patrol"}},
+            {"ref": "monitor/abort_routine", "kwargs": {"routine_name": "patrol"}},
+        ]
+
+    def test_what_is_refused(self, rclpy_init, mock_model_client):
+        comp = self._cortex(mock_model_client, "test_cortex_events_refused")
+        bad_conditions = [
+            ({"topic": "ghost"}, "Unknown topic"),
+            (
+                {
+                    "topic": "detections",
+                    "field": "colour",
+                    "operator": "equals",
+                    "value": 1,
+                },
+                "has no field",
+            ),
+            (
+                {"topic": "detections", "field": "labels", "value": "x"},
+                "needs an operator",
+            ),
+            (
+                {
+                    "topic": "detections",
+                    "field": "labels",
+                    "operator": "near",
+                    "value": "x",
+                },
+                "needs an operator",
+            ),
+        ]
+        for condition, why in bad_conditions:
+            result = self._add(comp, conditions=[condition])
+            assert result.startswith("Error:") and why in result, result
+        for tool in ("wait", "inspect_component", "add_event", "unknown.tool"):
+            result = self._add(comp, actions=[{"tool": tool}])
+            assert result.startswith("Error:") and "cannot run" in result, result
+        assert self._add(comp, event_id="").startswith("Error:")
+        assert self._add(comp, conditions=[]).startswith("Error:")
+        assert self._add(comp, actions=[]).startswith("Error:")
+        assert json.loads(comp._execute_system_tool("list_events", {})) == {}
+
+    def test_off_by_default(self, rclpy_init, mock_model_client):
+        """Neither the tools nor the prompt guidance, unless the recipe asks"""
+        comp = _make_cortex([], mock_model_client, "test_cortex_events_off")
+        mock_component_internals(comp)
+        comp._action_registry = _registry()
+        comp.get_routines = MagicMock(return_value=[])
+
+        comp._managed_components = {"vision": _Watched("vision")}
+        comp._register_system_tools()
+        comp._compose_planning_prompt()
+
+        assert not {"add_event", "remove_event", "list_events"} & comp._execution_tools
+        assert "add_event" not in comp._effective_planning_prompt
+        assert "Topic fields" not in comp._inspect_component("vision")
+
+    def test_the_prompt_points_at_events_when_enabled(
+        self, rclpy_init, mock_model_client
+    ):
+        comp = self._cortex(mock_model_client, "test_cortex_events_prompt")
+
+        comp._compose_planning_prompt()
+
+        assert "=== Standing Instructions ===" in comp._effective_planning_prompt
+        assert "add_event" in comp._effective_planning_prompt
+        assert "add_event" not in Cortex._PLANNING_PROMPT
+
+
 class TestTheWaitTool:
     """The planner has no other way to dwell. The wait runs in slices, so a
     cancelled task does not sit it out"""

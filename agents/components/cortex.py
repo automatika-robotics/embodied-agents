@@ -32,6 +32,7 @@ from ..ros import (
     VisionLanguageAction,
     actions,
     get_logger,
+    get_ros_msg_fields_dict,
     ros_msg_to_str,
 )
 from ..utils import strip_think_tokens, validate_func_args
@@ -100,31 +101,35 @@ class Cortex(ModelComponent, Monitor):
     """
 
     _PLANNING_PROMPT = (
-        "You are a task planning agent on a robot. "
-        "Given a task, first use inspect_component to research the available "
-        "components and discover their capabilities, topics, and actions. "
-        "Once you have enough information, break down the task into subtasks"
-        " and create a plan by calling the appropriate actions in sequence.\n"
-        "IMPORTANT: Always return ALL actions needed as tool calls in a "
-        "single response. Each tool call is one step. Order them in execution "
-        "sequence. Fill in arguments you already know (e.g. topic names from "
-        "inspection). For arguments that depend on the output of a previous "
-        'step, write the placeholder exactly as "<output from step N>", with N '
-        "the number of that step — this is expected and correct. The arguments "
-        "will be automatically resolved "
-        "at execution time using actual results from prior steps. "
-        "Never return fewer tool calls than needed — always include every "
-        "step in the plan even if some arguments are not yet known. "
-        "A component's action server runs one goal at a time: if a goal is "
-        "rejected because the server is busy with a goal you did not send, "
-        "stop it with that component's cancel_main_goal tool when the task "
-        "calls for it, then send yours. Use the wait tool to hold for a number "
-        "of seconds when a step needs time to take effect, not to wait for a "
-        "running action goal: its progress is reported to you as it runs. "
-        "A send_goal_to_* tool waits for the goal to finish before the next "
-        "step. Pass wait_to_finish=false only when the following steps should be "
-        "carried out while the goal runs, such as speaking while navigating. "
-        "If the task requires no actions, respond with text only."
+        "You are the task planning agent of a robot. You receive a request and "
+        "turn it into tool calls.\n\n"
+        "How to work:\n"
+        "1. Research first. Use inspect_component to learn each component's "
+        "topics, the fields of their messages, and its actions, until you know "
+        "enough.\n"
+        "2. Decide what the request is:\n"
+        "   - A task to carry out now: return the plan as tool calls.\n"
+        "   - A question, or nothing to do: respond with text only.\n\n"
+        "Writing a plan:\n"
+        "- Return ALL the steps in a single response, one tool call per step, "
+        "in execution order. Never return fewer tool calls than needed, even "
+        "when some arguments are not known yet.\n"
+        "- Fill in the arguments you already know, such as topic names from "
+        "inspection. For an argument that depends on the output of an earlier "
+        'step, write exactly "<output from step N>", with N the number of that '
+        "step. This is expected and correct: it is resolved at execution time "
+        "from that step's result.\n\n"
+        "How the tools behave:\n"
+        "- A send_goal_to_* tool waits for its goal to finish before the next "
+        "step. Pass wait_to_finish=false only when the following steps should "
+        "run while the goal runs, such as speaking while navigating.\n"
+        "- A component's action server runs one goal at a time. If a goal is "
+        "rejected because the server is busy with a goal you did not send, and "
+        "the task calls for it, stop that goal with the component's "
+        "cancel_main_goal tool, then send yours.\n"
+        "- The wait tool holds for a number of seconds when a step needs time "
+        "to take effect. Do not use it to wait for a running goal: its progress "
+        "is reported to you as it runs."
     )
 
     _CONFIRMATION_PROMPT = (
@@ -194,6 +199,7 @@ class Cortex(ModelComponent, Monitor):
         self._robot_description = ""  # set by set_robot_description()
         self._sensors_description = ""  # set by set_sensor_descriptions()
         self._memory_addendum = ""  # set by _augment_planning_prompt_for_memory()
+        self._events_addendum = ""  # set by _register_event_tools()
 
         # Initialize messages buffer
         self.messages: List[Dict] = [
@@ -567,9 +573,33 @@ class Cortex(ModelComponent, Monitor):
         self._execution_tools.add("wait")
         self._execution_tool_descriptions.append(wait_desc)
 
+        if self.config.enable_events:
+            self._register_event_tools()
+
         # Register all the tools the monitor has gathered from components
         self._register_component_tools()
+        # Register all routines
         self._register_routine_tools()
+
+    # Tools that install, remove and list runtime events. Each is the Monitor
+    # method of the same name
+    _EVENT_TOOLS = ("add_event", "remove_event", "list_events")
+
+    # The comparisons a planner may write in an event condition
+    _CONDITION_OPERATORS = (
+        "equals",
+        "not_equals",
+        "greater_than",
+        "greater_or_equal",
+        "less_than",
+        "less_or_equal",
+        "contains",
+        "not_contains",
+        "is_in",
+        "not_in",
+        "contains_any",
+        "contains_all",
+    )
 
     # Tools that control a hosted routine by name. Each is the Monitor method
     # of the same name.
@@ -578,6 +608,110 @@ class Cortex(ModelComponent, Monitor):
         "resume_routine": "Resume a paused routine from that step",
         "abort_routine": "Abort a running or paused routine",
     }
+
+    def _register_event_tools(self) -> None:
+        """Offer the runtime events as tools, and tell the planner about
+        standing instructions."""
+        condition = {
+            "type": "object",
+            "properties": {
+                "topic": {"type": "string", "description": "Topic name"},
+                "field": {
+                    "type": "string",
+                    "description": (
+                        "Dotted path to a field of the message, as listed by "
+                        "inspect_component, e.g. labels or pose.position.x. "
+                        "Empty to fire on any message"
+                    ),
+                },
+                "operator": {"type": "string", "enum": list(self._CONDITION_OPERATORS)},
+                "value": {"description": "What the field is compared with"},
+            },
+            "required": ["topic"],
+        }
+        event_action = {
+            "type": "object",
+            "properties": {
+                "tool": {
+                    "type": "string",
+                    "description": (
+                        "A component action, a send_goal_to_* tool or a routine tool"
+                    ),
+                },
+                "arguments": {"type": "object"},
+            },
+            "required": ["tool"],
+        }
+        event_tools = {
+            "add_event": {
+                "description": (
+                    "Install a standing event: when the condition on a topic "
+                    "holds, run the actions. The event outlives the task and "
+                    "fires on its own."
+                ),
+                "properties": {
+                    "event_id": {
+                        "type": "string",
+                        "description": "Name to list and remove the event by",
+                    },
+                    "conditions": {"type": "array", "items": condition},
+                    "match": {
+                        "type": "string",
+                        "enum": ["all", "any"],
+                        "description": "Whether all conditions must hold, or any one. Default all",
+                    },
+                    "actions": {"type": "array", "items": event_action},
+                    "once": {
+                        "type": "boolean",
+                        "description": (
+                            "Fire once and remove the event, the default. False "
+                            "keeps it, firing each time the condition becomes true"
+                        ),
+                    },
+                },
+                "required": ["event_id", "conditions", "actions"],
+            },
+            "remove_event": {
+                "description": "Remove a standing event by its id.",
+                "properties": {"event_id": {"type": "string"}},
+                "required": ["event_id"],
+            },
+            "list_events": {
+                "description": "The standing events installed, by id.",
+                "properties": {},
+                "required": [],
+            },
+        }
+        for tool_name, schema in event_tools.items():
+            description = {
+                "type": "function",
+                "function": {
+                    "name": tool_name,
+                    "description": schema["description"],
+                    "parameters": {
+                        "type": "object",
+                        "properties": schema["properties"],
+                        "required": schema["required"],
+                    },
+                },
+            }
+            self._execution_tools.add(tool_name)
+            self._execution_tool_descriptions.append(description)
+            if tool_name == "list_events":
+                # Planning may look before it decides between a plan and an event
+                self._planning_tools.add(tool_name)
+                self._planning_tool_descriptions.append(description)
+
+        self._events_addendum = (
+            "\n\n=== Standing Instructions ===\n"
+            "Besides a task and a question, a request can include a standing "
+            "instruction conditioned on an event happening: 'whenever X happens, "
+            "do Y', 'if the battery drops below 20 percent, dock'. Install it with "
+            "add_event instead of adding simple planning steps. Its condition "
+            "names a topic and a field listed by inspect_component. An event outlives "
+            "this task and fires on its own. list_events shows what is installed "
+            "and remove_event removes one."
+        )
 
     def _register_routine_tools(self) -> None:
         """Offer every routine the Monitor hosts as a skill.
@@ -752,6 +886,10 @@ class Cortex(ModelComponent, Monitor):
             )
 
         result = comp.inspect_component()
+
+        # The fields of each topic's message, required only for event conditions
+        if self.config.enable_events:
+            result += self._topic_fields(comp)
 
         # Append Cortex-registered execution tools for this component
         prefix = f"{component_name}."
@@ -1138,6 +1276,7 @@ class Cortex(ModelComponent, Monitor):
             + self._robot_description
             + self._sensors_description
             + self._memory_addendum
+            + self._events_addendum
         )
         self.config._system_prompt = self._effective_planning_prompt
         self.messages = [{"role": "system", "content": self._effective_planning_prompt}]
@@ -1460,6 +1599,8 @@ class Cortex(ModelComponent, Monitor):
         """
         if tool_name == "inspect_component":
             return self._inspect_component(args.get("component", ""))
+        if tool_name == "list_events":
+            return self._run_event_tool(tool_name, args)
         if tool_name in self._planning_tools and tool_name in self._tool_refs:
             parsed_args = self._parse_tool_args(args)
             return self._call_component_action(tool_name, parsed_args)
@@ -1645,51 +1786,19 @@ class Cortex(ModelComponent, Monitor):
             )
             return f"Error: Unknown tool '{fn_name}'. Available: {all_tools}"
 
-    def _execute_system_tool(self, tool_name: str, args: Dict) -> str:
-        """Execute an execution-phase system tool or a component action.
-
-        A tool built from the action registry is dispatched by the kind of
-        its entry: a goal to an action server, a request to a service, and
-        anything else as a component method run through the Monitor.
-        """
-        try:
-            if tool_name == "update_parameter":
-                self.get_logger().info(
-                    f"Calling component action {tool_name} with args: {args}"
-                )
-                success, message = self.update_parameter(
-                    args.get("component", ""),
-                    args.get("param_name", ""),
-                    args.get("new_value", ""),
-                )
-                if success:
-                    return f"{tool_name} executed successfully"
-                return f"Error: {tool_name} failed with error: {message}"
-            if tool_name == "wait":
-                return self._wait(args.get("duration"))
-            if tool_name in self._routine_tools or tool_name in self._ROUTINE_CONTROLS:
-                return self._run_routine_tool(tool_name, args)
-            if tool_name in self._plugin_action_tools:
-                return self._call_plugin_action(tool_name, args)
-            ref = self._tool_refs.get(tool_name)
-            if ref is None:
-                return f"Error: Unknown tool '{tool_name}'"
-            entry = self._action_registry.get(ref)
-            interface = self._action_registry.interface_for(ref)
-            if entry.kind == COMPONENT_ACTION_SERVER:
-                goal_fields = {
-                    key: value for key, value in args.items() if key != "wait_to_finish"
-                }
-                return self._send_action_goal_from_dict(
-                    tool_name, entry.owner, entry.server_name, interface, goal_fields
-                )
-            if entry.kind == COMPONENT_SERVICE:
-                return self._send_service_request_from_dict(
-                    entry.owner, entry.server_name, interface, args
-                )
-            return self._call_component_action(tool_name, args)
-        except Exception as e:
-            return f"Error calling {tool_name}: {e}"
+    def _update_parameter_tool(self, args: Dict) -> str:
+        """The update_parameter tool, through the Monitor"""
+        self.get_logger().info(
+            f"Calling component action update_parameter with args: {args}"
+        )
+        success, message = self.update_parameter(
+            args.get("component", ""),
+            args.get("param_name", ""),
+            args.get("new_value", ""),
+        )
+        if success:
+            return "update_parameter executed successfully"
+        return f"Error: update_parameter failed with error: {message}"
 
     def _run_routine_tool(self, tool_name: str, args: Dict) -> str:
         """Start, pause, resume or abort a routine.
@@ -1729,6 +1838,213 @@ class Cortex(ModelComponent, Monitor):
                 )
             time.sleep(min(self.config.monitoring_interval, remaining))
         return f"Waited {seconds:g}s"
+
+    def _execute_system_tool(self, tool_name: str, args: Dict) -> str:
+        """Execute an execution-phase system tool or a component action.
+
+        A tool built from the action registry is dispatched by the kind of
+        its entry: a goal to an action server, a request to a service, and
+        anything else as a component method run through the Monitor.
+        """
+        try:
+            if tool_name == "update_parameter":
+                return self._update_parameter_tool(args)
+            if tool_name in self._EVENT_TOOLS:
+                return self._run_event_tool(tool_name, args)
+            if tool_name == "wait":
+                return self._wait(args.get("duration"))
+            if tool_name in self._routine_tools or tool_name in self._ROUTINE_CONTROLS:
+                return self._run_routine_tool(tool_name, args)
+            if tool_name in self._plugin_action_tools:
+                return self._call_plugin_action(tool_name, args)
+            ref = self._tool_refs.get(tool_name)
+            if ref is None:
+                return f"Error: Unknown tool '{tool_name}'"
+            entry = self._action_registry.get(ref)
+            interface = self._action_registry.interface_for(ref)
+            if entry.kind == COMPONENT_ACTION_SERVER:
+                goal_fields = {
+                    key: value for key, value in args.items() if key != "wait_to_finish"
+                }
+                return self._send_action_goal_from_dict(
+                    tool_name, entry.owner, entry.server_name, interface, goal_fields
+                )
+            if entry.kind == COMPONENT_SERVICE:
+                return self._send_service_request_from_dict(
+                    entry.owner, entry.server_name, interface, args
+                )
+            return self._call_component_action(tool_name, args)
+        except Exception as e:
+            return f"Error calling {tool_name}: {e}"
+
+    # =========================================================================
+    # Tools: runtime events (standing instructions kept by the Monitor)
+    # =========================================================================
+
+    @staticmethod
+    def _message_fields(topic: Topic) -> Dict:
+        """The fields of a topic's message, nested as the message is"""
+        ros_type = getattr(topic.msg_type, "_ros_type", None)
+        return get_ros_msg_fields_dict(ros_type) if ros_type else {}
+
+    @classmethod
+    def _field_paths(cls, fields: Dict, prefix: str = "") -> List[str]:
+        """Dotted field paths with their types, out of the nested fields"""
+        paths: List[str] = []
+        for name, kind in fields.items():
+            path = f"{prefix}{name}"
+            if isinstance(kind, dict):
+                paths.extend(cls._field_paths(kind, f"{path}."))
+            elif isinstance(kind, list):
+                paths.extend(cls._field_paths(kind[0], f"{path}[]."))
+            else:
+                paths.append(f"{path}: {kind}")
+        return paths
+
+    def _topic_fields(self, comp: Any) -> str:
+        """The fields of each of a component's topics, for inspection"""
+        topics = [
+            *(getattr(comp, "in_topics", None) or []),
+            *(getattr(comp, "out_topics", None) or []),
+        ]
+        described = []
+        for topic in topics:
+            fields = self._message_fields(topic)
+            if fields:
+                type_name = getattr(topic.msg_type, "__name__", str(topic.msg_type))
+                described.append(
+                    f"  - {topic.name} ({type_name}): "
+                    + ", ".join(self._field_paths(fields))
+                )
+        if not described:
+            return ""
+        return "\nTopic fields, for event conditions:\n" + "\n".join(described)
+
+    def _condition_spec(self, condition: Dict) -> Dict:
+        """One structured condition as the JSON leaf sugarcoat reads.
+
+        The topic must be one a managed component reads or writes, and the
+        field one the message has.
+
+        :raises ValueError: Naming what was wrong and what is available
+        """
+        topics = {
+            topic.name: topic
+            for comp in self._managed_components.values()
+            for topic in [
+                *(getattr(comp, "in_topics", None) or []),
+                *(getattr(comp, "out_topics", None) or []),
+            ]
+        }
+        topic = topics.get(condition.get("topic", ""))
+        if topic is None:
+            raise ValueError(
+                f"Unknown topic '{condition.get('topic', '')}'. Known topics: "
+                f"{sorted(topics)}"
+            )
+        fields = self._message_fields(topic)
+        path = [part for part in str(condition.get("field") or "").split(".") if part]
+        node: Any = fields
+        for part in path:
+            if isinstance(node, list):
+                node = node[0]
+            if not isinstance(node, dict) or part not in node:
+                raise ValueError(
+                    f"Topic '{topic.name}' has no field '{'.'.join(path)}'. Fields: "
+                    f"{', '.join(self._field_paths(fields))}"
+                )
+            node = node[part]
+        operator = condition.get("operator") if path else None
+        if path and operator not in self._CONDITION_OPERATORS:
+            raise ValueError(
+                f"A condition on a field needs an operator, one of "
+                f"{', '.join(self._CONDITION_OPERATORS)}; got {operator!r}"
+            )
+        return {
+            "type": "simple",
+            "topic_name": topic.name,
+            "topic_msg_type": getattr(topic.msg_type, "__name__", str(topic.msg_type)),
+            "topic_qos_config": topic.qos_profile.to_dict(),
+            "topic_use_plugin": topic.use_plugin,
+            "attribute_path": path,
+            "operator": operator or "none",
+            "ref_value": condition.get("value") if path else None,
+        }
+
+    def _event_action_spec(self, call: Dict) -> Dict:
+        """One of an event's actions, a tool call, as an action spec by
+        registry reference.
+
+        :raises ValueError: For a tool an event cannot run
+        """
+        tool = call.get("tool", "")
+        args = self._parse_tool_args(call.get("arguments", {}))
+        if tool in self._routine_tools:
+            return {
+                "ref": f"{MONITOR_OWNER}/start_routine",
+                "kwargs": {"routine_name": self._routine_tools[tool]},
+            }
+        if tool in self._ROUTINE_CONTROLS:
+            return {
+                "ref": f"{MONITOR_OWNER}/{tool}",
+                "kwargs": {"routine_name": args.get("routine_name", "")},
+            }
+        ref = self._tool_refs.get(tool)
+        if ref is None:
+            raise ValueError(
+                f"An event cannot run '{tool}'. It runs component actions, "
+                "send_goal_to_* tools and routine tools"
+            )
+        return self._action_spec(ref, args)
+
+    def _event_spec(self, args: Dict) -> Tuple[Dict, List[Dict]]:
+        """The event and its actions as the Monitor's registration reads them.
+
+        :raises ValueError: If anything in the call cannot be installed
+        """
+        if not args.get("event_id"):
+            raise ValueError("An event needs an event_id")
+        conditions = [self._condition_spec(c) for c in args.get("conditions") or []]
+        if not conditions:
+            raise ValueError("An event needs at least one condition")
+        actions = [self._event_action_spec(call) for call in args.get("actions") or []]
+        if not actions:
+            raise ValueError("An event needs at least one action")
+        condition = conditions[0]
+        if len(conditions) > 1:
+            # NOTE: sugarcoat's logic operators: AND is 1, OR is 2
+            condition = {
+                "type": "composite",
+                "logic_operator": 2 if args.get("match") == "any" else 1,
+                "sub_conditions": conditions,
+            }
+        once = bool(args.get("once", True))
+        event = {
+            "name": args["event_id"],
+            "condition": condition,
+            "handle_once": once,
+            # A kept event fires when the condition becomes true, not on
+            # every message that satisfies it
+            "on_change": not once,
+            "keep_event_delay": 0.0,
+        }
+        return event, actions
+
+    def _run_event_tool(self, tool_name: str, args: Dict) -> str:
+        """Install, remove or list runtime events through the Monitor"""
+        if tool_name == "list_events":
+            return self.list_events()[1]
+        if tool_name == "remove_event":
+            success, message = self.remove_event(args.get("event_id", ""))
+            return message if success else f"Error: {message}"
+        try:
+            event, event_actions = self._event_spec(args)
+        except ValueError as e:
+            return f"Error: {e}"
+        success, message = self._add_event_from_spec(
+            event=event, actions=event_actions, event_id=args["event_id"]
+        )
+        return message if success else f"Error: {message}"
 
     # =========================================================================
     # Compiled execution: a run of known steps as one routine
@@ -1813,24 +2129,26 @@ class Cortex(ModelComponent, Monitor):
             index += len(run) or 1
         return runs
 
+    def _action_spec(self, ref: str, args: Dict) -> Dict:
+        """An action by registry reference with its arguments, as the Monitor's
+        spec builder reads it.
+        """
+        if self._action_registry.get(ref).kind == COMPONENT_ACTION_SERVER:
+            goal = {
+                key: value for key, value in args.items() if key != "wait_to_finish"
+            }
+            return {"ref": ref, "goal": goal}
+        return {"ref": ref, "kwargs": args}
+
     def _routine_spec(self, plan: List[Dict], run: Dict[int, str]) -> Dict:
         """Create a routine spec from a run of plan steps."""
         steps = []
         for index, ref in run.items():
             function = plan[index]["function"]
             args = self._parse_tool_args(function.get("arguments", {}))
-            spec: Dict[str, Any] = {
-                "ref": ref,
-                "name": f"{index + 1}_{function['name']}",
-            }
-            kind = self._action_registry.get(ref).kind
-            if kind == COMPONENT_ACTION_SERVER:
-                spec["goal"] = {
-                    key: value for key, value in args.items() if key != "wait_to_finish"
-                }
-            else:
-                spec["kwargs"] = args
-            if kind == COMPONENT_METHOD:
+            spec = self._action_spec(ref, args)
+            spec["name"] = f"{index + 1}_{function['name']}"
+            if self._action_registry.get(ref).kind == COMPONENT_METHOD:
                 spec["timeout"] = self.config.step_timeout
                 spec["on_timeout"] = "fail"
             steps.append(spec)

@@ -161,11 +161,15 @@ Each hosted routine becomes a `routine.<name>` execution tool with no parameters
 
 Cortex runs two or more consecutive compilable steps of a plan, or a lone awaited goal, as one routine hosted by the Monitor instead of one at a time. A step compiles when it is a component action, an awaited action goal or a wait and all its arguments are known. A goal sent with `wait_to_finish=false` breaks the run and runs asynchronously while the following steps proceed. A step whose argument is a placeholder for an earlier result, written `<output from step N>`, breaks the run and is resolved by the confirmation call as before; so do services, plugin actions and routine tools. Inside the routine a goal is awaited and cancelled natively, a component action gets `step_timeout`, and the routine can be paused, resumed or aborted like any other. Each step's message reaches the planner as its result. A failed step ends the run, the steps not reached are reported as not run, and the planner replans. A routine aborted from outside ends the task. `compile_routines=False` restores step-by-step execution.
 
+## Event Conditioned Actions
+
+A standing instruction, "whenever X happens, do Y", requires a sugarcoat runtime event rather than an action step. Tools that allow adding events while planning are off by default, since they are the most complex Cortex offers; `CortexConfig(enable_events=True)` registers them and adds the guidance to the planning prompt. The planner installs an event with `add_event`: an id, one or more conditions on topic fields joined by `all` or `any`, the actions to run as tool calls, and `once`, true by default. Conditions name a topic a managed component reads or writes, a dotted field path and one of sugarcoat's comparison operators. `inspect_component` lists the fields of every topic's message, and a topic or field that does not exist is refused before anything is installed. An event may run component actions, awaited goals and routine tools. With `once` false the event stays and fires each time the condition becomes true. `remove_event` and `list_events` complete the set. Events outlive the task that installed them, and a firing is not reported to the planner.
+
 ## Cortex's Own Tools
 
 | Tool | Phase | Description |
 |---|---|---|
-| `inspect_component(component)` | planning | A component's topics, configuration, model clients and tools |
+| `inspect_component(component)` | planning | A component's topics with their message fields, configuration, model clients and tools |
 | `update_parameter(component, param_name, new_value)` | execution | Change one configuration parameter |
 | `wait(duration)` | execution | Hold for a number of seconds. Not for waiting on a running goal, whose progress the planner is shown. Cut short if the task is cancelled |
 
