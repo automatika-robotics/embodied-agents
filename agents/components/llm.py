@@ -17,6 +17,7 @@ from ..ros import (
     Topic,
     DetectionsMultiSource,
     Detections,
+    Detections3D,
     StreamingString,
     BaseComponent,
     ServiceClientHandler,
@@ -26,7 +27,6 @@ from ..utils import (
     get_prompt_template,
     validate_func_args,
     strip_think_tokens,
-    execute_method_response_to_str,
 )
 from .model_component import ModelComponent
 from .component_base import ComponentRunType
@@ -107,7 +107,7 @@ class LLM(ModelComponent):
             if kwargs.get("allowed_inputs")
             else {
                 "Required": [String],
-                "Optional": [DetectionsMultiSource, Detections],
+                "Optional": [DetectionsMultiSource, Detections, Detections3D],
             }
         )
         self.handled_outputs = [String, StreamingString]
@@ -249,7 +249,12 @@ class LLM(ModelComponent):
             response = srv_client.send_request(req_msg=srv_request)
         except Exception as e:
             return f"Error calling {tool_name}: {e}"
-        return execute_method_response_to_str(tool_name, response)
+        if response is None:
+            return f"Error: {tool_name} got no response from the component"
+        if not response.success:
+            return f"Error: {tool_name} failed with error: {response.error_msg}"
+        message = json.loads(response.response_json) if response.response_json else ""
+        return message or f"{tool_name} executed successfully"
 
     @validate_func_args
     def add_documents(
@@ -470,10 +475,9 @@ class LLM(ModelComponent):
             msg_type = i.input_topic.msg_type
             # set trigger equal to a topic with type String if trigger not found
             if msg_type == String:
-                if not query:
-                    query = item
+                query = query or item
                 context[i.input_topic.name] = item
-            elif msg_type in [DetectionsMultiSource, Detections]:
+            elif msg_type in [DetectionsMultiSource, Detections, Detections3D]:
                 context[i.input_topic.name] = item
 
         if query is None:

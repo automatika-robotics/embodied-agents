@@ -3,7 +3,7 @@ from typing import Any, Optional, Dict, Union, List, Generator
 import httpx
 
 from ..models import OllamaModel
-from ..utils import encode_img_base64
+from ..utils import encode_img_base64, tls_verify
 from .model_base import ModelClient
 
 __all__ = ["OllamaClient"]
@@ -20,6 +20,7 @@ class OllamaClient(ModelClient):
         inference_timeout: int = 30,
         init_on_activation: bool = True,
         logging_level: str = "info",
+        ca_cert: Optional[str] = None,
         **kwargs,
     ):
         try:
@@ -39,9 +40,10 @@ class OllamaClient(ModelClient):
             inference_timeout=inference_timeout,
             init_on_activation=init_on_activation,
             logging_level=logging_level,
+            ca_cert=ca_cert,
             **kwargs,
         )
-        self.client = Client(host=self._build_url())
+        self.client = Client(host=self._build_url(), verify=tls_verify(self.ca_cert))
         self._check_connection()
 
     @property

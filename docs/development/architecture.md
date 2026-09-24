@@ -4,21 +4,23 @@ This document describes the internal architecture of EmbodiedAgents for develope
 
 ## Component Hierarchy
 
-Every processing unit in EmbodiedAgents is a **component**. Components form a strict inheritance chain:
+Every processing unit in EmbodiedAgents is a **component**. Components form an inheritance tree, with mixins adding shared machinery to some of them:
 
 ```
 BaseComponent (ros_sugar)
   └── Component (agents.components.component_base)
-        └── ModelComponent (agents.components.model_component)
-              ├── LLM
-              ├── VLM / MLLM
-              ├── VLA
-              ├── Vision
-              ├── SpeechToText
-              ├── TextToSpeech
-              ├── SemanticRouter
-              ├── MapEncoding
-              └── MotionDetector
+        ├── ModelComponent (agents.components.model_component)
+        │     ├── LLM
+        │     │     ├── MLLM / VLM      (+ DepthLiftMixin)
+        │     │     └── SemanticRouter
+        │     ├── Vision                (+ DepthLiftMixin)
+        │     ├── VLA
+        │     ├── SpeechToText
+        │     ├── TextToSpeech
+        │     └── Cortex                (+ Monitor from ros_sugar)
+        ├── Memory
+        ├── MotionDetector
+        └── MoveIt
 ```
 
 ### BaseComponent
@@ -44,7 +46,17 @@ BaseComponent (ros_sugar)
 - Warmup logic.
 - Streaming support via a fast timer (`_handle_websocket_streaming()`).
 
-All specialized components (`LLM`, `VLM`, `Vision`, etc.) subclass `ModelComponent`.
+Components that call a model (`LLM`, `VLM`, `Vision`, etc.) subclass `ModelComponent`. Components that do their work without one (`Memory`, `MotionDetector`, `MoveIt`) subclass `Component` directly.
+
+### DepthLiftMixin
+
+`DepthLiftMixin` (defined in `agents.components.depth_lift`) is the shared machinery of the components that publish `Detections3D` (`Vision` and `MLLM`). It pairs the lifted picture with its depth, either nested in an `RGBD` message or read from a separate depth topic (a depth image registered to the picture, or a `PointCloud2`). It resolves the camera calibration, from a `camera_info` topic or the one an `RGBD` message carries, and the camera's transform into the configured `detections_frame`. It then builds the kompass-core depth detector and caches it until one of those inputs changes.
+
+The mixin decides whether a tick can be lifted. When depth or calibration is missing, depth is too far from the picture in time, the resolutions disagree, or a transform is unresolved, it logs why and publishes no 3D boxes for that tick. The geometry itself (checking the lift inputs at construction, preparing depth, lifting boxes, the depth-validity score) lives in `agents.utils.perception3d`, so a component gains 3D output by using the mixin rather than reimplementing either part.
+
+### Cortex as the Monitor
+
+`Cortex` subclasses both `ModelComponent` and sugarcoat's `Monitor`. When a recipe includes a `Cortex`, the `Launcher` installs it in place of the default `Monitor` (see `Launcher._init_monitor_node`). The launcher takes Cortex out of the components to be monitored, since Cortex is now the monitor, and initializes its monitor side through `Cortex._init_internal_monitor` with the same arguments the default `Monitor` would receive.
 
 ## The `_execution_step()` Pattern
 
@@ -105,7 +117,7 @@ The `trigger` parameter controls when `_execution_step()` fires:
 | **Topic** | `Topic` instance | Fires when a message arrives on that topic. The topic must be one of the component's inputs. Sets `ComponentRunType.EVENT`. |
 | **Multi-topic** | `List[Topic]` | Fires when any of the listed topics receives a message. |
 | **Event** | `Event` instance | Fires when an external event is raised. Wired via an `Action` in `custom_on_configure()`. |
-| **None** | `None` | Only valid for `ACTION_SERVER` or `SERVER` run types (e.g., VLA). |
+| **None** | `None` | Only valid for `ACTION_SERVER` or `SERVER` run types (e.g., VLA, MoveIt, Cortex). |
 
 When a `Topic` trigger is set, the topic's callback is moved from `self.callbacks` to `self.trig_callbacks`. The trigger callback's `on_callback_execute()` is wired to call `_execution_step()` in `activate_all_triggers()`.
 

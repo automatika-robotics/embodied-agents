@@ -12,7 +12,7 @@ import msgpack
 import msgpack_numpy as m_pack
 
 from ..models import Model, OllamaModel
-from ..utils import encode_img_base64
+from ..utils import encode_img_base64, tls_verify
 from .model_base import ModelClient
 
 # patch msgpack for numpy arrays
@@ -48,6 +48,7 @@ class RoboMLHTTPClient(ModelClient):
         inference_timeout: int = 30,
         init_on_activation: bool = True,
         logging_level: str = "info",
+        ca_cert: Optional[str] = None,
         **kwargs,
     ):
         if isinstance(model, OllamaModel):
@@ -61,12 +62,17 @@ class RoboMLHTTPClient(ModelClient):
             inference_timeout=inference_timeout,
             init_on_activation=init_on_activation,
             logging_level=logging_level,
+            ca_cert=ca_cert,
             **kwargs,
         )
         self.url = self._build_url()
 
         # create httpx client
-        self.client = httpx.Client(base_url=self.url, timeout=self.inference_timeout)
+        self.client = httpx.Client(
+            base_url=self.url,
+            timeout=self.inference_timeout,
+            verify=tls_verify(self.ca_cert),
+        )
         self._check_connection()
 
     def _check_connection(self) -> None:
@@ -209,7 +215,7 @@ class RoboMLHTTPClient(ModelClient):
 
 
 class RoboMLWSClient(RoboMLHTTPClient):
-    """An websocket client for interaction with ML models served on RoboML"""
+    """An websocket client for interaction with ML models served on RoboML."""
 
     def __init__(
         self,
@@ -219,6 +225,7 @@ class RoboMLWSClient(RoboMLHTTPClient):
         inference_timeout: int = 30,
         init_on_activation: bool = True,
         logging_level: str = "info",
+        ca_cert: Optional[str] = None,
         **kwargs,
     ):
         if isinstance(model, OllamaModel):
@@ -232,14 +239,24 @@ class RoboMLWSClient(RoboMLHTTPClient):
             inference_timeout=inference_timeout,
             init_on_activation=init_on_activation,
             logging_level=logging_level,
+            ca_cert=ca_cert,
             **kwargs,
         )
         # Add queues and events
         self.stop_event: Optional[threading.Event] = None
         self.request_queue: Optional[queue.Queue] = None
         self.response_queue: Optional[queue.Queue] = None
-        self.websocket_endpoint = (
-            f"{self._build_url('ws')}/{self.model_name}/ws_inference"
+        if not self.url.startswith("http"):
+            raise ValueError(
+                f"RoboMLWSClient takes an http:// or https:// host, got '{host}'. "
+                "The WebSocket connection is derived from it: wss for https"
+            )
+        self.websocket_endpoint = f"ws{self.url[4:]}/{self.model_name}/ws_inference"
+        # certificate to trust only applies to wss
+        self._ws_ssl = (
+            tls_verify(self.ca_cert)
+            if self.ca_cert and self.websocket_endpoint.startswith("wss")
+            else None
         )
 
     def _inference(self) -> Optional[Dict]:
@@ -267,7 +284,9 @@ class RoboMLWSClient(RoboMLHTTPClient):
             return
 
         try:
-            async with websockets.connect(self.websocket_endpoint) as websocket:
+            async with websockets.connect(
+                self.websocket_endpoint, ssl=self._ws_ssl
+            ) as websocket:
                 while not self.stop_event.is_set():
                     try:
                         # Attempt to send
