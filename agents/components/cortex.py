@@ -1,3 +1,4 @@
+import inspect
 import json
 import os
 import re
@@ -569,7 +570,11 @@ class Cortex(ModelComponent, Monitor):
                         "type": "string",
                         "description": "Name to list and remove the event by",
                     },
-                    "conditions": {"type": "array", "items": condition},
+                    "conditions": {
+                        "type": "array",
+                        "items": condition,
+                        "description": "Conditions on topic fields",
+                    },
                     "match": {
                         "type": "string",
                         "enum": ["all", "any"],
@@ -597,6 +602,26 @@ class Cortex(ModelComponent, Monitor):
                 "required": [],
             },
         }
+        # Conditions the attached plugins offer, named as their tools are
+        plugin_events = self._action_registry.events()
+        if plugin_events:
+            event_tools["add_event"]["properties"]["plugin_condition"] = {
+                "type": "object",
+                "description": (
+                    "A ready-made condition the robot provides, such as a low "
+                    "battery, by name with its arguments. Give either this or "
+                    "the 'conditions' list, not both"
+                ),
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "enum": [e.ref.replace("/", ".") for e in plugin_events],
+                    },
+                    "arguments": {"type": "object"},
+                },
+                "required": ["name"],
+            }
+            event_tools["add_event"]["required"].remove("conditions")
         for tool_name, schema in event_tools.items():
             description = {
                 "type": "function",
@@ -627,6 +652,16 @@ class Cortex(ModelComponent, Monitor):
             "this task and fires on its own. list_events shows what is installed "
             "and remove_event removes one."
         )
+        if plugin_events:
+            lines = "\n".join(
+                f"  - {e.ref.replace('/', '.')}{e.signature}: {e.description}"
+                for e in plugin_events
+            )
+            self._events_addendum += (
+                "\nThe robot also offers these conditions, for giving to add_event as "
+                "plugin_condition in place of conditions, with their arguments:\n"
+                + lines
+            )
 
     def _register_routine_tools(self) -> None:
         """Offer every routine the Monitor hosts as a skill.
@@ -1147,24 +1182,23 @@ class Cortex(ModelComponent, Monitor):
         """
         if not args.get("event_id"):
             raise ValueError("An event needs an event_id")
-        conditions = [self._condition_spec(c) for c in args.get("conditions") or []]
-        if not conditions:
-            raise ValueError("An event needs at least one condition")
+        plugin_condition = args.get("plugin_condition")
+        if plugin_condition and args.get("conditions"):
+            raise ValueError(
+                "An event takes either conditions or a plugin_condition, not both"
+            )
+        watched = (
+            self._plugin_condition_spec(plugin_condition)
+            if plugin_condition
+            else {"condition": self._conditions_spec(args)}
+        )
         actions = [self._event_action_spec(call) for call in args.get("actions") or []]
         if not actions:
             raise ValueError("An event needs at least one action")
-        condition = conditions[0]
-        if len(conditions) > 1:
-            # NOTE: sugarcoat's logic operators: AND is 1, OR is 2
-            condition = {
-                "type": "composite",
-                "logic_operator": 2 if args.get("match") == "any" else 1,
-                "sub_conditions": conditions,
-            }
         once = bool(args.get("once", True))
         event = {
             "name": args["event_id"],
-            "condition": condition,
+            **watched,
             "handle_once": once,
             # A kept event fires when the condition becomes true, not on
             # every message that satisfies it
@@ -1172,6 +1206,43 @@ class Cortex(ModelComponent, Monitor):
             "keep_event_delay": 0.0,
         }
         return event, actions
+
+    def _conditions_spec(self, args: Dict) -> Dict:
+        """The topic conditions of an event, one leaf or a group of them"""
+        conditions = [self._condition_spec(c) for c in args.get("conditions") or []]
+        if not conditions:
+            raise ValueError("An event needs at least one condition")
+        if len(conditions) == 1:
+            return conditions[0]
+        # NOTE: sugarcoat's logic operators: AND is 1, OR is 2
+        return {
+            "type": "composite",
+            "logic_operator": 2 if args.get("match") == "any" else 1,
+            "sub_conditions": conditions,
+        }
+
+    def _plugin_condition_spec(self, plugin_condition: Dict) -> Dict:
+        """A condition a plugin offers, by reference with its arguments.
+
+        The Monitor builds it with the plugin's factory; the event's own flags
+        override what the factory set.
+
+        :raises ValueError: If no plugin offers it
+        """
+        name = str(plugin_condition.get("name", ""))
+        ref = name.replace(".", "/", 1)
+        try:
+            self._action_registry.get_event(ref)
+        except (KeyError, ValueError) as e:
+            raise ValueError(str(e).strip("'\"")) from e
+        arguments = dict(plugin_condition.get("arguments") or {})
+        # Ensure ints passed for floats work correctly
+        factory = self._action_registry.event_factory_for(ref)
+        for key, parameter in inspect.signature(factory).parameters.items():
+            value = arguments.get(key)
+            if parameter.annotation is float and isinstance(value, int):
+                arguments[key] = float(value)
+        return {"ref": ref, "kwargs": arguments}
 
     def _run_event_tool(self, tool_name: str, args: Dict) -> str:
         """Install, remove or list runtime events through the Monitor"""
@@ -1636,7 +1707,14 @@ class Cortex(ModelComponent, Monitor):
             is the conversation history, preserved so execution results can
             be fed back for continued planning.
         """
-        all_tools = self._planning_tool_descriptions + self._execution_tool_descriptions
+        # The planner gets both tool sets with duplicates removed
+        all_tools = list(
+            {
+                tool["function"]["name"]: tool
+                for tool in self._planning_tool_descriptions
+                + self._execution_tool_descriptions
+            }.values()
+        )
         if messages is None:
             messages = self._build_planning_messages(task)
         output = ""

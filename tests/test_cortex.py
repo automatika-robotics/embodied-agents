@@ -7,11 +7,18 @@ import pytest
 from typing import Tuple
 from unittest.mock import MagicMock
 
-from ros_sugar.robot import ActionRegistry, PluginMetadata, SensorPlugin, plugin_action
+from ros_sugar.robot import (
+    ActionRegistry,
+    EventRegistry,
+    PluginMetadata,
+    SensorPlugin,
+    plugin_action,
+)
 from std_srvs.srv import SetBool
 
 from agents.config import CortexConfig
 from agents.ros import (
+    Event,
     COMPONENT_ACTION_SERVER,
     COMPONENT_METHOD,
     COMPONENT_SERVICE,
@@ -278,6 +285,32 @@ class TestCortexPlanning:
         assert len(plan) == 2
         assert plan[0]["function"]["name"] == "navigate"
         assert plan[1]["function"]["name"] == "grasp"
+
+    def test_a_tool_in_both_phases_is_offered_once(self, rclpy_init, mock_model_client):
+        """The planning call joins both tool sets; a tool registered for both
+        phases must still appear once in the list the model receives"""
+        mock_model_client.inference.return_value = {"output": "", "tool_calls": []}
+        comp = _make_cortex([], mock_model_client, "test_cortex_plan_no_duplicates")
+        mock_component_internals(comp)
+        comp._action_registry = _registry(
+            _method("memory", "body_status", phase="both"),
+            _method("memory", "recall", phase="planning"),
+            _method("memory", "start_episode"),
+        )
+        comp.get_routines = MagicMock(return_value=[])
+        comp._register_system_tools()
+
+        comp._plan_task("how is the battery?")
+
+        sent = mock_model_client.inference.call_args.args[0]["tools"]
+        names = [tool["function"]["name"] for tool in sent]
+        assert len(names) == len(set(names))
+        assert {"memory.body_status", "memory.recall", "memory.start_episode"} <= set(
+            names
+        )
+        # Still in both sets, so it is routed as either
+        assert "memory.body_status" in comp._planning_tools
+        assert "memory.body_status" in comp._execution_tools
 
     def test_plan_task_no_tool_calls_returns_none(self, rclpy_init, mock_model_client):
         mock_model_client.inference.return_value = {
@@ -1540,6 +1573,19 @@ class _Watched:
         return f"Component {self.node_name}"
 
 
+class _Battery(SensorPlugin):
+    """A plugin offering one condition, a battery threshold"""
+
+    def __init__(self):
+        self.metadata = PluginMetadata(name="Battery")
+        self.level = Topic(name="battery_level", msg_type="Float32")
+        self.events = EventRegistry({"low_battery": self._make_low_battery})
+
+    def _make_low_battery(self, threshold: float = 20.0) -> Event:
+        """Fire when the battery drops below threshold percent"""
+        return Event(self.level.msg.data < threshold, on_change=True)
+
+
 class TestEventsAsTools:
     """A standing instruction becomes a runtime event on the Monitor: a
     condition on a topic field the planner has seen in inspection, and
@@ -1747,6 +1793,90 @@ class TestEventsAsTools:
         assert self._add(comp, conditions=[]).startswith("Error:")
         assert self._add(comp, actions=[]).startswith("Error:")
         assert json.loads(comp._execute_system_tool("list_events", {})) == {}
+
+    def _with_battery(self, comp):
+        """The fixture's Cortex with a plugin offering a condition"""
+        plugins = SystemActionRegistry.from_components(
+            [], plugins=[_Battery(id="base")]
+        )
+        for event in plugins.events():
+            comp._action_registry.add_event_factory(
+                event, plugins.event_factory_for(event.ref)
+            )
+        comp._execution_tools.discard("add_event")
+        comp._execution_tool_descriptions = [
+            t
+            for t in comp._execution_tool_descriptions
+            if t["function"]["name"] not in self._EVENT_TOOL_NAMES
+        ]
+        comp._register_event_tools()
+
+    _EVENT_TOOL_NAMES = ("add_event", "remove_event", "list_events")
+
+    def test_a_plugin_condition_is_offered(self, rclpy_init, mock_model_client):
+        comp = self._cortex(mock_model_client, "test_cortex_events_plugin_offer")
+        self._with_battery(comp)
+
+        add = next(
+            t["function"]
+            for t in comp._execution_tool_descriptions
+            if t["function"]["name"] == "add_event"
+        )
+        options = add["parameters"]["properties"]["plugin_condition"]
+        assert options["properties"]["name"]["enum"] == ["base.low_battery"]
+        assert "conditions" not in add["parameters"]["required"]
+        assert "base.low_battery(threshold" in comp._events_addendum
+
+    def test_a_plugin_condition_is_written_by_reference(
+        self, rclpy_init, mock_model_client
+    ):
+        comp = self._cortex(mock_model_client, "test_cortex_events_plugin_spec")
+        self._with_battery(comp)
+        call = {
+            "event_id": "dock_when_low",
+            "plugin_condition": {
+                "name": "base.low_battery",
+                "arguments": {"threshold": 15},
+            },
+            "actions": [self.TAKE],
+            "once": False,
+        }
+
+        event, _ = comp._event_spec(call)
+
+        assert event["ref"] == "base/low_battery"
+        assert event["kwargs"] == {"threshold": 15}
+        assert "condition" not in event
+        assert event["handle_once"] is False and event["on_change"] is True
+
+    def test_a_plugin_event_is_installed(self, rclpy_init, mock_model_client):
+        """Through the Monitor, which builds it with the plugin's factory"""
+        comp = self._cortex(mock_model_client, "test_cortex_events_plugin_install")
+        self._with_battery(comp)
+
+        result = self._add(
+            comp,
+            conditions=None,
+            plugin_condition={
+                "name": "base.low_battery",
+                "arguments": {"threshold": 15},
+            },
+        )
+
+        assert not result.startswith("Error"), result
+        assert "spot_person" in json.loads(comp._execute_system_tool("list_events", {}))
+
+    def test_plugin_conditions_that_are_refused(self, rclpy_init, mock_model_client):
+        comp = self._cortex(mock_model_client, "test_cortex_events_plugin_refused")
+        self._with_battery(comp)
+
+        unknown = self._add(
+            comp, conditions=None, plugin_condition={"name": "base.on_fire"}
+        )
+        both = self._add(comp, plugin_condition={"name": "base.low_battery"})
+
+        assert unknown.startswith("Error:") and "base/low_battery" in unknown
+        assert both.startswith("Error:") and "not both" in both
 
     def test_off_by_default(self, rclpy_init, mock_model_client):
         """Neither the tools nor the prompt guidance, unless the recipe asks"""
