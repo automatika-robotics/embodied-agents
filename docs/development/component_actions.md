@@ -110,9 +110,9 @@ Cortex does not scan components itself. The `Launcher` builds a `SystemActionReg
 
 - A method decorated with `@component_action` or `@component_fallback` becomes a tool when its decorator carries a description. The description is used whole, so what the planner sees is exactly what the component author wrote. A method without a description is not offered.
 - An action server becomes a `send_goal_to_<server_name>` tool and a service a `send_request_to_<service_name>` tool, see [Action Servers as Tools](#action-servers-as-tools).
-- An action a robot or sensor plugin contributes becomes a `<plugin id>.<action>` tool, with the tool description the plugin's own registry gives it. It is built by the plugin's factory from the call's arguments and runs in Cortex's process, where the plugin lives.
+- An action a robot or sensor plugin contributes becomes a `<plugin id>-<action>` tool, with the tool description the plugin's own registry gives it. It is built by the plugin's factory from the call's arguments and runs in Cortex's process, where the plugin lives.
 
-Tool names for methods are namespaced as `{component_name}.{method_name}` (e.g. `vision.take_picture`, `tts.say`). Cortex keeps the registry reference behind every tool, `{component_name}/{name}`, and dispatches a call by what the entry is: a method runs through the Monitor's own resolver over the component's `ExecuteMethod` service, a goal goes to the action server, a request to the service.
+Tool names for methods are namespaced as `{component_name}-{method_name}` (e.g. `vision-take_picture`, `tts-say`). Cortex keeps the registry reference behind every tool, `{component_name}/{name}`, and dispatches a call by what the entry is: a method runs through the Monitor's own resolver over the component's `ExecuteMethod` service, a goal goes to the action server, a request to the service.
 
 Lifecycle methods (`start`, `stop`, `restart`, `reconfigure`, `set_param`, `set_params`, `broadcast_status`) are filtered out — they are managed by the Monitor, not by the planner. Cortex's own actions and the Monitor's methods are left out as well.
 
@@ -156,7 +156,7 @@ This puts one requirement on a component implementing `main_action_callback()`: 
 
 A `Routine` the Monitor hosts is a skill for the planner. Routines reach the Monitor when an event triggers them, when they are given to `enable_ui(routines=...)`, or when they are passed to `Cortex(routines=[...])`, which needs neither an event nor a UI. A routine given to Cortex must have a description, since that is what the planner reads.
 
-Each hosted routine becomes a `routine.<name>` execution tool with no parameters, described by the routine's description and step names. Starting one returns at once. Cortex then follows its cursor and reports its status, active step and last step message to the planner alongside running goals, until it completes, fails or is aborted. `pause_routine`, `resume_routine` and `abort_routine` take the routine name. When the task ends, routines it started are aborted, as running goals are cancelled.
+Each hosted routine becomes a `routine-<name>` execution tool with no parameters, described by the routine's description and step names. Starting one returns at once. Cortex then follows its cursor and reports its status, active step and last step message to the planner alongside running goals, until it completes, fails or is aborted. `pause_routine`, `resume_routine` and `abort_routine` take the routine name. When the task ends, routines it started are aborted, as running goals are cancelled.
 
 ### Compiled Execution
 
@@ -249,4 +249,4 @@ class SecurityCamera(ModelComponent):
         # ... run detection, check for intruders ...
 ```
 
-When this component is managed by Cortex, the planner can call `security_camera.arm` or `security_camera.disarm` as part of a task plan.
+When this component is managed by Cortex, the planner can call `security_camera-arm` or `security_camera-disarm` as part of a task plan.

@@ -305,12 +305,12 @@ class TestCortexPlanning:
         sent = mock_model_client.inference.call_args.args[0]["tools"]
         names = [tool["function"]["name"] for tool in sent]
         assert len(names) == len(set(names))
-        assert {"memory.body_status", "memory.recall", "memory.start_episode"} <= set(
+        assert {"memory-body_status", "memory-recall", "memory-start_episode"} <= set(
             names
         )
         # Still in both sets, so it is routed as either
-        assert "memory.body_status" in comp._planning_tools
-        assert "memory.body_status" in comp._execution_tools
+        assert "memory-body_status" in comp._planning_tools
+        assert "memory-body_status" in comp._execution_tools
 
     def test_plan_task_no_tool_calls_returns_none(self, rclpy_init, mock_model_client):
         mock_model_client.inference.return_value = {
@@ -486,7 +486,7 @@ class TestCortexConfirmation:
             "tool_calls": [
                 {
                     "function": {
-                        "name": "tts.say",
+                        "name": "tts-say",
                         "arguments": {"text": "A red cup on the table"},
                     }
                 },
@@ -500,7 +500,7 @@ class TestCortexConfirmation:
         )
         mock_component_internals(comp)
 
-        plan = [{"function": {"name": "tts.say", "arguments": {"text": "placeholder"}}}]
+        plan = [{"function": {"name": "tts-say", "arguments": {"text": "placeholder"}}}]
         decision, resolved = comp._confirm_step(plan, [], 0)
         assert decision == "EXECUTE"
         assert resolved is not None
@@ -609,10 +609,10 @@ class TestCortexRunsPluginActions:
         front, rear = _PtzCamera(id="front_cam"), _PtzCamera(id="rear_cam")
         comp = self._cortex(mock_model_client, "test_cortex_plugin_ids", front, rear)
 
-        assert {"front_cam.look_at", "rear_cam.look_at"} <= comp._execution_tools
+        assert {"front_cam-look_at", "rear_cam-look_at"} <= comp._execution_tools
 
         comp._execute_action_step(
-            _tool_call("rear_cam.look_at", {"pan_deg": 10, "tilt_deg": 0})
+            _tool_call("rear_cam-look_at", {"pan_deg": 10, "tilt_deg": 0})
         )
         assert rear.aimed == [(10, 0)]
         assert front.aimed == []
@@ -627,9 +627,9 @@ class TestCortexRunsPluginActions:
             mock_model_client, "test_cortex_plugin_schema", _PtzCamera(id="front_cam")
         )
 
-        look_at = self._tool(comp, "front_cam.look_at")
+        look_at = self._tool(comp, "front_cam-look_at")
         assert look_at["parameters"]["required"] == ["pan_deg", "tilt_deg"]
-        stop = self._tool(comp, "front_cam.stop")
+        stop = self._tool(comp, "front_cam-stop")
         assert stop["description"] == "Stop moving the camera."
         assert stop["parameters"]["properties"] == {}
 
@@ -639,7 +639,7 @@ class TestCortexRunsPluginActions:
 
         # OpenAI-compatible endpoints send arguments as a JSON string
         result = comp._execute_action_step(
-            _tool_call("front_cam.look_at", '{"pan_deg": 90, "tilt_deg": 30}')
+            _tool_call("front_cam-look_at", '{"pan_deg": 90, "tilt_deg": 30}')
         )
 
         assert camera.aimed == [(90, 30)]
@@ -653,7 +653,7 @@ class TestCortexRunsPluginActions:
         comp = self._cortex(mock_model_client, "test_cortex_plugin_missing", camera)
 
         result = comp._execute_action_step(
-            _tool_call("front_cam.look_at", {"pan_deg": 90})
+            _tool_call("front_cam-look_at", {"pan_deg": 90})
         )
 
         assert result.startswith("Error:") and "missing required" in result
@@ -666,7 +666,7 @@ class TestCortexRunsPluginActions:
         comp = self._cortex(mock_model_client, "test_cortex_plugin_extra", camera)
 
         result = comp._execute_action_step(
-            _tool_call("front_cam.look_at", {"pan_deg": 1, "tilt_deg": 2, "speed": 9})
+            _tool_call("front_cam-look_at", {"pan_deg": 1, "tilt_deg": 2, "speed": 9})
         )
 
         assert camera.aimed == [(1, 2)]
@@ -679,7 +679,7 @@ class TestCortexRunsPluginActions:
         comp = self._cortex(mock_model_client, "test_cortex_plugin_failed", camera)
 
         result = comp._execute_action_step(
-            _tool_call("front_cam.look_at", {"pan_deg": 0, "tilt_deg": 0})
+            _tool_call("front_cam-look_at", {"pan_deg": 0, "tilt_deg": 0})
         )
 
         assert result.startswith("Error:") and "refused" in result
@@ -705,7 +705,7 @@ class TestCortexSensorDescriptions:
         assert "Attached Sensors" in prompt
         assert "front_cam: PTZ Camera, by Acme" in prompt
         assert "A pan-tilt camera." in prompt
-        assert "front_cam.look_at" in prompt
+        assert "front_cam-look_at" in prompt
         assert comp._PLANNING_PROMPT in prompt
         assert comp.messages[0]["content"] == prompt
 
@@ -976,7 +976,7 @@ class TestDispatchingAGoal:
         assert result.startswith("Error:")
         assert "rejected" in result and "busy" in result
         # The way out is named: the planner can stop a goal it did not send
-        assert "vla.cancel_main_goal" in result
+        assert "vla-cancel_main_goal" in result
         assert self.TOOL not in comp._active_action_clients
 
 
@@ -999,12 +999,12 @@ class TestTheStopTool:
 
         comp._register_system_tools()
 
-        assert f"{arm.node_name}.cancel_main_goal" in comp._execution_tools
-        assert f"{worker.node_name}.cancel_main_goal" not in comp._execution_tools
+        assert f"{arm.node_name}-cancel_main_goal" in comp._execution_tools
+        assert f"{worker.node_name}-cancel_main_goal" not in comp._execution_tools
         tool = next(
             t["function"]
             for t in comp._execution_tool_descriptions
-            if t["function"]["name"] == f"{arm.node_name}.cancel_main_goal"
+            if t["function"]["name"] == f"{arm.node_name}-cancel_main_goal"
         )
         assert tool["description"].startswith("Stop the goal")
         assert tool["parameters"]["properties"] == {}
@@ -1073,7 +1073,7 @@ class TestRoutinesAsTools:
         tool = next(
             t["function"]
             for t in comp._execution_tool_descriptions
-            if t["function"]["name"] == "routine.pick_object"
+            if t["function"]["name"] == "routine-pick_object"
         )
         assert "Pick the object in front. Steps: detect, grasp." in tool["description"]
         assert tool["parameters"]["properties"] == {}
@@ -1095,7 +1095,7 @@ class TestRoutinesAsTools:
         comp._register_system_tools()
         comp.start_routine = MagicMock(return_value=(True, "Routine started"))
 
-        result = comp._execute_system_tool("routine.pick_object", {})
+        result = comp._execute_system_tool("routine-pick_object", {})
 
         comp.start_routine.assert_called_once_with("pick_object")
         assert "started" in result
@@ -1110,7 +1110,7 @@ class TestRoutinesAsTools:
         comp._register_system_tools()
         comp.start_routine = MagicMock(return_value=(False, "already running"))
 
-        result = comp._execute_system_tool("routine.pick_object", {})
+        result = comp._execute_system_tool("routine-pick_object", {})
 
         assert result.startswith("Error:") and "already running" in result
         assert not comp._active_routines
@@ -1139,7 +1139,7 @@ class TestRoutinesAsTools:
 
         status = comp._monitor_active_clients()
 
-        assert "routine.pick_object: running at step 'grasp'" in status
+        assert "routine-pick_object: running at step 'grasp'" in status
         assert "found it" in status
         assert comp._active_routines == {"pick_object"}
 
@@ -1148,7 +1148,7 @@ class TestRoutinesAsTools:
         ]
         status = comp._monitor_active_clients()
 
-        assert "routine.pick_object: COMPLETED | lifted" in status
+        assert "routine-pick_object: COMPLETED | lifted" in status
         assert not comp._active_routines
         assert comp._monitor_active_clients() is None
 
@@ -1186,7 +1186,7 @@ class TestRoutinesAsTools:
         assert comp.add_routine(routine)[0]
         comp._register_system_tools()
 
-        assert "started" in comp._execute_system_tool("routine.pick", {})
+        assert "started" in comp._execute_system_tool("routine-pick", {})
         assert grasped.wait(2.0)
         deadline = time.monotonic() + 2.0
         status = comp._monitor_active_clients()
@@ -1194,7 +1194,7 @@ class TestRoutinesAsTools:
             time.sleep(0.02)
             status = comp._monitor_active_clients()
 
-        assert "routine.pick: COMPLETED | grasped" in status
+        assert "routine-pick: COMPLETED | grasped" in status
         assert not comp._active_routines
 
 
@@ -1254,7 +1254,7 @@ class TestCompilingPlans:
         ref = comp._compiled_ref
 
         assert (
-            ref(_step("vision.take_picture", topic_name="/cam"))
+            ref(_step("vision-take_picture", topic_name="/cam"))
             == "vision/take_picture"
         )
         assert ref(_step("send_goal_to_vla_run", task="go")) == "vla/run"
@@ -1274,22 +1274,22 @@ class TestCompilingPlans:
         # Services, Cortex's other tools and unknown tools run step by step
         assert ref(_step("send_request_to_planner_save_plan", data=True)) is None
         assert ref(_step("update_parameter", component="vision")) is None
-        assert ref(_step("tts.say", text="hi")) is None
+        assert ref(_step("tts-say", text="hi")) is None
         # So does anything waiting for an earlier result, however deep
         assert (
-            ref(_step("vision.take_picture", topic_name="<output from step 1>")) is None
+            ref(_step("vision-take_picture", topic_name="<output from step 1>")) is None
         )
         assert (
             ref(
                 _step(
-                    "vision.take_picture", save_path={"dir": ["<output from step 2>"]}
+                    "vision-take_picture", save_path={"dir": ["<output from step 2>"]}
                 )
             )
             is None
         )
         as_json = {
             "function": {
-                "name": "vision.take_picture",
+                "name": "vision-take_picture",
                 "arguments": '{"topic_name": "<output from step 1>"}',
             }
         }
@@ -1300,10 +1300,10 @@ class TestCompilingPlans:
     ):
         comp = self._cortex(mock_model_client, "test_cortex_compile_runs")
         plan = [
-            _step("vision.take_picture", topic_name="/cam"),
+            _step("vision-take_picture", topic_name="/cam"),
             _step("send_goal_to_vla_run", task="go"),
-            _step("vision.take_picture", topic_name="<output from step 1>"),
-            _step("vision.take_picture", topic_name="/cam2"),
+            _step("vision-take_picture", topic_name="<output from step 1>"),
+            _step("vision-take_picture", topic_name="/cam2"),
             _step("send_request_to_planner_save_plan", data=True),
         ]
 
@@ -1327,8 +1327,8 @@ class TestCompilingPlans:
         }
         concurrent = [
             _step("send_goal_to_vla_run", task="go", wait_to_finish=False),
-            _step("vision.take_picture", topic_name="/cam"),
-            _step("vision.take_picture", topic_name="/cam2"),
+            _step("vision-take_picture", topic_name="/cam"),
+            _step("vision-take_picture", topic_name="/cam2"),
         ]
         assert comp._compilable_run(concurrent, 0) == {}
         assert comp._compilable_run(concurrent, 1) == {
@@ -1341,7 +1341,7 @@ class TestCompilingPlans:
     def test_the_spec_of_a_run(self, rclpy_init, mock_model_client):
         comp = self._cortex(mock_model_client, "test_cortex_compile_spec")
         plan = [
-            _step("vision.take_picture", topic_name="/cam"),
+            _step("vision-take_picture", topic_name="/cam"),
             _step("send_goal_to_vla_run", task="go", wait_to_finish=True),
             _step("wait", duration=1),
         ]
@@ -1354,7 +1354,7 @@ class TestCompilingPlans:
         assert "1 to 3" in spec["description"]
         assert spec["steps"][0] == {
             "ref": "vision/take_picture",
-            "name": "1_vision.take_picture",
+            "name": "1_vision-take_picture",
             "kwargs": {"topic_name": "/cam"},
             "timeout": 60.0,
             "on_timeout": "fail",
@@ -1379,7 +1379,7 @@ class TestCompilingPlans:
         self._picture_taken(comp)
         handle = _Handle()
         plan = [
-            _step("vision.take_picture", topic_name="/cam"),
+            _step("vision-take_picture", topic_name="/cam"),
             _step("wait", duration=0.05),
         ]
 
@@ -1400,9 +1400,9 @@ class TestCompilingPlans:
         comp = self._cortex(mock_model_client, "test_cortex_compile_failed")
         self._picture_taken(comp, returns=(False, "no camera"))
         plan = [
-            _step("vision.take_picture", topic_name="/cam"),
-            _step("vision.take_picture", topic_name="/cam2"),
-            _step("vision.take_picture", topic_name="<output from step 2>"),
+            _step("vision-take_picture", topic_name="/cam"),
+            _step("vision-take_picture", topic_name="/cam2"),
+            _step("vision-take_picture", topic_name="<output from step 2>"),
         ]
 
         results, aborted = comp._execute_plan(plan, _Handle(), MagicMock())
@@ -1422,7 +1422,7 @@ class TestCompilingPlans:
         handle = _Handle(cancel_after=2)
         started = time.monotonic()
         plan = [
-            _step("vision.take_picture", topic_name="/cam"),
+            _step("vision-take_picture", topic_name="/cam"),
             _step("wait", duration=30),
         ]
 
@@ -1442,7 +1442,7 @@ class TestCompilingPlans:
         comp = self._cortex(mock_model_client, "test_cortex_compile_fallback")
 
         plan = [
-            _step("vision.take_picture", topic_name="/cam"),
+            _step("vision-take_picture", topic_name="/cam"),
             _step("send_goal_to_vla_run", nope=1),
         ]
 
@@ -1462,7 +1462,7 @@ class TestCompilingPlans:
         comp.add_routine = MagicMock()
 
         results, _ = comp._execute_plan(
-            [_step("vision.take_picture", topic_name="/cam")], _Handle(), MagicMock()
+            [_step("vision-take_picture", topic_name="/cam")], _Handle(), MagicMock()
         )
 
         assert results[0]["result"] == "ran stepwise"
@@ -1474,7 +1474,7 @@ class TestCompilingPlans:
         comp.add_routine = MagicMock()
 
         results, _ = comp._execute_plan(
-            [_step("vision.take_picture", topic_name="/cam")], _Handle(), MagicMock()
+            [_step("vision-take_picture", topic_name="/cam")], _Handle(), MagicMock()
         )
 
         assert results[0]["result"] == "ran stepwise"
@@ -1518,20 +1518,20 @@ class TestCompilingPlans:
         self._with_camera(comp)
         ref = comp._compiled_ref
 
-        look = _step("front_cam.look_at", pan_deg=1, tilt_deg=2)
+        look = _step("front_cam-look_at", pan_deg=1, tilt_deg=2)
         assert ref(look) == "front_cam/look_at"
         # A required argument missing: step by step, where the error is reported
-        assert ref(_step("front_cam.look_at", pan_deg=1)) is None
+        assert ref(_step("front_cam-look_at", pan_deg=1)) is None
         # Alone, a plugin action runs directly, like a component action
         assert comp._compilable_run([look], 0) == {}
 
         spec = comp._routine_spec(
-            [_step("front_cam.look_at", pan_deg=1, tilt_deg=2, speed=9)],
+            [_step("front_cam-look_at", pan_deg=1, tilt_deg=2, speed=9)],
             {0: "front_cam/look_at"},
         )
         assert spec["steps"][0] == {
             "ref": "front_cam/look_at",
-            "name": "1_front_cam.look_at",
+            "name": "1_front_cam-look_at",
             "kwargs": {"pan_deg": 1, "tilt_deg": 2},
             "timeout": 60.0,
             "on_timeout": "fail",
@@ -1542,8 +1542,8 @@ class TestCompilingPlans:
         comp = self._cortex(mock_model_client, "test_cortex_compile_plugin_run")
         camera = self._with_camera(comp)
         plan = [
-            _step("front_cam.look_at", pan_deg=1, tilt_deg=2),
-            _step("front_cam.look_at", pan_deg=3, tilt_deg=4),
+            _step("front_cam-look_at", pan_deg=1, tilt_deg=2),
+            _step("front_cam-look_at", pan_deg=3, tilt_deg=4),
         ]
 
         results, aborted = comp._execute_plan(plan, _Handle(), MagicMock())
@@ -1597,7 +1597,7 @@ class TestEventsAsTools:
         "operator": "contains",
         "value": "person",
     }
-    TAKE = {"tool": "vision.take_picture", "arguments": {"topic_name": "/cam"}}
+    TAKE = {"tool": "vision-take_picture", "arguments": {"topic_name": "/cam"}}
 
     def _cortex(self, mock_model_client, name):
         comp = _make_cortex([], mock_model_client, name)
@@ -1615,7 +1615,7 @@ class TestEventsAsTools:
         comp._Monitor__event_listeners = {}
         comp.config.enable_events = True
         comp._register_system_tools()
-        comp._routine_tools["routine.patrol"] = "patrol"
+        comp._routine_tools["routine-patrol"] = "patrol"
         return comp
 
     def _add(self, comp, **overrides):
@@ -1745,7 +1745,7 @@ class TestEventsAsTools:
                     "tool": "send_goal_to_vla_run",
                     "arguments": {"task": "go", "wait_to_finish": True},
                 },
-                {"tool": "routine.patrol"},
+                {"tool": "routine-patrol"},
                 {"tool": "abort_routine", "arguments": {"routine_name": "patrol"}},
             ],
         })
@@ -1823,9 +1823,9 @@ class TestEventsAsTools:
             if t["function"]["name"] == "add_event"
         )
         options = add["parameters"]["properties"]["plugin_condition"]
-        assert options["properties"]["name"]["enum"] == ["base.low_battery"]
+        assert options["properties"]["name"]["enum"] == ["base-low_battery"]
         assert "conditions" not in add["parameters"]["required"]
-        assert "base.low_battery(threshold" in comp._events_addendum
+        assert "base-low_battery(threshold" in comp._events_addendum
 
     def test_a_plugin_condition_is_written_by_reference(
         self, rclpy_init, mock_model_client
@@ -1835,7 +1835,7 @@ class TestEventsAsTools:
         call = {
             "event_id": "dock_when_low",
             "plugin_condition": {
-                "name": "base.low_battery",
+                "name": "base-low_battery",
                 "arguments": {"threshold": 15},
             },
             "actions": [self.TAKE],
@@ -1858,7 +1858,7 @@ class TestEventsAsTools:
             comp,
             conditions=None,
             plugin_condition={
-                "name": "base.low_battery",
+                "name": "base-low_battery",
                 "arguments": {"threshold": 15},
             },
         )
@@ -1871,9 +1871,9 @@ class TestEventsAsTools:
         self._with_battery(comp)
 
         unknown = self._add(
-            comp, conditions=None, plugin_condition={"name": "base.on_fire"}
+            comp, conditions=None, plugin_condition={"name": "base-on_fire"}
         )
-        both = self._add(comp, plugin_condition={"name": "base.low_battery"})
+        both = self._add(comp, plugin_condition={"name": "base-low_battery"})
 
         assert unknown.startswith("Error:") and "base/low_battery" in unknown
         assert both.startswith("Error:") and "not both" in both
@@ -1976,10 +1976,10 @@ class TestToolsFromTheRegistry:
 
         self._register(comp, _method("vision", "take_picture"))
 
-        tool = self._tool(comp, "vision.take_picture")
+        tool = self._tool(comp, "vision-take_picture")
         assert tool["description"] == "take_picture on vision"
         assert tool["parameters"]["required"] == ["topic"]
-        assert comp._tool_refs["vision.take_picture"] == "vision/take_picture"
+        assert comp._tool_refs["vision-take_picture"] == "vision/take_picture"
 
     def test_the_phase_in_the_schema_routes_the_tool(
         self, rclpy_init, mock_model_client
@@ -1993,14 +1993,14 @@ class TestToolsFromTheRegistry:
             _method("memory", "start_episode"),
         )
 
-        assert "memory.recall" in comp._planning_tools
-        assert "memory.recall" not in comp._execution_tools
-        assert "memory.body_status" in comp._planning_tools
-        assert "memory.body_status" in comp._execution_tools
-        assert "memory.start_episode" not in comp._planning_tools
-        assert "memory.start_episode" in comp._execution_tools
+        assert "memory-recall" in comp._planning_tools
+        assert "memory-recall" not in comp._execution_tools
+        assert "memory-body_status" in comp._planning_tools
+        assert "memory-body_status" in comp._execution_tools
+        assert "memory-start_episode" not in comp._planning_tools
+        assert "memory-start_episode" in comp._execution_tools
         # The phase is Cortex's business, not the model's
-        assert "phase" not in self._tool(comp, "memory.recall", "planning")
+        assert "phase" not in self._tool(comp, "memory-recall", "planning")
 
     def test_what_is_not_offered(self, rclpy_init, mock_model_client):
         """Lifecycle methods, methods without a description, Cortex's own
@@ -2022,7 +2022,7 @@ class TestToolsFromTheRegistry:
             _method("vision", "track"),
         )
 
-        assert comp._tool_refs == {"vision.track": "vision/track"}
+        assert comp._tool_refs == {"vision-track": "vision/track"}
 
     def test_an_action_server_is_a_goal_tool(self, rclpy_init, mock_model_client):
         comp = _make_cortex([], mock_model_client, "test_cortex_registry_server")
@@ -2071,7 +2071,7 @@ class TestToolsFromTheRegistry:
 
         names = [t["function"]["name"] for t in comp._execution_tool_descriptions]
         assert names.count("send_goal_to_vla_run") == 1
-        assert names.count("vision.track") == 1
+        assert names.count("vision-track") == 1
 
     def test_a_goal_tool_is_dispatched_by_its_entry(
         self, rclpy_init, mock_model_client
@@ -2149,12 +2149,12 @@ class TestCallingAComponentAction:
         """Through the real resolver, down to the method service call"""
         mock_component_internals(comp)
         comp._action_registry = _registry(_method("memory", "start_episode"))
-        comp._tool_refs["memory.start_episode"] = "memory/start_episode"
+        comp._tool_refs["memory-start_episode"] = "memory/start_episode"
         comp._execute_component_method_srv_client = {"memory": MagicMock()}
         comp.execute_component_method = MagicMock(
             return_value=returns, side_effect=raises
         )
-        return comp._call_component_action("memory.start_episode", {"name": "tidy"})
+        return comp._call_component_action("memory-start_episode", {"name": "tidy"})
 
     def test_the_actions_message_is_the_tool_result(
         self, rclpy_init, mock_model_client
@@ -2185,7 +2185,7 @@ class TestCallingAComponentAction:
 
         result = self._call(comp, raises=KeyError("memory"))
 
-        assert result.startswith("Error calling memory.start_episode")
+        assert result.startswith("Error calling memory-start_episode")
 
     def test_a_tool_the_registry_does_not_know_is_refused(
         self, rclpy_init, mock_model_client

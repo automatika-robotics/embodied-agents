@@ -615,7 +615,7 @@ class Cortex(ModelComponent, Monitor):
                 "properties": {
                     "name": {
                         "type": "string",
-                        "enum": [e.ref.replace("/", ".") for e in plugin_events],
+                        "enum": [e.ref.replace("/", "-") for e in plugin_events],
                     },
                     "arguments": {"type": "object"},
                 },
@@ -654,7 +654,7 @@ class Cortex(ModelComponent, Monitor):
         )
         if plugin_events:
             lines = "\n".join(
-                f"  - {e.ref.replace('/', '.')}{e.signature}: {e.description}"
+                f"  - {e.ref.replace('/', '-')}{e.signature}: {e.description}"
                 for e in plugin_events
             )
             self._events_addendum += (
@@ -697,13 +697,13 @@ class Cortex(ModelComponent, Monitor):
             })
 
     def _register_routine(self, routine: Dict) -> None:
-        """One start tool for one hosted routine, named ``routine.<name>``.
+        """One start tool for one hosted routine, named ``routine-<name>``.
 
         :param routine: The routine's cursor and description, as the Monitor
             lists them
         """
         name = routine["name"]
-        tool_name = f"routine.{name}"
+        tool_name = f"routine-{name}"
         if tool_name in self._routine_tools:
             return
         self._routine_tools[tool_name] = name
@@ -760,6 +760,7 @@ class Cortex(ModelComponent, Monitor):
         """The tool a registry entry becomes with its name, its function
         description and the phase it is registered in. None for an entry
         that is not offered to the planner."""
+        # Named owner-name
         if entry.kind in (COMPONENT_METHOD, PLUGIN_ACTION):
             # Lifecycle actions are the Monitor's to call. Skip from component actions
             lifecycle = (
@@ -769,7 +770,7 @@ class Cortex(ModelComponent, Monitor):
                 return None
             function = entry.schema.get("function", entry.schema)
             return (
-                f"{entry.owner}.{entry.name}",
+                f"{entry.owner}-{entry.name}",
                 function,
                 entry.schema.get("phase", "execution"),
             )
@@ -837,7 +838,7 @@ class Cortex(ModelComponent, Monitor):
             result += self._topic_fields(comp)
 
         # Append Cortex-registered execution tools for this component
-        prefix = f"{component_name}."
+        prefix = f"{component_name}-"
         comp_tools = [name for name in self._execution_tools if name.startswith(prefix)]
         if comp_tools:
             lines = ["Actions (available as tools):"]
@@ -959,7 +960,7 @@ class Cortex(ModelComponent, Monitor):
                 return (
                     f"Error: '{component_name}' rejected the goal because it is "
                     "busy with another one. Stop that one first with the "
-                    f"'{component_name}.cancel_main_goal' tool."
+                    f"'{component_name}-cancel_main_goal' tool."
                 )
             return (
                 f"Error: Failed to construct or send action goal to "
@@ -1230,7 +1231,7 @@ class Cortex(ModelComponent, Monitor):
         :raises ValueError: If no plugin offers it
         """
         name = str(plugin_condition.get("name", ""))
-        ref = name.replace(".", "/", 1)
+        ref = name.replace("-", "/", 1)
         try:
             self._action_registry.get_event(ref)
         except (KeyError, ValueError) as e:
@@ -1302,7 +1303,7 @@ class Cortex(ModelComponent, Monitor):
         if action_names:
             action_hint = (
                 f"The robot actions above are available to you as execution "
-                f"tools (named '{ns}.<action>', e.g. '{ns}.{action_names[0]}'); "
+                f"tools (named '{ns}-<action>', e.g. '{ns}-{action_names[0]}'); "
                 "use them when a task calls for a physical behaviour."
             )
         else:
@@ -1356,7 +1357,7 @@ class Cortex(ModelComponent, Monitor):
             if feedback_keys := [f["key"] for f in desc.get("feedbacks", [])]:
                 entry += f"\n    Feedback: {', '.join(feedback_keys)}"
             if action_names := [a["name"] for a in desc.get("actions", [])]:
-                tools = ", ".join(f"{ns}.{a}" for a in action_names)
+                tools = ", ".join(f"{ns}-{a}" for a in action_names)
                 entry += f"\n    Tools: {tools}"
             entries.append(entry)
 
@@ -1393,7 +1394,7 @@ class Cortex(ModelComponent, Monitor):
         if memory_comp is None:
             return
 
-        prefix = f"{memory_comp.node_name}."
+        prefix = f"{memory_comp.node_name}-"
         start_ep_tool = f"{prefix}start_episode"
         end_ep_tool = f"{prefix}end_episode"
         body_status_tool = f"{prefix}body_status"
@@ -1474,7 +1475,7 @@ class Cortex(ModelComponent, Monitor):
             "with a clear text explanation instead of proceeding.\n"
             "  2. Optionally call perception retrieval tools during "
             f"planning to ground the task in past memory (e.g. use "
-            f"'{memory_comp.node_name}.locate' to find a known object's "
+            f"'{memory_comp.node_name}-locate' to find a known object's "
             "position).\n"
             f"  3. Begin your execution plan with '{start_ep_tool}' using a "
             "short, descriptive episode name derived from the task.\n"
@@ -2483,7 +2484,7 @@ class Cortex(ModelComponent, Monitor):
             cursor = cursors.get(name)
             if cursor is None:
                 self._active_routines.discard(name)
-                lines += f"- routine.{name}: GONE | The routine was removed\n"
+                lines += f"- routine-{name}: GONE | The routine was removed\n"
                 continue
             status = RoutineStatus(cursor["status"])
             if status.is_terminal():
@@ -2493,10 +2494,10 @@ class Cortex(ModelComponent, Monitor):
                     if status == RoutineStatus.ABORTED
                     else cursor["step_message"]
                 )
-                lines += f"- routine.{name}: {status.upper()} | {detail}\n"
+                lines += f"- routine-{name}: {status.upper()} | {detail}\n"
                 continue
             lines += (
-                f"- routine.{name}: {status} at step '{cursor['active_step']}' "
+                f"- routine-{name}: {status} at step '{cursor['active_step']}' "
                 f"(running for {cursor['elapsed']}s)"
             )
             if cursor["step_message"]:
