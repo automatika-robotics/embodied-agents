@@ -263,7 +263,7 @@ class LLM(ModelComponent):
         """Add documents to vector DB for Retrieval Augmented Generation (RAG).
 
         ```{important}
-        Documents can be provided after parsing them using a document parser. Checkout various document parsers, available in packages like [langchain_community](https://github.com/langchain-ai/langchain/tree/master/libs/community/langchain_community/document_loaders/parsers)
+        Documents can be provided after parsing them using a document parser. Checkout various document parsers, available in packages like [langchain_community](https://github.com/langchain-ai/langchain-community/tree/main/libs/community/langchain_community/document_loaders/parsers)
         ```
 
         :param ids: List of unique string ids for each document

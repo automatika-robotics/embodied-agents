@@ -902,7 +902,7 @@ class Topic(BaseTopic):
 
     :param name: Name of the topic
     :type name: str
-    :param msg_type: One of the SupportedTypes. This parameter can be set by passing the SupportedType data-type name as a string. See a list of supported types [here](https://automatika-robotics.github.io/sugarcoat/advanced/types.html)
+    :param msg_type: One of the SupportedTypes. This parameter can be set by passing the SupportedType data-type name as a string. See a list of supported types [here](https://sugarcoat.automatikarobotics.com/apidocs/ros_sugar/ros_sugar.io.supported_types.html)
     :type msg_type: Union[type[supported_types.SupportedType], str]
     :param qos_profile: QoS profile for the topic
     :type qos_profile: QoSConfig

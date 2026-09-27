@@ -166,7 +166,7 @@ class GenericTTS(Model):
     :param name: An arbitrary name given to the model.
     :type name: str
     :param checkpoint: The model identifier (e.g., "tts-1", "tts-1-hd").
-                       For details: https://platform.openai.com/docs/models/tts
+                       For details: https://developers.openai.com/api/docs/models/tts-1
     :type checkpoint: str
     :param voice: The voice ID to use. OpenAI standard voices: 'alloy', 'echo', 'fable',
                   'onyx', 'nova', 'shimmer'. Other providers may have different IDs.
@@ -209,7 +209,7 @@ class GenericSTT(Model):
     :param name: An arbitrary name given to the model.
     :type name: str
     :param checkpoint: The model identifier (e.g., "whisper-1").
-                       For details: https://platform.openai.com/docs/models/whisper
+                       For details: https://developers.openai.com/api/docs/models/whisper-1
     :type checkpoint: str
     :param language: The language of the input audio (ISO-639-1 format, e.g., 'en', 'fr').
                      Improves accuracy if known. Default is None (auto-detect).
