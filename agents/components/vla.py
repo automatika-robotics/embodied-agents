@@ -16,6 +16,7 @@ import time
 from ..ros import (
     Event,
     Action,
+    ActionReturnType,
     RGBD,
     Image,
     Topic,
@@ -302,11 +303,12 @@ class VLA(ModelComponent):
             self.config._termination_timesteps = max_timesteps
             self._add_event_action_pair(stop_event, Action(self.signal_done))
 
-    def signal_done(self):
+    def signal_done(self) -> ActionReturnType:
         """Signals that the action is complete.
         Can be used as an action for signaled events"""
         self._task_completed = True
         self.get_logger().info("Action completion signaled")
+        return True, "Action completion signaled"
 
     def _on_key_press(self, key):
         """Callback for keyboard listener."""

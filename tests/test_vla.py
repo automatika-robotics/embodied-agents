@@ -476,6 +476,32 @@ class TestVLAComponent:
         assert "observation.state" in features
         assert "observation.images.front" in features
 
+    def test_signal_done_follows_the_action_contract(self, rclpy_init, vla_topics):
+        """signal_done ends a goal as the action of a termination event, so it
+        must return (success, message): sugarcoat treats anything else as a
+        failed action"""
+        from ros_sugar.utils import parse_action_result
+
+        model = LeRobotPolicy(name="policy")
+        comp = VLA(
+            inputs=[vla_topics["state"], vla_topics["camera"]],
+            outputs=[vla_topics["out"]],
+            model_client=_mock_lerobot_client(model),
+            config=VLAConfig(
+                joint_names_map={"shoulder_pan.pos": "joint1"},
+                camera_inputs_map={"front": vla_topics["camera"]},
+            ),
+            component_name="test_vla_signal_done",
+        )
+        # A node that was never started has no logger to write to
+        comp.get_logger = MagicMock()
+
+        success, message = parse_action_result(comp.signal_done(), "signal_done")
+
+        assert success is True
+        assert message
+        assert comp._task_completed
+
     def test_dataset_verification_and_camera_prefix_strip(
         self, rclpy_init, vla_topics, dataset_info_file
     ):
