@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from agents.components.component_base import Component
-from agents.ros import Image, String, Topic
+from agents.ros import Action, Event, Image, String, Topic
 
 
 class _Probe(Component):
@@ -130,3 +130,34 @@ class TestTriggerPartitionTiming:
         # and the same answer once the partition exists
         probe.init_variables()
         assert "not found" in probe._replace_input_topic("nope", "elsewhere", "String")
+
+
+class TestAnEventTrigger:
+    """With an event as its trigger, the execution step runs as the event's
+    action, and an action must follow the (success, message) contract"""
+
+    def test_the_step_runs_without_breaking_the_contract(self, probe, monkeypatch):
+        import ros_sugar.core.event
+        import ros_sugar.utils
+
+        probe._execution_step = MagicMock()
+        event = Event(Topic(name="trig_in", msg_type="String"))
+        # What custom_on_configure registers for an event trigger
+        event.register_actions(Action(probe._run_triggered_step))
+        errors = []
+        monkeypatch.setattr(ros_sugar.utils.logger, "error", errors.append)
+        monkeypatch.setattr(ros_sugar.core.event.logger, "error", errors.append)
+
+        # What the event runs each time it fires
+        event._async_action_wrapper({})
+
+        probe._execution_step.assert_called_once()
+        assert errors == []
+
+    def test_a_step_that_raises_is_a_failure(self, probe):
+        probe._execution_step = MagicMock(side_effect=RuntimeError("no model"))
+
+        success, message = Action(probe._run_triggered_step)()
+
+        assert success is False
+        assert "no model" in message

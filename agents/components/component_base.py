@@ -12,6 +12,7 @@ from ..ros import (
     BaseTopic,
     Event,
     Action,
+    ActionReturnType,
 )
 from ..config import BaseComponentConfig
 from ..utils import flatten
@@ -75,7 +76,15 @@ class Component(BaseComponent):
         """Custom configurateion in case trigger is an event"""
         if isinstance(self.trig_source, Event):
             self.get_logger().info("ADDING TRIGGER EVENT/ACTION PAIR")
-            self._add_event_action_pair(self.trig_source, Action(self._execution_step))
+            self._add_event_action_pair(
+                self.trig_source, Action(self._run_event_triggered_step)
+            )
+
+    def _run_event_triggered_step(self, *args, **kwargs) -> ActionReturnType:
+        """Run the execution step as the action of an event trigger."""
+
+        self._execution_step(*args, **kwargs)
+        return True, f"{self.node_name} execution step ran"
 
     def custom_on_activate(self):
         """
