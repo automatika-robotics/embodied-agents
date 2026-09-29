@@ -151,7 +151,7 @@ class TestKompassCoreGuard:
         own; running against it would misplace boxes silently."""
         monkeypatch.setattr("agents.utils.perception3d.find_spec", lambda name: object())
         monkeypatch.setattr("importlib.metadata.version", lambda name: "0.8.3")
-        with pytest.raises(ImportError, match="0.8.4.*found 0.8.3"):
+        with pytest.raises(ImportError, match="0.8.5.*found 0.8.3"):
             ensure_kompass_core()
 
 

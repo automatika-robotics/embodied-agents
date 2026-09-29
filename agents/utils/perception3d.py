@@ -22,7 +22,7 @@ from attrs import define, field
 _KOMPASS_MIN_VERSION = (0, 8, 5)
 _KOMPASS_INSTALL_HINT = (
     "'kompass-core' >= 0.8.5 is required to lift 2D detections into 3D. "
-    "Install it with: pip install 'kompass-core>=0.8.4'"
+    "Install it with: pip install 'kompass-core>=0.8.5'"
 )
 
 # Depth encodings carrying integer millimeters rather than float meters
