@@ -167,6 +167,45 @@ class TestLLMExecutionStep:
         llm._execution_step(topic=trigger)
         mock_tool.assert_called_once()
 
+    def test_with_tool_calls_across_processes(
+        self, llm, mock_model_client, launcher_processors
+    ):
+        """A tool registered in the recipe lives in the launcher process in a
+        multiprocess launch, and is called from the component's own process"""
+        calls = []
+
+        def add_numbers(a: int, b: int) -> str:
+            calls.append((a, b))
+            return f"sum is {a + b}"
+
+        llm.register_tool(
+            tool=add_numbers,
+            tool_description={"function": {"name": "add_numbers"}},
+        )
+        # as in the component's process, which gets the serialized processors
+        llm._external_processors_json = launcher_processors(llm)
+
+        mock_model_client.inference.return_value = {
+            "output": "calling tool",
+            "tool_calls": [
+                {
+                    "function": {
+                        "name": "add_numbers",
+                        "arguments": {"a": 2, "b": "3"},
+                    }
+                }
+            ],
+        }
+        mock_cb = MagicMock()
+        mock_cb.get_output.return_value = "add 2 and 3"
+        llm.trig_callbacks = {"in": mock_cb}
+        llm.callbacks = {}
+
+        llm._execution_step(topic=Topic(name="in", msg_type="String"))
+
+        assert calls == [(2, 3)]
+        assert {"role": "tool", "content": "sum is 5"} in llm.messages
+
 
 class TestLLMThinkTokens:
     THINKING = "<think>\nreasoning here\n</think>\n\nParis."

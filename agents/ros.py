@@ -38,6 +38,7 @@ from ros_sugar.io.topic import QoSConfig, Topic as BaseTopic
 from ros_sugar.config import (
     BaseComponentConfig,
     ComponentRunType,
+    ExternalProcessorType,
     BaseAttrs,
     base_validators,
 )
@@ -147,6 +148,7 @@ __all__ = [
     "BaseComponent",
     "BaseComponentConfig",
     "ComponentRunType",
+    "ExternalProcessorType",
     "Launcher",
     "Monitor",
     "MemLayer",

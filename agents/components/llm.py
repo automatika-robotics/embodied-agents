@@ -2,8 +2,6 @@ import json
 from pathlib import Path
 from typing import Any, Optional, Union, Callable, List, Dict, MutableMapping
 from functools import partial
-import msgpack
-import msgpack_numpy as m_pack
 
 from ..callbacks import TextCallback
 from ..clients.db_base import DBClient
@@ -22,6 +20,8 @@ from ..ros import (
     BaseComponent,
     ServiceClientHandler,
     ExecuteMethod,
+    ExternalProcessorType,
+    run_external_processor,
 )
 from ..utils import (
     get_prompt_template,
@@ -30,9 +30,6 @@ from ..utils import (
 )
 from .model_component import ModelComponent
 from .component_base import ComponentRunType
-
-# patch msgpack for numpy arrays
-m_pack.patch()
 
 
 class LLM(ModelComponent):
@@ -220,7 +217,7 @@ class LLM(ModelComponent):
             # Add the tool
             self._external_processors[method_name] = (
                 [partial(self._execute_component_method, comp_name, method_name)],
-                "tool",
+                ExternalProcessorType.FUNCTION,
             )
             # Create a service client only if it doesnt exist for a node
             if not self._component_clients.get(comp_name):
@@ -382,7 +379,8 @@ class LLM(ModelComponent):
 
         # make tool calls
         for tool in result["tool_calls"]:
-            function_to_call = self._external_processors[tool["function"]["name"]][0][0]
+            tool_name = tool["function"]["name"]
+            function_to_call = self._external_processors[tool_name][0][0]
 
             try:
                 # HACK: Read function argument as serialized datatypes
@@ -394,17 +392,13 @@ class LLM(ModelComponent):
                     except json.JSONDecodeError:
                         pass  # Keep it as a normal string if it's not valid JSON
                     arg_json[key] = arg
-                if isinstance(function_to_call, Callable):
-                    function_response = function_to_call(**arg_json)
-                else:
-                    payload = msgpack.packb(arg_json)
-                    if not payload:
-                        raise Exception(
-                            f"Could not serialize the following function arguments for tool calling: {arg_json}"
-                        )
-                    function_to_call.sendall(payload)
-                    result_b = function_to_call.recv(1024)
-                    function_response = msgpack.unpackb(result_b)
+                function_response = run_external_processor(
+                    self.node_name,
+                    tool_name,
+                    function_to_call,
+                    arg_json,
+                    processor_type=ExternalProcessorType.FUNCTION,
+                )
             except Exception as e:
                 self.get_logger().error(f"Exception in tool calling. {e}")
                 return result
@@ -416,9 +410,7 @@ class LLM(ModelComponent):
             self.messages.append({"role": "tool", "content": function_response})
 
             # check for response flags
-            response_flags.append(
-                self.config._tool_response_flags[tool["function"]["name"]]
-            )
+            response_flags.append(self.config._tool_response_flags[tool_name])
 
         # make call to model again if any tool requires response to be sent back
         if any(response_flags):
@@ -795,7 +787,7 @@ class LLM(ModelComponent):
         else:
             self._external_processors[tool_description["function"]["name"]] = (
                 [tool],
-                "tool",
+                ExternalProcessorType.FUNCTION,
             )
         self.config._tool_descriptions.append(tool_description)
         self.config._tool_response_flags[tool_description["function"]["name"]] = (

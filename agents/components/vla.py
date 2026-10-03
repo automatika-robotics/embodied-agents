@@ -1,6 +1,5 @@
 from typing import Optional, List, Dict, Callable, Literal
 import inspect
-from functools import partial, wraps
 import queue
 import threading
 import numpy as np
@@ -26,6 +25,7 @@ from ..ros import (
     ComponentRunType,
     MutuallyExclusiveCallbackGroup,
     VisionLanguageAction,
+    ExternalProcessorType,
     run_external_processor,
 )
 from ..callbacks import RGBDCallback
@@ -230,17 +230,6 @@ class VLA(ModelComponent):
         # Resolve the aggregation preset from config
         self._aggregator_function = AGGREGATE_FUNCTIONS[self.config.aggregate_fn_name]
 
-        # Assign external aggregator function in case its provided
-        # (takes precedence over the config preset)
-        if agg_fun := self._external_processors.get("aggregator_function", None):
-            # Get the first element of the tuple and the only function in that list
-            self._aggregator_function = partial(
-                run_external_processor,
-                logger_name=self.node_name,
-                topic_name="aggregator_function",
-                processor=agg_fun[0][0],
-            )
-
     def custom_on_deactivate(self):
         """Custom deactivation"""
 
@@ -443,6 +432,55 @@ class VLA(ModelComponent):
         if latest_actions:
             self._update_actions_queue(latest_actions)
 
+    def _aggregate(self, existing: np.ndarray, new: np.ndarray) -> np.ndarray:
+        """Aggregate two actions generated for the same timestep. Uses the custom
+        aggregation function if set, falling back to the latest action if it fails
+        or returns an invalid output.
+
+        :param existing: Action already in the queue
+        :type existing: np.ndarray
+        :param new: Newly received action for the same timestep
+        :type new: np.ndarray
+        :return: Aggregated action
+        :rtype: np.ndarray
+        """
+        # The custom aggregation function takes precedence over the config preset
+        agg_fun = self._external_processors.get("aggregator_function")
+        if not agg_fun:
+            return self._aggregator_function(existing, new)
+
+        try:
+            out = run_external_processor(
+                self.node_name,
+                "aggregator_function",
+                agg_fun[0][0],
+                {"x": existing, "y": new},
+                processor_type=ExternalProcessorType.FUNCTION,
+            )
+        except Exception as e:
+            self.log_once(
+                "aggregator_error",
+                f"Custom aggregation function failed: {e}. Using the latest action instead.",
+                level="error",
+            )
+            return new
+
+        if type(out) is not np.ndarray or out.shape != new.shape:
+            self.log_once(
+                "aggregator_output",
+                f"Custom aggregation function returned an invalid output, expected a numpy array of shape {new.shape}. Using the latest action instead.",
+                level="error",
+            )
+            return new
+        if self._dataset_action_dtype and out.dtype != self._dataset_action_dtype:
+            self.log_once(
+                "aggregator_dtype",
+                f"Custom aggregation function returned an array of dtype {out.dtype}, expected {self._dataset_action_dtype}. Using the latest action instead.",
+                level="error",
+            )
+            return new
+        return out
+
     def _update_actions_queue(
         self,
         new_actions: List,
@@ -477,9 +515,7 @@ class VLA(ModelComponent):
                     existing_act = action_map[ts]
 
                     # Perform the aggregation on the array
-                    merged_array = self._aggregator_function(
-                        existing_act.action, new_act.action
-                    )
+                    merged_array = self._aggregate(existing_act.action, new_act.action)
 
                     # Update the existing action object
                     existing_act.action = merged_array
@@ -686,34 +722,16 @@ class VLA(ModelComponent):
                 "Aggregation function must have exactly two parameters, both expected to be numpy arrays."
             )
 
-        # Closure for using external functions
-        def agg_closure(func: Callable[[np.ndarray, np.ndarray], np.ndarray]):
-            """Wrapper for aggregator function"""
+        # Wrap the function to be called with keyword arguments.
+        def _wrapper(x: np.ndarray, y: np.ndarray) -> np.ndarray:
+            return agg_fn(x, y)
 
-            @wraps(func)
-            def _wrapper(*, x: np.ndarray, y: np.ndarray):
-                """_wrapper"""
-                out = func(x, y)
-                # Check if we have action dtype
-                # type check agg fn output, if incorrect, raise an error
-                if type(out) is not np.ndarray:
-                    raise TypeError(
-                        "Only numpy arrays are acceptable as outputs of aggregator functions."
-                    )
-                elif (
-                    self._dataset_action_dtype
-                    and out.dtype != self._dataset_action_dtype
-                ):
-                    raise TypeError(
-                        f"Only numpy arrays of dtype {self._dataset_action_dtype} are acceptable as outputs of aggregator functions."
-                    )
-
-            _wrapper.__name__ = func.__name__
-            return _wrapper
+        # The function name is used to name the socket in a multiprocess launch
+        _wrapper.__name__ = agg_fn.__name__
 
         self._external_processors["aggregator_function"] = (
-            [agg_closure(agg_fn)],
-            "aggregator_function",
+            [_wrapper],
+            ExternalProcessorType.FUNCTION,
         )
 
     def main_action_callback(self, goal_handle: VisionLanguageAction.Goal):
