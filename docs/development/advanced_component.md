@@ -208,7 +208,7 @@ If you don't configure any fallbacks, the component uses `broadcast_status()` as
 
 ## Model-Specific Fallbacks
 
-`ModelComponent` provides two additional fallback methods designed for AI workloads. Both are decorated with `@component_fallback`, which validates that the component is in a valid lifecycle state before executing.
+`ModelComponent` provides two additional fallback methods designed for AI workloads. Both are decorated with `@component_fallback`, which validates that the component is in a valid lifecycle state before executing, and both follow the [action contract](./component_actions.md#the-action-contract): they return `(success, message)`, and report a failure by returning `False` with its reason instead of raising.
 
 ### Falling Back to a Local Model
 
@@ -233,9 +233,9 @@ llm.on_algorithm_fail(action=switch_to_local, max_retries=3)
 When `fallback_to_local()` executes, it:
 
 1. Enables the local model flag in the config (if not already set).
-2. Deploys the local model via `_deploy_local_model()`.
+2. Deploys the local model via `_deploy_local_model()`. If deployment fails, it returns `(False, reason)` and the remote client is left in place.
 3. Deinitializes the remote model client.
-4. Returns `True` on success (which resets health to healthy).
+4. Returns `(True, message)`, which resets health to healthy.
 
 This requires a local model backend to be implemented for the component. Built-in components with local support: `LLM` (llama-cpp), `MLLM` (Moondream2), `SpeechToText` (sherpa-onnx Whisper), `TextToSpeech` (sherpa-onnx Kokoro), `Vision` (DEIM ONNX).
 
@@ -276,10 +276,12 @@ llm.on_algorithm_fail(action=switch_to_backup, max_retries=3)
 
 When `change_model_client()` executes, it:
 
-1. Looks up the named client in `additional_model_clients`.
+1. Looks up the named client in `additional_model_clients`. With no additional clients registered, or no client under that name, it returns `(False, reason)`.
 2. Deinitializes the current model client.
-3. Sets the new client as active and initializes it.
-4. Returns `True` on success.
+3. Sets the new client as active and initializes it. If initialization fails, it returns `(False, reason)`.
+4. Returns `(True, message)`, which resets health to healthy.
+
+A failed fallback is logged with its reason, and the fallback runner moves on to the next retry or the next action in the list.
 
 ### Combining Fallback Strategies
 
@@ -313,18 +315,23 @@ Events allow components to react to data-driven conditions. An `Event` pairs a t
 ### Defining Events
 
 ```python
-from agents.ros import Event, Action, Topic
+from agents.ros import Event, Topic
 
 # Topic-based: triggers whenever a message arrives
 emergency_topic = Topic(name="/emergency", msg_type="Bool")
 event = Event(event_condition=emergency_topic)
 
-# Action-based: polls a method at a given rate
+# Callable-based: polls a predicate at a given rate
+def battery_low() -> bool:
+    return read_battery_level() < 0.2
+
 event = Event(
-    event_condition=Action(my_component.check_battery),
+    event_condition=battery_low,
     check_rate=1.0,  # Poll at 1 Hz
 )
 ```
+
+A polled condition is a plain callable returning `bool`, and its return value is read directly as the trigger. A `@component_action` method cannot be a condition, since it is bound to its component's lifecycle.
 
 ### Event Options
 
@@ -333,7 +340,7 @@ event = Event(
 | `on_change` | `False` | Only trigger when the value changes (not on every message) |
 | `handle_once` | `False` | Only trigger once during the component's lifetime |
 | `keep_event_delay` | `0.0` | Minimum delay (seconds) between consecutive triggers |
-| `check_rate` | `None` | Poll rate (Hz) for action-based events |
+| `check_rate` | `None` | Poll rate (Hz) for callable-based events. Without it the component's loop rate is used |
 
 ### Using Events as Component Triggers
 
@@ -362,7 +369,7 @@ vlm = MLLM(
 
 ### Wiring Events to Actions at Launch
 
-Events and actions are connected at the Launcher level, not inside individual components. This keeps components decoupled:
+Events and actions are connected at the Launcher level, not inside individual components. This keeps components decoupled. Any method you wrap in an `Action` follows the [action contract](./component_actions.md#the-action-contract): a return value other than a `(success, message)` pair is logged as a contract violation and counted as a failed action.
 
 ```python
 from agents.ros import Launcher, Event, Action, Topic

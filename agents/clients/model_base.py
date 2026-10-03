@@ -4,7 +4,7 @@ from typing import Any, Optional, Dict, Union, Generator, MutableMapping
 from rclpy import logging
 
 from ..models import Model
-from ..utils import validate_func_args, build_url
+from ..utils import validate_func_args, build_url, plain_text_warning
 
 
 class ModelClient(ABC):
@@ -19,6 +19,7 @@ class ModelClient(ABC):
         inference_timeout: int = 30,
         init_on_activation: bool = True,
         logging_level: str = "info",
+        ca_cert: Optional[str] = None,
         **_,
     ):
         """__init__.
@@ -35,6 +36,10 @@ class ModelClient(ABC):
         :type inference_timeout: int
         :param logging_level:
         :type logging_level: str
+        :param ca_cert: Path to a PEM file holding the certificate to trust
+            for a server that serves its own, instead of the system store.
+            Used by clients connecting over TLS.
+        :type ca_cert: Optional[str]
         """
         if isinstance(model, Model):
             self._model = model
@@ -51,6 +56,7 @@ class ModelClient(ABC):
 
         self.host = host
         self.port = port
+        self.ca_cert = ca_cert
         self.init_on_activation = init_on_activation
         self.logger = logging.get_logger(self.model_name)
         logging.set_logger_level(
@@ -86,6 +92,7 @@ class ModelClient(ABC):
             "init_on_activation": self.init_on_activation,
             "logging_level": self.logger.get_effective_level().name,
             "inference_timeout": self.inference_timeout,
+            "ca_cert": self.ca_cert,
         }
 
     @property
@@ -108,6 +115,9 @@ class ModelClient(ABC):
         """initialize.
         :rtype: None
         """
+        # Warn for non encrypted
+        if warning := plain_text_warning(self.host):
+            self.logger.warning(warning)
         if self.init_on_activation:
             self._initialize()
 

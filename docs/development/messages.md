@@ -12,6 +12,8 @@ The following custom messages are defined in the `automatika_embodied_agents` pa
 | `Bbox2D` | `Bbox2D.msg` | A 2D bounding box with `top_left_x`, `top_left_y`, `bottom_right_x`, `bottom_right_y`. |
 | `Detections2D` | `Detections2D.msg` | Object detection results: arrays of `scores`, `labels`, `boxes` (Bbox2D[]), plus optional `image` and `depth`. |
 | `Detections2DMultiSource` | `Detections2DMultiSource.msg` | An array of `Detections2D` for multi-camera setups. |
+| `Bbox3D` | `Bbox3D.msg` | A 3D bounding box: `center` (Pose) and `size` (Vector3, full extents in meters). Assignable to `vision_msgs/BoundingBox3D` and usable as a MoveIt BOX primitive. |
+| `Detections3D` | `Detections3D.msg` | Detected objects in metric space: `scores`, `labels`, `boxes` (Bbox3D[]) in `header.frame_id`, plus `depth_validity` per box and the `boxes_2d`/`source_frame` they were lifted from. |
 | `Trackings` | `Trackings.msg` | Tracked object data: `ids`, `labels`, `boxes`, `centroids`, `estimated_velocities`, plus source image. |
 | `TrackingsMultiSource` | `TrackingsMultiSource.msg` | An array of `Trackings` for multi-camera tracking. |
 | `StreamingString` | `StreamingString.msg` | A string with `stream` (bool) and `done` (bool) flags for token-by-token LLM output. |
@@ -23,6 +25,7 @@ The following custom messages are defined in the `automatika_embodied_agents` pa
 | Action | File | Description |
 |---|---|---|
 | `VisionLanguageAction` | `VisionLanguageAction.action` | ROS2 action for VLA inference. Defines goal, feedback, and result for vision-language-action loops. |
+| `MoveManipulator` | `MoveManipulator.action` | ROS2 action served by the MoveIt component. The goal carries a motion `mode` (pose, joints, named, cartesian, pick, place) with its target fields; feedback reports the current step; the result carries success, a message and the MoveIt error code. |
 
 ## The `SupportedType` System
 

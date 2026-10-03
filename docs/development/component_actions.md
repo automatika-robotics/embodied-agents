@@ -9,7 +9,7 @@ Read [Creating a Custom Component](./custom_component.md) and [Advanced Componen
 Decorate a method with `@component_action` and provide an OpenAI-style tool description:
 
 ```python
-from agents.ros import component_action
+from agents.ros import ActionReturnType, component_action
 
 class MyVisionComponent(ModelComponent):
 
@@ -32,25 +32,54 @@ class MyVisionComponent(ModelComponent):
             },
         }
     )
-    def take_picture(self, topic_name: str, save_path: str = "~/pictures") -> bool:
+    def take_picture(
+        self, topic_name: str, save_path: str = "~/pictures"
+    ) -> ActionReturnType:
         """Capture and save a single frame."""
-        # ... implementation ...
-        return True
+        frame = ...  # grab a frame from the topic's callback
+        if frame is None:
+            return False, f"No image received on '{topic_name}'"
+        path = ...  # save the frame under save_path
+        return True, f"Picture from '{topic_name}' saved to {path}"
 ```
 
 ### Key Points
 
 - The `description` dict follows the [OpenAI function calling](https://platform.openai.com/docs/guides/function-calling) schema. This is what the Cortex planner sees when deciding which tools to call.
 - The method name in your Python code must match the `"name"` inside the description.
-- Return `bool` for success/failure actions, or `str` to return a text result (e.g. a description of what the component sees).
-- Actions are executed via ROS services (`ExecuteMethod`), so they run on the component's own process and can access its internal state.
+- With `active=True`, a call made while the component is not active returns a failure without running the method.
+
+## The Action Contract
+
+Every action returns a `(success, message)` pair and is annotated with `ActionReturnType`, an alias of `Tuple[bool, str]` (that spelling is accepted too). The annotation is checked when the class is defined: a method decorated with `@component_action` or `@component_fallback` without it raises `TypeError` at import, so a component that breaks the contract fails before it is ever launched.
+
+- `success` tells the caller whether the action did what it was asked.
+- `message` carries the result on success: a confirmation, a text answer, or JSON when the result is structured (`MLLM.run_task` returns its summary this way). On failure it carries the reason.
+- Report a failure you can explain by returning `False` with the reason rather than raising. An exception is still caught and reported as a failure, but its text is all the caller gets.
+- At runtime, a return value that is not a `(bool, str)` pair is logged as a contract violation and treated as a failure.
+
+The same contract applies wherever sugarcoat runs a method as an action: through the `ExecuteMethod` service, as a fallback, or as an `Action` wired to an event.
+
+### What the Caller Receives
+
+Actions are executed through the component's `ExecuteMethod` service, so they run in the component's own process and can access its internal state. On success the message is JSON-encoded into the response's `response_json`; on failure it is placed in `error_msg`.
+
+Cortex reaches actions through the Monitor, which reads that response back into the `(success, message)` pair. The `LLM` component calls the service directly and decodes the response itself. Either way, the tool result the model sees is:
+
+| Response | Tool result |
+|---|---|
+| success, non-empty message | the message itself |
+| success, empty message | `<tool_name> executed successfully` |
+| failure | `Error: <tool_name> failed with error: <reason>` |
+
+Write messages for that reader: a failure reason should say what went wrong in terms the planner can act on.
 
 ## Defining a Component Fallback
 
-Use `@component_fallback` for methods intended as recovery actions (model switching, local fallback). These are also discoverable as tools but are specifically validated when used with `on_component_fail()` or `on_algorithm_fail()`:
+Use `@component_fallback` for methods intended as recovery actions (model switching, local fallback). They follow the same contract and are also discoverable as tools. Only a component's own fallback methods are accepted by `on_component_fail()` or `on_algorithm_fail()`. Unlike an action, a fallback also runs while the component is inactive or still activating, since recovery happens before the component is healthy again:
 
 ```python
-from agents.ros import component_fallback
+from agents.ros import ActionReturnType, component_fallback
 
 class MyComponent(ModelComponent):
 
@@ -64,20 +93,86 @@ class MyComponent(ModelComponent):
             },
         }
     )
-    def switch_to_backup(self) -> bool:
-        # ... implementation ...
-        return True
+    def switch_to_backup(self) -> ActionReturnType:
+        if self.backup_client is None:
+            return False, "No backup model client is configured"
+        # ... swap the clients ...
+        return True, "Switched to the backup model client"
 ```
+
+A `True` success resets the component's health status. A failure is logged with its reason, and the next retry or the next fallback in the list takes over.
 
 See [Model-Specific Fallbacks](./advanced_component.md#model-specific-fallbacks) for the built-in `fallback_to_local()` and `change_model_client()` methods.
 
 ## How Actions Are Discovered
 
-When the Cortex component activates, it scans all managed components for methods decorated with `@component_action` or `@component_fallback`. Each discovered method is registered as an execution tool with the tool description from the decorator.
+Cortex does not scan components itself. The `Launcher` builds a `SystemActionRegistry`, sugarcoat's catalogue of everything the stack can be asked to do by name, from every component in the recipe, whatever process it runs in, and hands it to Cortex. When Cortex activates, it walks that registry and turns its entries into tools:
 
-Tool names are namespaced as `{component_name}.{method_name}` (e.g. `vision.take_picture`, `tts.say`).
+- A method decorated with `@component_action` or `@component_fallback` becomes a tool when its decorator carries a description. The description is used whole, so what the planner sees is exactly what the component author wrote. A method without a description is not offered.
+- An action server becomes a `send_goal_to_<server_name>` tool and a service a `send_request_to_<service_name>` tool, see [Action Servers as Tools](#action-servers-as-tools).
+- An action a robot or sensor plugin contributes becomes a `<plugin id>-<action>` tool, with the tool description the plugin's own registry gives it. It is built by the plugin's factory from the call's arguments and runs in Cortex's process, where the plugin lives.
 
-Lifecycle methods (`start`, `stop`, `restart`, `reconfigure`, `set_param`, `set_params`, `broadcast_status`) are filtered out — they are managed by the Monitor, not by the planner.
+Tool names for methods are namespaced as `{component_name}-{method_name}` (e.g. `vision-take_picture`, `tts-say`). Cortex keeps the registry reference behind every tool, `{component_name}/{name}`, and dispatches a call by what the entry is: a method runs through the Monitor's own resolver over the component's `ExecuteMethod` service, a goal goes to the action server, a request to the service.
+
+Lifecycle methods (`start`, `stop`, `restart`, `reconfigure`, `set_param`, `set_params`, `broadcast_status`) are filtered out — they are managed by the Monitor, not by the planner. Cortex's own actions and the Monitor's methods are left out as well.
+
+### Planning and Execution Phases
+
+Cortex keeps two tool sets: the planner's, used while it builds a plan, and the executor's, used while it carries the plan out. The `phase` argument of `agents.ros.component_action` decides where an action is registered. The wrapper writes the phase into the description dict the decorator stores, beside `type` and `function`, which is how it reaches Cortex through the registry. Sugarcoat's own decorator has no such argument, and fallbacks are always execution tools.
+
+| `phase` | Registered with | Use for |
+|---|---|---|
+| `ActionPhase.EXECUTION` (default) | executor | actions that change state (`say`, `start_episode`) |
+| `ActionPhase.PLANNING` | planner | introspection the executor has no reason to call |
+| `ActionPhase.BOTH` | both | retrieval the planner benefits from before planning and the executor may need at run time (`describe`, `locate`) |
+
+```python
+from agents.ros import ActionPhase, ActionReturnType, component_action
+
+@component_action(description={...}, phase=ActionPhase.BOTH)
+def locate(self, **kwargs) -> ActionReturnType: ...
+```
+
+## Action Servers as Tools
+
+Cortex also exposes action servers as execution tools, named `send_goal_to_<component>_<server>` from the registry reference: the component's node name, then the server's name with that node name prefix removed and slashes replaced by underscores. A server `vla/run` on component `vla` gives `send_goal_to_vla_run`. The goal message's fields become the tool parameters. The registry lists two kinds of server:
+
+- the main action server of every managed component running as `ComponentRunType.ACTION_SERVER` (e.g. `VLA`, `MoveIt`)
+- any additional action servers a component reports through `get_ros_entrypoints()`.
+
+Services become `send_request_to_<component>_<service>` tools the same way, both the main service of a component running as `ComponentRunType.SERVER` and the additional ones reported through `get_ros_entrypoints()`. Because the name carries the component, two components whose servers share a bare name get two tools.
+
+Every goal tool takes a `wait_to_finish` flag, true by default: the step ends when the server returns, and the server's outcome is the step's result. With `wait_to_finish=false` the goal is dispatched asynchronously: the tool returns once the server accepts the goal, Cortex keeps reporting its status, latest feedback and result to the model while the plan continues, and the goal is cancelled when the task ends. Concurrency is therefore the planner's explicit choice.
+
+### One Goal at a Time
+
+A component's main action server runs one goal at a time. While a goal is ongoing, a new goal request is rejected: the running goal has to finish or be canceled first, through the action's own cancel request, the inherited `cancel_main_goal` component action, or the component's `<node_name>/cancel_main_action` service (`std_srvs/Trigger`). A goal counts as ongoing until `main_action_callback()` returns, not only until it reaches a terminal state, so a new goal never starts while the previous one is still cleaning up.
+
+When Cortex sends a goal through a tool that still has a goal of its own running, it replaces that goal: it cancels it, waits for the server to return the result, and then sends the new one. The wait is bounded by the action client's `feedback_check_timeout`. If the goal has not returned by then, the tool reports that it could not be canceled and the new goal is not sent. Cortex never cancels a goal that another client started on its own: that rejection reaches the planner as the server being busy and names the component's `cancel_main_goal` tool, so the planner can stop that goal and send its own.
+
+This puts one requirement on a component implementing `main_action_callback()`: check `goal_handle.is_cancel_requested` inside the loop, transition the goal with `goal_handle.canceled()`, and return promptly. A callback that keeps running after a cancel request blocks every new goal, including the one Cortex is waiting to send.
+
+## Routines as Tools
+
+A `Routine` the Monitor hosts is a skill for the planner. Routines reach the Monitor when an event triggers them, when they are given to `enable_ui(routines=...)`, or when they are passed to `Cortex(routines=[...])`, which needs neither an event nor a UI. A routine given to Cortex must have a description, since that is what the planner reads.
+
+Each hosted routine becomes a `routine-<name>` execution tool with no parameters, described by the routine's description and step names. Starting one returns at once. Cortex then follows its cursor and reports its status, active step and last step message to the planner alongside running goals, until it completes, fails or is aborted. `pause_routine`, `resume_routine` and `abort_routine` take the routine name. When the task ends, routines it started are aborted, as running goals are cancelled.
+
+### Compiled Execution
+
+Cortex runs two or more consecutive compilable steps of a plan, or a lone awaited goal, as one routine hosted by the Monitor instead of one at a time. A step compiles when it is a component action, a plugin action, an awaited action goal or a wait and all its arguments are known. A goal sent with `wait_to_finish=false` breaks the run and runs asynchronously while the following steps proceed. A step whose argument is a placeholder for an earlier result, written `<output from step N>`, breaks the run and is resolved by the confirmation call as before; so do services and routine tools. Inside the routine a goal is awaited and cancelled natively, a component or plugin action gets `step_timeout`, and the routine can be paused, resumed or aborted like any other. Each step's message reaches the planner as its result. A failed step ends the run, the steps not reached are reported as not run, and the planner replans. A routine aborted from outside ends the task. `compile_routines=False` restores step-by-step execution.
+
+## Event Conditioned Actions
+
+A standing instruction, "whenever X happens, do Y", requires a sugarcoat runtime event rather than an action step. Tools that allow adding events while planning are off by default, since they are the most complex Cortex offers; `CortexConfig(enable_events=True)` registers them and adds the guidance to the planning prompt. The planner installs an event with `add_event`: an id, one or more conditions on topic fields joined by `all` or `any`, the actions to run as tool calls, and `once`, true by default. Conditions name a topic a managed component reads or writes, a dotted field path and one of sugarcoat's comparison operators. `inspect_component` lists the fields of every topic's message, and a topic or field that does not exist is refused before anything is installed. Instead of topic conditions, an event may name a condition a robot or sensor plugin offers, such as a low battery with its threshold, as `plugin_condition`; those conditions are listed in the prompt guidance when events are enabled. An event may run component actions, plugin actions, awaited goals and routine tools. With `once` false the event stays and fires each time the condition becomes true. `remove_event` and `list_events` complete the set. Events outlive the task that installed them, and a firing is not reported to the planner.
+
+## Cortex's Own Tools
+
+| Tool | Phase | Description |
+|---|---|---|
+| `inspect_component(component)` | planning | A component's topics with their message fields, configuration, model clients and tools |
+| `update_parameter(component, param_name, new_value)` | execution | Change one configuration parameter |
+| `wait(duration)` | execution | Hold for a number of seconds. Not for waiting on a running goal, whose progress the planner is shown. Cut short if the task is cancelled |
 
 ## Built-in Component Actions
 
@@ -98,11 +193,13 @@ All `ModelComponent` subclasses also inherit:
 | `fallback_to_local()` | Switch from remote client to built-in local model |
 | `change_model_client(model_client_name)` | Hot-swap to a registered additional model client |
 
+Action server components also inherit `cancel_main_goal()`, which stops the goal their main action server is running.
+
 ## Example: Custom Action on a Component
 
 ```python
 from agents.components import ModelComponent
-from agents.ros import component_action, Topic, Image
+from agents.ros import ActionReturnType, component_action, Topic, Image
 
 
 class SecurityCamera(ModelComponent):
@@ -124,11 +221,11 @@ class SecurityCamera(ModelComponent):
             },
         }
     )
-    def arm(self) -> bool:
+    def arm(self) -> ActionReturnType:
         """Start monitoring."""
         self._armed = True
         self.get_logger().info("Security camera armed.")
-        return True
+        return True, "Security camera armed"
 
     @component_action(
         description={
@@ -140,11 +237,11 @@ class SecurityCamera(ModelComponent):
             },
         }
     )
-    def disarm(self) -> bool:
+    def disarm(self) -> ActionReturnType:
         """Stop monitoring."""
         self._armed = False
         self.get_logger().info("Security camera disarmed.")
-        return True
+        return True, "Security camera disarmed"
 
     def _execution_step(self, **kwargs):
         if not self._armed:
@@ -152,4 +249,4 @@ class SecurityCamera(ModelComponent):
         # ... run detection, check for intruders ...
 ```
 
-When this component is managed by Cortex, the planner can call `security_camera.arm` or `security_camera.disarm` as part of a task plan.
+When this component is managed by Cortex, the planner can call `security_camera-arm` or `security_camera-disarm` as part of a task plan.

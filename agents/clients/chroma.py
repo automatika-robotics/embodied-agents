@@ -4,6 +4,7 @@ import httpx
 
 from ..vectordbs import DB
 from ..models import OllamaModel
+from ..utils import tls_verify
 from .db_base import DBClient
 from .ollama import OllamaClient
 
@@ -25,6 +26,7 @@ class ChromaClient(DBClient):
         response_timeout: int = 30,
         init_on_activation: bool = True,
         logging_level: str = "info",
+        ca_cert: Optional[str] = None,
         **kwargs,
     ):
         super().__init__(
@@ -34,12 +36,17 @@ class ChromaClient(DBClient):
             response_timeout=response_timeout,
             init_on_activation=init_on_activation,
             logging_level=logging_level,
+            ca_cert=ca_cert,
             **kwargs,
         )
         self.url = f"{self._build_url()}/api/v2"
 
         # create httpx client
-        self.client = httpx.Client(base_url=self.url, timeout=self.response_timeout)
+        self.client = httpx.Client(
+            base_url=self.url,
+            timeout=self.response_timeout,
+            verify=tls_verify(self.ca_cert),
+        )
 
         # create ollama client if using ollama embeddings
         if self.db_init_params["embeddings"] == "ollama":

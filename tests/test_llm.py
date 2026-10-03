@@ -167,6 +167,45 @@ class TestLLMExecutionStep:
         llm._execution_step(topic=trigger)
         mock_tool.assert_called_once()
 
+    def test_with_tool_calls_across_processes(
+        self, llm, mock_model_client, launcher_processors
+    ):
+        """A tool registered in the recipe lives in the launcher process in a
+        multiprocess launch, and is called from the component's own process"""
+        calls = []
+
+        def add_numbers(a: int, b: int) -> str:
+            calls.append((a, b))
+            return f"sum is {a + b}"
+
+        llm.register_tool(
+            tool=add_numbers,
+            tool_description={"function": {"name": "add_numbers"}},
+        )
+        # as in the component's process, which gets the serialized processors
+        llm._external_processors_json = launcher_processors(llm)
+
+        mock_model_client.inference.return_value = {
+            "output": "calling tool",
+            "tool_calls": [
+                {
+                    "function": {
+                        "name": "add_numbers",
+                        "arguments": {"a": 2, "b": "3"},
+                    }
+                }
+            ],
+        }
+        mock_cb = MagicMock()
+        mock_cb.get_output.return_value = "add 2 and 3"
+        llm.trig_callbacks = {"in": mock_cb}
+        llm.callbacks = {}
+
+        llm._execution_step(topic=Topic(name="in", msg_type="String"))
+
+        assert calls == [(2, 3)]
+        assert {"role": "tool", "content": "sum is 5"} in llm.messages
+
 
 class TestLLMThinkTokens:
     THINKING = "<think>\nreasoning here\n</think>\n\nParis."
@@ -276,3 +315,63 @@ class TestLLMWarmup:
         comp.local_model = MagicMock(return_value={"output": "ok"})
         comp._warmup()
         assert comp.local_model.call_count == 2
+
+
+class TestDetections3DContext:
+    """A Detections3D input enriches the prompt with metric positions."""
+
+    def test_detections3d_string_reaches_the_prompt_template(self, llm):
+        from agents.utils import get_prompt_template
+
+        trigger = Topic(name="in", msg_type="String")
+        mock_cb = MagicMock()
+        mock_cb.get_output.return_value = "where is the orange?"
+        llm.trig_callbacks = {"in": mock_cb}
+
+        mock_d3 = MagicMock()
+        mock_d3.get_output.return_value = "In odom: orange at (2.00, 3.00, 0.05)"
+        mock_d3.input_topic = Topic(name="d3", msg_type="Detections3D")
+        llm.callbacks = {"d3": mock_d3}
+        llm.component_prompt = get_prompt_template("Visible objects: {{ d3 }}")
+
+        result = llm._create_input(topic=trigger)
+
+        assert "orange at (2.00, 3.00, 0.05)" in result["query"][-1]["content"]
+
+
+class TestComponentActionToolResults:
+    """The LLM component calls a component action over its ExecuteMethod
+    service and turns the response into the tool result the model sees"""
+
+    def _call(self, llm, response):
+        client = MagicMock()
+        client.send_request.return_value = response
+        llm._component_clients = {"memory": client}
+        return llm._execute_component_method("memory", "start_episode", name="tidy")
+
+    def _response(self, success, message=""):
+        response = MagicMock()
+        response.success = success
+        response.response_json = '"' + message + '"' if success and message else ""
+        response.error_msg = "" if success else message
+        return response
+
+    def test_the_actions_message_is_the_tool_result(self, llm):
+        result = self._call(llm, self._response(True, "Episode 'tidy' started"))
+
+        assert result == "Episode 'tidy' started"
+
+    def test_an_empty_message_is_a_confirmation(self, llm):
+        assert "executed successfully" in self._call(llm, self._response(True))
+
+    def test_a_failure_is_an_error_line(self, llm):
+        result = self._call(llm, self._response(False, "no such layer"))
+
+        assert result.startswith("Error:") and "no such layer" in result
+
+    def test_no_response_is_an_error_line(self, llm):
+        """The client returns None when the service is unavailable or the call
+        times out. That used to raise inside the result decoding"""
+        result = self._call(llm, None)
+
+        assert result.startswith("Error:") and "no response" in result

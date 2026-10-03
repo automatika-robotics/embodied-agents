@@ -78,16 +78,19 @@ EmbodiedAgents components run in separate processes. The model client must be se
 }
 ```
 
-If your client stores additional state (e.g., API keys, custom headers), override `serialize()` to include them, and handle deserialization from a `Dict` in your `__init__()`:
+If your client takes additional constructor arguments (e.g., custom headers, the name of the variable holding a key), override `serialize()` to include them, and handle deserialization from a `Dict` in your `__init__()`.
+
+Never serialize a secret. The serialized client travels as a process argument, which every user on the machine can read with `ps`. Serialize the name of the environment variable holding the secret, and read the variable in `__init__()`, which runs in the process that uses the connection. This is what `GenericHTTPClient` does with `api_key_env`:
 
 ```python
-def __init__(self, model, host=None, port=None, api_key=None, **kwargs):
+def __init__(self, model, host=None, port=None, api_key_env=None, **kwargs):
     super().__init__(model=model, host=host, port=port, **kwargs)
-    self.api_key = api_key
+    self.api_key_env = api_key_env
+    self.api_key = os.environ.get(api_key_env, "") if api_key_env else ""
 
 def serialize(self):
     base = super().serialize()
-    base["api_key"] = self.api_key
+    base["api_key_env"] = self.api_key_env
     return base
 ```
 
@@ -132,6 +135,7 @@ The constructor takes a `DB` instance (from `agents.vectordbs`) instead of a `Mo
 Below is a complete skeleton for a client that communicates with a custom HTTP inference server.
 
 ```python
+import os
 from typing import Any, Dict, Optional, Union, MutableMapping
 
 import httpx
@@ -149,7 +153,7 @@ class CustomHTTPClient(ModelClient):
         host: str = "127.0.0.1",
         port: int = 5000,
         inference_timeout: int = 30,
-        api_key: Optional[str] = None,
+        api_key_env: Optional[str] = None,
         logging_level: str = "info",
         **kwargs,
     ):
@@ -161,7 +165,9 @@ class CustomHTTPClient(ModelClient):
             logging_level=logging_level,
             **kwargs,
         )
-        self.api_key = api_key
+        # the key is read here, in the process that runs the component
+        self.api_key_env = api_key_env
+        self.api_key = os.environ.get(api_key_env, "") if api_key_env else ""
         self.base_url = f"http://{self.host}:{self.port}"
         self._client: Optional[httpx.Client] = None
 
@@ -231,9 +237,9 @@ class CustomHTTPClient(ModelClient):
         self.logger.info(f"Model {self.model_name} deinitialized")
 
     def serialize(self) -> Dict:
-        """Include api_key in serialization for multiprocess."""
+        """Include the key's variable name, never the key, for multiprocess."""
         base = super().serialize()
-        base["api_key"] = self.api_key
+        base["api_key_env"] = self.api_key_env
         return base
 ```
 
@@ -245,7 +251,7 @@ from agents.components import LLM
 from agents.ros import Topic, Launcher
 
 model = GenericLLM(name="my_model", checkpoint="my-custom-model")
-client = CustomHTTPClient(model, host="10.0.0.5", port=5000, api_key="sk-...")
+client = CustomHTTPClient(model, host="10.0.0.5", port=5000, api_key_env="MY_SERVER_KEY")
 
 text_in = Topic(name="input_text", msg_type="String")
 text_out = Topic(name="output_text", msg_type="String")

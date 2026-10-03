@@ -1,6 +1,5 @@
 from typing import Optional, List, Dict, Callable, Literal
 import inspect
-from functools import partial, wraps
 import queue
 import threading
 import numpy as np
@@ -16,6 +15,7 @@ import time
 from ..ros import (
     Event,
     Action,
+    ActionReturnType,
     RGBD,
     Image,
     Topic,
@@ -25,6 +25,7 @@ from ..ros import (
     ComponentRunType,
     MutuallyExclusiveCallbackGroup,
     VisionLanguageAction,
+    ExternalProcessorType,
     run_external_processor,
 )
 from ..callbacks import RGBDCallback
@@ -131,6 +132,10 @@ class VLA(ModelComponent):
         self._dataset_sorted_joint_names = None
         # Joint Limits
         self.robot_joints_limits = None
+        # Action values seen and capped by the limits while the unit-mismatch
+        # heuristic is still sampling
+        self._cap_actions_seen = 0
+        self._cap_actions_capped = 0
         # Make verifications on init, skip after serialization
         if hasattr(self.model_client, "_model"):
             self._verify_config(component_name)
@@ -225,17 +230,6 @@ class VLA(ModelComponent):
         # Resolve the aggregation preset from config
         self._aggregator_function = AGGREGATE_FUNCTIONS[self.config.aggregate_fn_name]
 
-        # Assign external aggregator function in case its provided
-        # (takes precedence over the config preset)
-        if agg_fun := self._external_processors.get("aggregator_function", None):
-            # Get the first element of the tuple and the only function in that list
-            self._aggregator_function = partial(
-                run_external_processor,
-                logger_name=self.node_name,
-                topic_name="aggregator_function",
-                processor=agg_fun[0][0],
-            )
-
     def custom_on_deactivate(self):
         """Custom deactivation"""
 
@@ -298,11 +292,12 @@ class VLA(ModelComponent):
             self.config._termination_timesteps = max_timesteps
             self._add_event_action_pair(stop_event, Action(self.signal_done))
 
-    def signal_done(self):
+    def signal_done(self) -> ActionReturnType:
         """Signals that the action is complete.
         Can be used as an action for signaled events"""
         self._task_completed = True
         self.get_logger().info("Action completion signaled")
+        return True, "Action completion signaled"
 
     def _on_key_press(self, key):
         """Callback for keyboard listener."""
@@ -437,6 +432,55 @@ class VLA(ModelComponent):
         if latest_actions:
             self._update_actions_queue(latest_actions)
 
+    def _aggregate(self, existing: np.ndarray, new: np.ndarray) -> np.ndarray:
+        """Aggregate two actions generated for the same timestep. Uses the custom
+        aggregation function if set, falling back to the latest action if it fails
+        or returns an invalid output.
+
+        :param existing: Action already in the queue
+        :type existing: np.ndarray
+        :param new: Newly received action for the same timestep
+        :type new: np.ndarray
+        :return: Aggregated action
+        :rtype: np.ndarray
+        """
+        # The custom aggregation function takes precedence over the config preset
+        agg_fun = self._external_processors.get("aggregator_function")
+        if not agg_fun:
+            return self._aggregator_function(existing, new)
+
+        try:
+            out = run_external_processor(
+                self.node_name,
+                "aggregator_function",
+                agg_fun[0][0],
+                {"x": existing, "y": new},
+                processor_type=ExternalProcessorType.FUNCTION,
+            )
+        except Exception as e:
+            self.log_once(
+                "aggregator_error",
+                f"Custom aggregation function failed: {e}. Using the latest action instead.",
+                level="error",
+            )
+            return new
+
+        if type(out) is not np.ndarray or out.shape != new.shape:
+            self.log_once(
+                "aggregator_output",
+                f"Custom aggregation function returned an invalid output, expected a numpy array of shape {new.shape}. Using the latest action instead.",
+                level="error",
+            )
+            return new
+        if self._dataset_action_dtype and out.dtype != self._dataset_action_dtype:
+            self.log_once(
+                "aggregator_dtype",
+                f"Custom aggregation function returned an array of dtype {out.dtype}, expected {self._dataset_action_dtype}. Using the latest action instead.",
+                level="error",
+            )
+            return new
+        return out
+
     def _update_actions_queue(
         self,
         new_actions: List,
@@ -471,9 +515,7 @@ class VLA(ModelComponent):
                     existing_act = action_map[ts]
 
                     # Perform the aggregation on the array
-                    merged_array = self._aggregator_function(
-                        existing_act.action, new_act.action
-                    )
+                    merged_array = self._aggregate(existing_act.action, new_act.action)
 
                     # Update the existing action object
                     existing_act.action = merged_array
@@ -582,16 +624,12 @@ class VLA(ModelComponent):
             else action_to_pub_data
         )
 
-        # NOTE: Unit mismatch heuristic: if most early actions are getting capped,
-        # the limits are almost certainly in a different unit space than the
-        # policy's actions. Issue a warning once.
-        if self.robot_joints_limits and not getattr(
-            self, "_cap_mismatch_warned", False
-        ):
-            self._cap_actions_seen = getattr(self, "_cap_actions_seen", 0) + len(
-                np.atleast_1d(safe_action)
-            )
-            self._cap_actions_capped = getattr(self, "_cap_actions_capped", 0) + int(
+        # NOTE: Unit mismatch heuristic: if most of the first 100 action values
+        # get capped, the limits are almost certainly in a different unit space
+        # than the policy's actions. Issue a warning once.
+        if self.robot_joints_limits and self._cap_actions_seen < 100:
+            self._cap_actions_seen += len(np.atleast_1d(safe_action))
+            self._cap_actions_capped += int(
                 np.sum(
                     ~np.isclose(
                         np.asarray(safe_action, dtype=np.float64),
@@ -599,19 +637,18 @@ class VLA(ModelComponent):
                     )
                 )
             )
-            if self._cap_actions_seen >= 100:
-                capped_frac = self._cap_actions_capped / self._cap_actions_seen
-                if capped_frac > 0.5:
-                    self.get_logger().warning(
-                        f"{capped_frac:.0%} of the first {self._cap_actions_seen} action "
-                        "values were capped by joint limits — this usually means the "
-                        "limits and the policy's actions are in different unit spaces. "
-                        "URDF limits are radians; if your policy outputs normalized "
-                        "motor positions (e.g. LeRobot SO-100/101 datasets), set "
-                        "policy_action_units='normalized' in VLAConfig or provide "
-                        "'joint_limits' manually in the policy's units."
-                    )
-                self._cap_mismatch_warned = True
+            capped_frac = self._cap_actions_capped / self._cap_actions_seen
+            if self._cap_actions_seen >= 100 and capped_frac > 0.5:
+                self.log_once(
+                    "cap_mismatch",
+                    f"{capped_frac:.0%} of the first {self._cap_actions_seen} action "
+                    "values were capped by joint limits — this usually means the "
+                    "limits and the policy's actions are in different unit spaces. "
+                    "URDF limits are radians; if your policy outputs normalized "
+                    "motor positions (e.g. LeRobot SO-100/101 datasets), set "
+                    "policy_action_units='normalized' in VLAConfig or provide "
+                    "'joint_limits' manually in the policy's units.",
+                )
 
         # TODO: Add smoothing for bigger deltas between new action and currect state
 
@@ -685,34 +722,16 @@ class VLA(ModelComponent):
                 "Aggregation function must have exactly two parameters, both expected to be numpy arrays."
             )
 
-        # Closure for using external functions
-        def agg_closure(func: Callable[[np.ndarray, np.ndarray], np.ndarray]):
-            """Wrapper for aggregator function"""
+        # Wrap the function to be called with keyword arguments.
+        def _wrapper(x: np.ndarray, y: np.ndarray) -> np.ndarray:
+            return agg_fn(x, y)
 
-            @wraps(func)
-            def _wrapper(*, x: np.ndarray, y: np.ndarray):
-                """_wrapper"""
-                out = func(x, y)
-                # Check if we have action dtype
-                # type check agg fn output, if incorrect, raise an error
-                if type(out) is not np.ndarray:
-                    raise TypeError(
-                        "Only numpy arrays are acceptable as outputs of aggregator functions."
-                    )
-                elif (
-                    self._dataset_action_dtype
-                    and out.dtype != self._dataset_action_dtype
-                ):
-                    raise TypeError(
-                        f"Only numpy arrays of dtype {self._dataset_action_dtype} are acceptable as outputs of aggregator functions."
-                    )
-
-            _wrapper.__name__ = func.__name__
-            return _wrapper
+        # The function name is used to name the socket in a multiprocess launch
+        _wrapper.__name__ = agg_fn.__name__
 
         self._external_processors["aggregator_function"] = (
-            [agg_closure(agg_fn)],
-            "aggregator_function",
+            [_wrapper],
+            ExternalProcessorType.FUNCTION,
         )
 
     def main_action_callback(self, goal_handle: VisionLanguageAction.Goal):

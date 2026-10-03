@@ -11,6 +11,7 @@
   <depend>builtin_interfaces</depend>
   <depend>std_msgs</depend>
   <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
   <depend>python3-tqdm</depend>
   <depend>python3-httpx</depend>
   <depend>python3-websockets</depend>

@@ -36,12 +36,58 @@ def test_frame_difference_static_vs_motion():
     assert motion.frame_difference(frame, moved, threshold=0.3)
 
 
+def test_frame_difference_ignores_sensor_noise():
+    """A static webcam frame with pixel noise is still, not motion."""
+    rng = np.random.default_rng(3)
+    smooth = np.full((64, 64), 120, dtype=np.uint8)
+    noisy = np.clip(smooth + rng.normal(0, 3, smooth.shape), 0, 255).astype(np.uint8)
+    assert not motion.frame_difference(smooth, noisy, threshold=0.3)
+
+
+def test_frame_difference_sees_a_darkening_object():
+    """An object moving over a lighter background darkens pixels; that is
+    motion too (a one-sided subtraction would miss the covered half)."""
+    background = np.full((64, 64), 200, dtype=np.uint8)
+    before, after = background.copy(), background.copy()
+    before[24:40, 8:24] = 40
+    after[24:40, 16:32] = 40
+    assert motion.frame_difference(before, after, threshold=0.3)
+
+
+def test_frame_difference_ignores_an_exposure_step():
+    """Auto-exposure re-exposes the WHOLE frame at once; that is not motion."""
+    frame = _textured_frame()
+    brighter = np.clip(frame.astype(int) + 40, 0, 255).astype(np.uint8)
+    assert not motion.frame_difference(frame, brighter, threshold=0.3)
+
+
+def test_frame_difference_sees_motion_during_an_exposure_step():
+    """The global shift is removed from the SIGNED difference, so an object
+    that moved while the exposure stepped is still seen."""
+    background = np.full((64, 64), 150, dtype=np.uint8)
+    before, after = background.copy(), background.copy()
+    before[24:40, 8:24] = 40
+    after[24:40, 16:32] = 40
+    after = np.clip(after.astype(int) + 40, 0, 255).astype(np.uint8)
+    assert motion.frame_difference(before, after, threshold=0.3)
+
+
 def test_optical_flow_static_vs_motion():
     flow_kwargs = MotionDetectorConfig().flow_kwargs
     frame = _textured_frame()
     assert not motion.optical_flow(frame, frame, 0.3, flow_kwargs)
     moved = np.roll(frame, 8, axis=1)
     assert motion.optical_flow(frame, moved, 0.3, flow_kwargs)
+
+
+def test_optical_flow_counts_motion_in_every_direction():
+    """Flow is thresholded by magnitude: motion to the left or upward (negative
+    components) counts exactly like motion to the right or downward."""
+    flow_kwargs = MotionDetectorConfig().flow_kwargs
+    frame = _textured_frame()
+    for shift, axis in ((-8, 1), (-8, 0)):
+        moved = np.roll(frame, shift, axis=axis)
+        assert motion.optical_flow(frame, moved, 0.3, flow_kwargs)
 
 
 def test_roi_mask():
@@ -416,20 +462,96 @@ class TestStateMachine:
 
 
 class TestImagePath:
-    def test_video_published_at_max_frames(self, rclpy_init):
-        # with no motion_estimation_func every frame after the first counts
-        # as motion; a full buffer ends the episode and publishes the video
+    def test_default_estimator_is_frame_difference(self):
+        assert MotionDetectorConfig().motion_estimation_func == "frame_difference"
+
+    def test_an_unknown_estimator_is_rejected(self):
+        with pytest.raises(ValueError):
+            MotionDetectorConfig(motion_estimation_func="always_true")
+
+    def test_mono_frames_are_processed(self, rclpy_init):
+        """A single-channel stream (mono8, RealSense infrared) arrives as a 2D
+        array and must be differenced as-is rather than color-converted."""
+        component = _prep(_image_detector(rclpy_init))
+        bool_publisher = MagicMock()
+        component._bool_publishers = [bool_publisher]
+        texture = _textured_frame()
+
+        component._process_image(SimpleNamespace(number=0), texture)
+        component._process_image(SimpleNamespace(number=1), texture)
+        component._process_image(SimpleNamespace(number=2), np.roll(texture, 8, axis=1))
+
+        published = [c.kwargs["output"] for c in bool_publisher.publish.call_args_list]
+        assert published == [False, False, True]
+
+    def test_16bit_mono_frames_are_rescaled_consistently(self, rclpy_init):
+        """16-bit mono (IR16, depth as image) is brought to 8 bits with a fixed
+        scale, so an unchanged scene stays still and a shifted one moves."""
+        component = _prep(_image_detector(rclpy_init))
+        bool_publisher = MagicMock()
+        component._bool_publishers = [bool_publisher]
+        texture = (_textured_frame().astype(np.uint16) * 257)  # full 16-bit range
+
+        component._process_image(SimpleNamespace(number=0), texture)
+        component._process_image(SimpleNamespace(number=1), texture)
+        component._process_image(SimpleNamespace(number=2), np.roll(texture, 8, axis=1))
+
+        published = [c.kwargs["output"] for c in bool_publisher.publish.call_args_list]
+        assert published == [False, False, True]
+
+    def test_large_frames_are_downscaled_before_estimation(self, rclpy_init):
+        """Motion estimation runs at a bounded resolution: the reference frame
+        is stored downscaled, detection still works, and an ROI polygon given
+        in camera pixels lands on the same part of the scene."""
         component = _prep(
             _image_detector(
                 rclpy_init,
-                config=MotionDetectorConfig(min_video_frames=2, max_video_frames=4),
+                # ignore the right half of a 640-wide camera image
+                config=MotionDetectorConfig(
+                    image_scale=0.5,
+                    roi_ignore_polygon=[(320, 0), (640, 0), (640, 480), (320, 480)],
+                ),
+            )
+        )
+        bool_publisher = MagicMock()
+        component._bool_publishers = [bool_publisher]
+        texture = _textured_frame(size=640)[:480]  # 480 x 640
+
+        component._process_image(SimpleNamespace(), texture)
+        assert component._last_frame.shape == (240, 320)
+        assert component._roi_mask.shape == (240, 320)
+        assert component._roi_mask[:, :160].all() and not component._roi_mask[:, 160:].any()
+
+        # motion in the LEFT (kept) half is seen ...
+        moved = texture.copy()
+        moved[:, :320] = np.roll(texture[:, :320], 16, axis=1)
+        component._process_image(SimpleNamespace(), moved)
+        assert bool_publisher.publish.call_args.kwargs["output"] is True
+        # ... motion confined to the ignored right half is not
+        for _ in range(component.config.motion_stop_delay + 1):
+            component._process_image(SimpleNamespace(), moved)  # settle
+        ignored = moved.copy()
+        ignored[:, 320:] = np.roll(moved[:, 320:], 16, axis=1)
+        component._process_image(SimpleNamespace(), ignored)
+        assert bool_publisher.publish.call_args.kwargs["output"] is False
+
+    def test_video_published_at_max_frames(self, rclpy_init):
+        # every frame moves relative to the previous one, so each counts as
+        # motion; a full buffer ends the episode and publishes the video
+        component = _prep(
+            _image_detector(
+                rclpy_init,
+                config=MotionDetectorConfig(
+                    min_video_frames=2, max_video_frames=4, video_preroll_frames=0
+                ),
             )
         )
         video_publisher = MagicMock()
         component._video_publishers = [video_publisher]
 
-        frame = np.dstack([_textured_frame()] * 3)
+        texture = _textured_frame()
         for i in range(6):
+            frame = np.dstack([np.roll(texture, 8 * i, axis=1)] * 3)
             component._process_image(SimpleNamespace(number=i), frame)
 
         video_publisher.publish.assert_called_once()
@@ -437,6 +559,41 @@ class TestImagePath:
         assert len(frames) == 4
         # motion continues after the flush: a new episode starts buffering
         assert len(component._frames) == 1
+
+    def test_video_opens_with_the_preroll_and_closes_with_the_tail(self, rclpy_init):
+        """A motion video shows the scene before the event and the still
+        frames that end it, and holds the very message objects received:
+        no copies, and never more pre-roll than configured."""
+        component = _prep(
+            _image_detector(
+                rclpy_init,
+                config=MotionDetectorConfig(
+                    min_video_frames=1,
+                    motion_stop_delay=2,
+                    video_preroll_frames=2,
+                ),
+            )
+        )
+        video_publisher = MagicMock()
+        component._video_publishers = [video_publisher]
+        texture = _textured_frame()
+        msgs = [SimpleNamespace(number=i) for i in range(8)]
+
+        for i in (0, 1, 2):  # still: only the last two are kept as pre-roll
+            component._process_image(msgs[i], texture)
+        assert len(component._preroll) == 2
+        for i in (3, 4):  # moving
+            component._process_image(msgs[i], np.roll(texture, 8 * i, axis=1))
+        for i in (5, 6):  # still again: the debounce tail, closes the episode
+            component._process_image(msgs[i], np.roll(texture, 32, axis=1))
+
+        video_publisher.publish.assert_called_once()
+        frames = video_publisher.publish.call_args.kwargs["output"]
+        assert [f.number for f in frames] == [1, 2, 3, 4, 5, 6]
+        assert all(frame is msgs[frame.number] for frame in frames)
+        # the pre-roll was consumed by the episode and starts collecting afresh
+        component._process_image(msgs[7], np.roll(texture, 32, axis=1))
+        assert [f.number for f in component._preroll] == [7]
 
 
 class TestCloudPath:
@@ -480,6 +637,43 @@ class TestCloudPath:
             centers_call.kwargs["output"][0], (-2.0, 1.0, 0.5), atol=0.2
         )
 
+    def test_clouds_are_not_accumulated_before_odometry_arrives(self, rclpy_init):
+        """With a position topic wired, clouds received before the first
+        odometry reading would enter the history in the sensor frame, and
+        every voxel would look new once the history is in the odometry frame."""
+        component = _prep(
+            MotionDetector(
+                inputs=[CLOUD],
+                outputs=[BOOL_OUT],
+                trigger=CLOUD,
+                position=ODOM,
+                component_name="test_motion",
+                config=MotionDetectorConfig(accumulation_window=1),
+            )
+        )
+        bool_publisher = MagicMock()
+        component._bool_publishers = [bool_publisher]
+        odom = MagicMock(frame_id="odom")
+        odom.get_output.return_value = None
+        component.callbacks = {ODOM.name: odom}
+        # clouds already in the base frame: no sensor TF lookup involved
+        cloud = SimpleNamespace(
+            xyz=_blob((2.0, 0.0, 0.5), n=60).astype(np.float32), frame_id="base_link"
+        )
+
+        component._process_cloud(cloud)
+        component._process_cloud(cloud)
+        assert len(component._voxel_history) == 0
+        bool_publisher.publish.assert_not_called()
+
+        # odometry arrives: accumulation starts, and the same static scene
+        # differenced against itself is still
+        odom.get_output.return_value = np.array([0.0, 0.0, 0.0, 0.0, 0.0])
+        component._process_cloud(cloud)
+        component._process_cloud(cloud)
+        assert len(component._voxel_history) == 1
+        assert bool_publisher.publish.call_args.kwargs["output"] is False
+
     def test_sensor_extrinsic_from_tf(self, rclpy_init):
         component = _prep(
             MotionDetector(
@@ -496,23 +690,23 @@ class TestCloudPath:
             translation=np.array([1.0, 0.0, 0.0]),
             rotation=np.array([0.0, 0.0, 0.0, 1.0]),
         )
-        component.create_tf_listener = MagicMock(return_value=listener)
+        component.get_transform_listener = MagicMock(return_value=listener)
 
         points = np.array([[1.0, 1.0, 1.0]], dtype=np.float32)
         np.testing.assert_allclose(
             component._apply_sensor_extrinsic(points, "lidar"), [[2.0, 1.0, 1.0]]
         )
-        # listener is created once and reused
-        component._apply_sensor_extrinsic(points, "lidar")
-        component.create_tf_listener.assert_called_once()
-        tf_config = component.create_tf_listener.call_args.args[0]
-        assert tf_config.source_frame == "lidar"
-        assert tf_config.goal_frame == "base_link"
+        # the mount is static, so the component's cached listener is asked for once
+        component.get_transform_listener.assert_called_once_with(
+            "lidar", "base_link", static_tf=True
+        )
 
         # cloud already in the base frame: no lookup needed
+        component.get_transform_listener.reset_mock()
         np.testing.assert_allclose(
             component._apply_sensor_extrinsic(points, "base_link"), points
         )
+        component.get_transform_listener.assert_not_called()
 
     def test_sensor_extrinsic_unavailable_warns_once(self, rclpy_init):
         component = _prep(
@@ -524,7 +718,7 @@ class TestCloudPath:
                 component_name="test_motion",
             )
         )
-        component.create_tf_listener = MagicMock(
+        component.get_transform_listener = MagicMock(
             return_value=SimpleNamespace(got_transform=False)
         )
         points = np.array([[1.0, 1.0, 1.0]], dtype=np.float32)
@@ -557,3 +751,75 @@ class TestCloudPath:
         component._process_cloud(self._cloud(scene))
 
         assert bool_publisher.publish.call_args.kwargs["output"] is False
+
+
+class TestEgoMotionGate:
+    """Image motion detection pauses while the robot itself moves."""
+
+    def _component(self, rclpy_init):
+        component = _prep(_image_detector(rclpy_init, position=ODOM))
+        bool_publisher = MagicMock()
+        component._bool_publishers = [bool_publisher]
+        clock = {"t": 0.0}
+        component.get_ros_time = MagicMock(
+            side_effect=lambda: SimpleNamespace(
+                sec=int(clock["t"]), nanosec=int((clock["t"] % 1) * 1e9)
+            )
+        )
+        odom = MagicMock()
+        component.callbacks = {ODOM.name: odom}
+        return component, bool_publisher, clock, odom
+
+    @staticmethod
+    def _state(x, y, heading, speed):
+        return np.array([x, y, 0.0, heading, speed])
+
+    def _feed(self, component, clock, frame, dt=0.1):
+        clock["t"] += dt
+        component._process_image(SimpleNamespace(), frame)
+
+    def test_turning_in_place_pauses_detection(self, rclpy_init):
+        """Rotation sweeps the whole image with zero linear speed: the old
+        speed-only gate let that through as motion."""
+        component, bool_publisher, clock, odom = self._component(rclpy_init)
+        texture = _textured_frame()
+        headings = iter([0.0, 0.3, 0.6, 0.9])
+        odom.get_output.side_effect = lambda: self._state(0, 0, next(headings), 0.0)
+
+        for i in range(4):
+            self._feed(component, clock, np.roll(texture, 8 * i, axis=1))
+
+        published = [c.kwargs["output"] for c in bool_publisher.publish.call_args_list]
+        assert published == [False, False, False, False]
+        assert component._last_frame is None
+
+    def test_translation_still_pauses_detection(self, rclpy_init):
+        component, bool_publisher, clock, odom = self._component(rclpy_init)
+        texture = _textured_frame()
+        odom.get_output.return_value = self._state(0, 0, 0.0, 0.5)
+
+        for i in range(3):
+            self._feed(component, clock, np.roll(texture, 8 * i, axis=1))
+
+        assert all(
+            c.kwargs["output"] is False for c in bool_publisher.publish.call_args_list
+        )
+
+    def test_the_first_frame_after_a_pause_only_seeds(self, rclpy_init):
+        """The frame taken while moving must not become the reference for the
+        first still frame, or every stop would register as motion."""
+        component, bool_publisher, clock, odom = self._component(rclpy_init)
+        texture = _textured_frame()
+        # turning for two frames, then perfectly still
+        headings = iter([0.0, 0.5, 1.0, 1.0, 1.0, 1.0])
+        odom.get_output.side_effect = lambda: self._state(0, 0, next(headings), 0.0)
+
+        self._feed(component, clock, texture)                          # seeds
+        self._feed(component, clock, np.roll(texture, 8, axis=1))      # turning
+        self._feed(component, clock, np.roll(texture, 16, axis=1))     # turning
+        self._feed(component, clock, np.roll(texture, 24, axis=1))     # stopped: seeds only
+        self._feed(component, clock, np.roll(texture, 24, axis=1))     # still
+        self._feed(component, clock, np.roll(texture, 32, axis=1))     # real motion
+
+        published = [c.kwargs["output"] for c in bool_publisher.publish.call_args_list]
+        assert published == [False, False, False, False, False, True]
