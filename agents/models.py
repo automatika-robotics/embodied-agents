@@ -12,6 +12,7 @@ __all__ = [
     "GenericMLLM",
     "GenericTTS",
     "GenericSTT",
+    "GenericDecisionModel",
     "TransformersLLM",
     "TransformersMLLM",
     "OllamaModel",
@@ -243,6 +244,36 @@ class GenericSTT(Model):
             "language": self.language,
             "temperature": self.temperature,
         }
+
+
+@define(kw_only=True)
+class GenericDecisionModel(Model):
+    """
+    A generic decision model for TypeSafe-compatible /v1/systemone APIs.
+
+    A decision model answers typed questions about a state (choice, score or yes/no),
+    each in one forward pass without generating text, and gives a probability for
+    every answer.
+    Find details [here](https://github.com/ggml-org/llama.cpp/tree/master/tools/server#post-v1systemone-typesafe-compatible-system-one-api)
+
+    :param name: An arbitrary name given to the model.
+    :type name: str
+    :param checkpoint: The model identifier on the server, as listed by its /v1/models
+                       endpoint. llama-server lists the model file name, or the name
+                       given with --alias. In router mode, it uses it to pick the model.
+    :type checkpoint: str
+    :param init_timeout: The timeout in seconds for the initialization process. Defaults to None.
+    :type init_timeout: int, optional
+
+    Example usage:
+    ```python
+    # llama-server -m lev-Q8_0.gguf --alias lev
+    lev = GenericDecisionModel(name="lev", checkpoint="lev")
+    ```
+    """
+
+    def _get_init_params(self) -> Dict:
+        return {"checkpoint": self.checkpoint}
 
 
 @define(kw_only=True)
@@ -611,9 +642,16 @@ class LeRobotPolicy(Model):
         "smolvla", "diffusion", "act", "pi0", "pi05", "groot", "tdmpc", "vqbet"
     ] = field(
         default="smolvla",
-        validator=base_validators.in_(
-            ["smolvla", "diffusion", "act", "pi0", "pi05", "groot", "tdmpc", "vqbet"]
-        ),
+        validator=base_validators.in_([
+            "smolvla",
+            "diffusion",
+            "act",
+            "pi0",
+            "pi05",
+            "groot",
+            "tdmpc",
+            "vqbet",
+        ]),
     )
     actions_per_chunk: int = field(default=50)
     policy_device: Literal["cpu", "cuda"] = field(
