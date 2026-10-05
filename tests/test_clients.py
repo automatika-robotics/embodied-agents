@@ -1,317 +1,258 @@
-import logging
-import time
-import subprocess
-import shutil
+"""Live tests of the model and vector DB clients against running servers.
+
+The servers are not started by these tests. Each client's tests are skipped when
+its server cannot be reached, and all of them are marked local_only, so CI
+deselects them. Hosts, ports and models are set with environment variables:
+
+- Ollama, for OllamaClient and for GenericHTTPClient against Ollama's
+  OpenAI-compatible endpoint: OLLAMA_HOST (127.0.0.1), OLLAMA_PORT (11434),
+  OLLAMA_MODEL (qwen2.5vl:latest, a vision model that does not think, so its
+  reply is all content)
+- RoboML (``roboml``), for the HTTP and WebSocket clients: ROBOML_HOST
+  (127.0.0.1), ROBOML_PORT (8000)
+- RoboML RESP (``roboml-resp``): ROBOML_RESP_PORT (6379)
+- RoboML models: ROBOML_LLM (Qwen/Qwen3-0.6B), ROBOML_MLLM
+  (Qwen/Qwen2.5-VL-3B-Instruct)
+- Chroma (``chroma run --path <dir> --port 8001``): CHROMA_HOST (127.0.0.1),
+  CHROMA_PORT (8001), with embeddings from Ollama's CHROMA_EMBEDDINGS
+  (bge-large:latest)
+
+RoboML's tests run first: on one GPU, a model Ollama has loaded stays in memory
+for a few minutes after its last use, and can leave too little for RoboML's.
+"""
+
+import os
+import queue
+import threading
+from pathlib import Path
 
 import cv2
 import pytest
 
-_IMPORTS_AVAILABLE = True
-try:
-    from agents.models import Idefics2, OllamaModel
-    from agents.vectordbs import ChromaDB
-    from agents.clients.roboml import (
-        HTTPModelClient,
-        HTTPDBClient,
-        RESPDBClient,
-        RESPModelClient,
-    )
-    from agents.clients.ollama import OllamaClient
-except ImportError:
-    _IMPORTS_AVAILABLE = False
-
-pytestmark = pytest.mark.skipif(
-    not _IMPORTS_AVAILABLE,
-    reason="Required packages for client integration tests not available",
+from agents.clients import (
+    ChromaClient,
+    GenericHTTPClient,
+    OllamaClient,
+    RoboMLHTTPClient,
+    RoboMLRESPClient,
+    RoboMLWSClient,
 )
+from agents.models import GenericLLM, OllamaModel, TransformersLLM, TransformersMLLM
+from agents.vectordbs import ChromaDB
 
-HOST = "http://localhost"
-RAY_PORT = 8000
-RESP_PORT = 6379
+pytestmark = pytest.mark.local_only
 
+HOST = os.environ.get("OLLAMA_HOST", "127.0.0.1")
+OLLAMA_PORT = int(os.environ.get("OLLAMA_PORT", 11434))
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5vl:latest")
+ROBOML_HOST = os.environ.get("ROBOML_HOST", "127.0.0.1")
+ROBOML_PORT = int(os.environ.get("ROBOML_PORT", 8000))
+ROBOML_RESP_PORT = int(os.environ.get("ROBOML_RESP_PORT", 6379))
+ROBOML_LLM = os.environ.get("ROBOML_LLM", "Qwen/Qwen3-0.6B")
+ROBOML_MLLM = os.environ.get("ROBOML_MLLM", "Qwen/Qwen2.5-VL-3B-Instruct")
+CHROMA_HOST = os.environ.get("CHROMA_HOST", "127.0.0.1")
+CHROMA_PORT = int(os.environ.get("CHROMA_PORT", 8001))
+CHROMA_EMBEDDINGS = os.environ.get("CHROMA_EMBEDDINGS", "bge-large:latest")
 
-@pytest.fixture(scope="class")
-def http_clients():
-    """Fixture to run roboml ray and make its clients before tests are run"""
-
-    # start server
-    p = subprocess.Popen(["roboml"])
-    # give it 20 seconds to start before sending request
-    time.sleep(20)
-    model = Idefics2(name="idefics")
-    model_client = HTTPModelClient(model, port=RAY_PORT, logging_level="debug")
-    db = ChromaDB(name="chroma", db_location="./http_data")
-    db_client = HTTPDBClient(db, port=RAY_PORT, logging_level="debug")
-
-    yield {"model": model_client, "db": db_client}
-
-    # terminate server process - kill to remove ray monitoring child
-    p.kill()
-    shutil.rmtree("./http_data")
+IMAGE = Path(__file__).parents[1] / "agents" / "resources" / "test.jpeg"
 
 
-@pytest.fixture(scope="class")
-def resp_clients():
-    """Fixture to run roboml-resp and make its clients before tests are run"""
-
-    # start server
-    p = subprocess.Popen(["roboml-resp"])
-    # give it 20 seconds to start before sending request
-    time.sleep(20)
-    model = Idefics2(name="idefics")
-    model_client = RESPModelClient(model, logging_level="debug")
-    db = ChromaDB(name="chroma", db_location="./resp_data")
-    db_client = RESPDBClient(db, logging_level="debug")
-
-    yield {"model": model_client, "db": db_client}
-
-    # terminate server process
-    p.terminate()
-    shutil.rmtree("./resp_data")
+def started(client):
+    """Connect and initialize a client, skipping when its server is not up"""
+    try:
+        client.check_connection()
+    except Exception as e:
+        pytest.skip(f"{type(client).__name__}: server not reachable ({e})")
+    client.initialize()
+    return client
 
 
-@pytest.fixture(scope="class")
-def ollama_client():
-    """Fixture to create client ollama before tests are run"""
-
-    model = OllamaModel(name="llava", checkpoint="llava")
-    ollama_client = OllamaClient(model, logging_level="debug")
-    yield ollama_client
-
-
-@pytest.fixture
-def loaded_img():
-    """Fixture to load test image"""
-    return cv2.imread("agents/resources/test.jpeg", cv2.COLOR_BGR2RGB)
-
-
-@pytest.fixture
-def data():
+def chat(text: str, stream: bool = False, **params) -> dict:
+    # Room for a thinking model to finish thinking before it answers
     return {
-        "ids": ["a"],
-        "metadatas": [{"something": "about a"}],
-        "documents": ["description of a"],
-        "collection_name": "alphabets",
+        "query": [{"role": "user", "content": f"/no_think {text}"}],
+        "max_new_tokens": 512,
+        "temperature": 0.1,
+        "stream": stream,
+        **params,
     }
 
 
-@pytest.mark.local_only
-class TestRobomlHTTPClient:
-    """
-    Test roboml http client
-    """
-
-    def test_model_init(self, http_clients):
-        """
-        Test roboml http model client init
-        """
-        try:
-            http_clients["model"].check_connection()
-        except Exception:
-            logging.error(
-                "Make sure roboml is installed on this machine before running these tests. roboml can be installed with `pip install roboml`"
-            )
-            raise
-        http_clients["model"].initialize()
-
-    def test_model_inference(self, http_clients, loaded_img):
-        """
-        Test roboml http model client inference
-        """
-        inference_input = {"query": "What do you see?", "images": [loaded_img]}
-        result = http_clients["model"].inference(inference_input)
-        assert result is not None
-        assert result["output"] is not None
-        logging.info(result["output"])
-
-    def test_model_deinit(self, http_clients):
-        """
-        Test roboml http model client deinit
-        """
-        http_clients["model"].deinitialize()
-
-    def test_db_init(self, http_clients):
-        """
-        Test roboml http db client init
-        """
-        http_clients["db"].check_connection()
-        http_clients["db"].initialize()
-
-    def test_db_add(self, http_clients, data):
-        """
-        Test roboml http db client add
-        """
-        result = http_clients["db"].add(data)
-        assert result is not None
-        assert result["output"] is not None
-        logging.info(result["output"])
-
-    def test_db_conditional_add(self, http_clients, data):
-        """
-        Test roboml http db client conditional add
-        """
-        result = http_clients["db"].conditional_add(data)
-        assert result is not None
-        assert result["output"] is not None
-        logging.info(result["output"])
-
-    def test_db_metadata_query(self, http_clients, data):
-        """
-        Test roboml http db client metadata query
-        """
-        metadata_query = {
-            "metadatas": data["metadatas"],
-            "collection_name": data["collection_name"],
-        }
-        result = http_clients["db"].metadata_query(metadata_query)
-        assert result is not None
-        assert result["output"] is not None
-        logging.info(result["output"])
-
-    def test_db_query(self, http_clients, data):
-        """
-        Test roboml http db client query
-        """
-        metadata_query = {
-            "query": "what is a",
-            "collection_name": data["collection_name"],
-        }
-        result = http_clients["db"].query(metadata_query)
-        assert result is not None
-        assert result["output"] is not None
-        logging.info(result["output"])
-
-    def test_db_deinit(self, http_clients):
-        """
-        Test roboml http db client deinit
-        """
-        http_clients["db"].deinitialize()
+def text_of(chunk) -> str:
+    """Text of a streamed chunk, from Ollama or from an OpenAI-compatible server"""
+    if "message" in chunk:
+        return chunk["message"].get("content") or ""
+    return chunk["choices"][0]["delta"].get("content") or ""
 
 
-@pytest.mark.local_only
-class TestRobomlRESPClient:
-    """
-    Test roboml resp client
-    """
-
-    def test_model_init(self, resp_clients):
-        """
-        Test roboml resp model client init
-        """
-        try:
-            resp_clients["model"].check_connection()
-        except Exception:
-            logging.error(
-                "Make sure roboml is installed on this machine before running these tests. roboml can be installed with `pip install roboml`"
-            )
-            raise
-        resp_clients["model"].initialize()
-
-    def test_model_inference(self, resp_clients, loaded_img):
-        """
-        Test roboml resp model client inference
-        """
-        inference_input = {"query": "What do you see?", "images": [loaded_img]}
-        result = resp_clients["model"].inference(inference_input)
-        assert result is not None
-        assert result["output"] is not None
-        logging.info(result["output"])
-
-    def test_model_deinit(self, resp_clients):
-        """
-        Test roboml resp model client deinit
-        """
-        resp_clients["model"].deinitialize()
-
-    def test_db_init(self, resp_clients):
-        """
-        Test roboml resp db client init
-        """
-        resp_clients["db"].check_connection()
-        resp_clients["db"].initialize()
-
-    def test_db_add(self, resp_clients, data):
-        """
-        Test roboml resp db client add
-        """
-        result = resp_clients["db"].add(data)
-        assert result is not None
-        assert result["output"] is not None
-        logging.info(result["output"])
-
-    def test_db_conditional_add(self, resp_clients, data):
-        """
-        Test roboml resp db client conditional add
-        """
-        result = resp_clients["db"].conditional_add(data)
-        assert result is not None
-        assert result["output"] is not None
-        logging.info(result["output"])
-
-    def test_db_metadata_query(self, resp_clients, data):
-        """
-        Test roboml resp db client metadata query
-        """
-        metadata_query = {
-            "metadatas": data["metadatas"],
-            "collection_name": data["collection_name"],
-        }
-        result = resp_clients["db"].metadata_query(metadata_query)
-        assert result is not None
-        assert result["output"] is not None
-        logging.info(result["output"])
-
-    def test_db_query(self, resp_clients, data):
-        """
-        Test roboml resp db client query
-        """
-        metadata_query = {
-            "query": "what is a",
-            "collection_name": data["collection_name"],
-        }
-        result = resp_clients["db"].query(metadata_query)
-        assert result is not None
-        assert result["output"] is not None
-        logging.info(result["output"])
-
-    def test_db_deinit(self, resp_clients):
-        """
-        Test roboml resp db client deinit
-        """
-        resp_clients["db"].deinitialize()
+@pytest.fixture(scope="class")
+def ollama():
+    client = started(OllamaClient(OllamaModel(name="llm", checkpoint=OLLAMA_MODEL)))
+    yield client
+    client.deinitialize()
 
 
-@pytest.mark.local_only
+@pytest.fixture(scope="class")
+def generic():
+    model = GenericLLM(name="llm", checkpoint=OLLAMA_MODEL)
+    client = started(GenericHTTPClient(model, host=HOST, port=OLLAMA_PORT))
+    yield client
+    client.deinitialize()
+
+
+@pytest.fixture(scope="class")
+def roboml_http():
+    model = TransformersLLM(name="agents_test_llm_http", checkpoint=ROBOML_LLM)
+    client = started(RoboMLHTTPClient(model, host=ROBOML_HOST, port=ROBOML_PORT))
+    yield client
+    client.deinitialize()
+
+
+@pytest.fixture(scope="class")
+def roboml_http_mllm():
+    model = TransformersMLLM(name="agents_test_mllm_http", checkpoint=ROBOML_MLLM)
+    client = started(RoboMLHTTPClient(model, host=ROBOML_HOST, port=ROBOML_PORT))
+    yield client
+    client.deinitialize()
+
+
+@pytest.fixture(scope="class")
+def roboml_ws():
+    model = TransformersLLM(name="agents_test_llm_ws", checkpoint=ROBOML_LLM)
+    client = started(RoboMLWSClient(model, host=ROBOML_HOST, port=ROBOML_PORT))
+    # Run the websocket loop on its own thread, fed through its queues, as the
+    # component does
+    client.stop_event = threading.Event()
+    client.request_queue = queue.Queue()
+    client.response_queue = queue.Queue()
+    thread = threading.Thread(target=client._inference, daemon=True)
+    thread.start()
+    yield client
+    client.stop_event.set()
+    thread.join(timeout=10)
+    client.deinitialize()
+
+
+@pytest.fixture(scope="class")
+def roboml_resp():
+    model = TransformersLLM(name="agents_test_llm_resp", checkpoint=ROBOML_LLM)
+    client = started(RoboMLRESPClient(model, host=ROBOML_HOST, port=ROBOML_RESP_PORT))
+    yield client
+    client.deinitialize()
+
+
+@pytest.fixture(scope="class")
+def chroma():
+    db = ChromaDB(
+        embeddings="ollama",
+        checkpoint=CHROMA_EMBEDDINGS,
+        ollama_host=HOST,
+        ollama_port=OLLAMA_PORT,
+    )
+    client = ChromaClient(db, host=CHROMA_HOST, port=CHROMA_PORT)
+    try:
+        client.check_connection()
+    except Exception as e:
+        pytest.skip(f"ChromaClient: server not reachable ({e})")
+    client.initialize()
+    yield client
+    client.deinitialize()
+
+
+class TestRoboMLHTTPClient:
+    def test_inference(self, roboml_http):
+        result = roboml_http.inference(chat("Say hello in five words."))
+        assert result and result["output"].strip()
+
+    def test_streamed_inference(self, roboml_http):
+        result = roboml_http.inference(chat("Say hello in five words.", stream=True))
+        assert "".join(result["output"]).strip()
+
+    def test_inference_with_an_image(self, roboml_http_mllm):
+        image = cv2.cvtColor(cv2.imread(str(IMAGE)), cv2.COLOR_BGR2RGB)
+        result = roboml_http_mllm.inference(
+            chat("What do you see in this image?", images=[image])
+        )
+        assert result and result["output"].strip()
+
+
+class TestRoboMLWSClient:
+    def test_inference(self, roboml_ws):
+        roboml_ws.request_queue.put(chat("Say hello in five words."))
+        output = roboml_ws.response_queue.get(timeout=120)
+        assert output.strip()
+
+
+class TestRoboMLRESPClient:
+    def test_inference(self, roboml_resp):
+        result = roboml_resp.inference(chat("Say hello in five words."))
+        assert result and result["output"].strip()
+
+
+class TestChromaClient:
+    COLLECTION = "agents_client_test"
+    DOCS = {
+        "ids": ["kitchen", "garden"],
+        "metadatas": [{"room": "kitchen"}, {"room": "garden"}],
+        "documents": ["a red mug on the kitchen table", "a tree in the garden"],
+    }
+
+    def test_add_then_query(self, chroma):
+        added = chroma.add({
+            **self.DOCS,
+            "collection_name": self.COLLECTION,
+            "reset_collection": True,
+        })
+        assert added
+
+        result = chroma.query({
+            "query": "where is the mug?",
+            "collection_name": self.COLLECTION,
+            "n_results": 1,
+        })
+        assert result["output"]["ids"][0] == ["kitchen"]
+
+    def test_metadata_query(self, chroma):
+        result = chroma.metadata_query({
+            "metadatas": [{"room": "garden"}],
+            "collection_name": self.COLLECTION,
+        })
+        assert result and result["output"]
+
+    def test_query_after_deinitialize(self, chroma):
+        """As after its component restarts"""
+        chroma.deinitialize()
+
+        result = chroma.query({
+            "query": "where is the mug?",
+            "collection_name": self.COLLECTION,
+            "n_results": 1,
+        })
+        assert result["output"]["ids"][0] == ["kitchen"]
+
+
 class TestOllamaClient:
-    """
-    Test ollama client
-    """
+    def test_inference(self, ollama):
+        result = ollama.inference(chat("Say hello in five words."))
+        assert result and result["output"].strip()
 
-    def test_model_init(self, ollama_client):
-        """
-        Test ollama model client init
-        """
-        try:
-            ollama_client.check_connection()
-        except Exception:
-            logging.error(
-                "Make sure Ollama is installed on this machine before running these tests. Visit https://ollama.com for installation instructions."
-            )
-            raise
-        ollama_client.initialize()
+    def test_streamed_inference(self, ollama):
+        result = ollama.inference(chat("Say hello in five words.", stream=True))
+        assert "".join(text_of(chunk) for chunk in result["output"]).strip()
 
-    def test_model_inference(self, ollama_client, loaded_img):
-        """
-        Test ollama model client inference
-        """
-        inference_input = {"query": "What do you see?", "images": [loaded_img]}
-        result = ollama_client.inference(inference_input)
-        assert result is not None
-        assert result["output"] is not None
-        logging.info(result["output"])
+    def test_inference_with_an_image(self, ollama):
+        image = cv2.cvtColor(cv2.imread(str(IMAGE)), cv2.COLOR_BGR2RGB)
+        result = ollama.inference(
+            chat("What do you see in this image?", images=[image])
+        )
+        assert result and result["output"].strip()
 
-    def test_model_deinit(self, ollama_client):
-        """
-        Test ollama model client deinit
-        """
-        ollama_client.deinitialize()
+
+class TestGenericHTTPClient:
+    def test_inference(self, generic):
+        result = generic.inference(chat("Say hello in five words."))
+        assert result and result["output"].strip()
+
+    def test_streamed_inference(self, generic):
+        result = generic.inference(chat("Say hello in five words.", stream=True))
+        assert "".join(text_of(chunk) for chunk in result["output"]).strip()
