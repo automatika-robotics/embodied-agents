@@ -213,14 +213,16 @@ class TestLLMToolCallHistory:
     expect it: the assistant message with its tool calls, then one tool message
     per call with the call's id"""
 
-    def _call_tools(self, llm, mock_model_client, tool_calls, tool, to_model=False):
+    def _call_tools(self, llm, mock_model_client, tool_calls, tool, follow_up=None):
+        """Run a step in which the model calls the tools. With a follow_up
+        reply, the results are sent back to the model, which replies with it"""
         llm.config._tool_descriptions = [{"function": {"name": "get_battery"}}]
-        llm.config._tool_response_flags = {"get_battery": to_model}
+        llm.config._tool_response_flags = {"get_battery": follow_up is not None}
         llm._external_processors = {"get_battery": ([tool], "Function")}
-        mock_model_client.inference.return_value = {
-            "output": "",
-            "tool_calls": tool_calls,
-        }
+        replies = [{"output": "", "tool_calls": tool_calls}]
+        if follow_up is not None:
+            replies.append({"output": follow_up})
+        mock_model_client.inference.side_effect = replies
         mock_cb = MagicMock()
         mock_cb.get_output.return_value = "battery?"
         llm.trig_callbacks = {"in": mock_cb}
@@ -288,7 +290,7 @@ class TestLLMToolCallHistory:
         assert llm.messages[-1]["role"] == "assistant"
         assert "tool_calls" not in llm.messages[-1]
 
-    def test_the_results_sent_back_to_the_model_follow_their_calls(
+    def test_the_reply_to_the_results_is_recorded_without_think_tokens(
         self, llm, mock_model_client
     ):
         calls = [
@@ -299,12 +301,20 @@ class TestLLMToolCallHistory:
         ]
 
         self._call_tools(
-            llm, mock_model_client, calls, lambda unit: "87", to_model=True
+            llm,
+            mock_model_client,
+            calls,
+            lambda unit: "87",
+            follow_up="<think>\nthe tool said 87\n</think>\n\nBattery is at 87%.",
         )
 
-        follow_up = mock_model_client.inference.call_args_list[-1].args[0]["query"]
-        assert follow_up[-2]["tool_calls"][0]["id"] == "call_abc"
-        assert follow_up[-1]["tool_call_id"] == "call_abc"
+        call, result, reply = llm.messages[-3:]
+        assert call["tool_calls"][0]["id"] == "call_abc"
+        assert result["tool_call_id"] == "call_abc"
+        assert reply == {"role": "assistant", "content": "Battery is at 87%."}
+        assert (
+            llm.publishers_dict["out"].publish.call_args[0][0] == "Battery is at 87%."
+        )
 
 
 class TestLLMThinkTokens:

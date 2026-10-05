@@ -434,10 +434,12 @@ class LLM(ModelComponent):
                 "query": self.messages,
                 **self.config._get_inference_params(),
             }
-            if self.model_client:
-                return self.model_client.inference(input)
-            elif hasattr(self, "local_model"):
-                return self.local_model(input)
+            result = self._call_inference(input)
+            # the model's reply to the results, handled as its first reply
+            if result:
+                result["output"] = self._strip_think_tokens(result["output"])
+                self.messages.append({"role": "assistant", "content": result["output"]})
+            return result
 
         else:
             # return result with its output set to last function response
