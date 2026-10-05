@@ -135,7 +135,7 @@ def locate(self, **kwargs) -> ActionReturnType: ...
 
 ## Action Servers as Tools
 
-Cortex also exposes action servers as execution tools, named `send_goal_to_<component>_<server>` from the registry reference: the component's node name, then the server's name with that node name prefix removed and slashes replaced by underscores. A server `vla/run` on component `vla` gives `send_goal_to_vla_run`. The goal message's fields become the tool parameters. The registry lists two kinds of server:
+Cortex also exposes action servers as execution tools, named `send_goal_to_<component>_<server>` from the registry reference: the component's node name, then the server's name with that node name prefix removed and slashes replaced by underscores. The VLA component's server `vla/manipulate_with_vla`, on a component named `vla`, gives `send_goal_to_vla_manipulate_with_vla`. The goal message's fields become the tool parameters. The registry lists two kinds of server:
 
 - the main action server of every managed component running as `ComponentRunType.ACTION_SERVER` (e.g. `VLA`, `MoveIt`)
 - any additional action servers a component reports through `get_ros_entrypoints()`.
