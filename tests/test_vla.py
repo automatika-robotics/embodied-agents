@@ -7,7 +7,7 @@ import queue
 import threading
 import time
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, PropertyMock
 
 import numpy as np
 import pytest
@@ -852,6 +852,30 @@ class TestVLAComponent:
         goal_handle.canceled.assert_called_once()
         goal_handle.abort.assert_not_called()
         comp._action_cleanup.assert_called_once()
+
+    def test_missing_inference_input_is_retried_at_once_and_logged_once(
+        self, rclpy_init, vla_topics, monkeypatch
+    ):
+        """While it cannot prepare an input, the loop retries after a short pause
+        that lets the threads receiving the inputs run, and logs the warning the
+        first time only"""
+        sleep = MagicMock()
+        monkeypatch.setattr("agents.components.vla.time.sleep", sleep)
+        comp = self._prepare_goal_execution(vla_topics, "test_vla_no_input")
+        comp._create_input = MagicMock(return_value=None)
+        goal_handle = MagicMock()
+        goal_handle.request.task = "pick"
+        goal_handle.is_active = True
+        type(goal_handle).is_cancel_requested = PropertyMock(
+            side_effect=[False] * 5 + [True] * 5
+        )
+
+        comp.main_action_callback(goal_handle)
+
+        assert comp._create_input.call_count == 5
+        assert [c.args for c in sleep.call_args_list] == [(0.001,)] * 5
+        comp.get_logger().warning.assert_called_once()
+        goal_handle.canceled.assert_called_once()
 
     def test_preempted_goal_not_transitioned_again(self, rclpy_init, vla_topics):
         """A goal already aborted by preemption is terminal — transitioning

@@ -791,9 +791,9 @@ class VLA(ModelComponent):
             and _timeout < self.config.input_timeout
             and not goal_handle.is_cancel_requested
         ):
-            self.get_logger().warning(
+            self.log_once(
+                "missing_inputs",
                 f"Inputs topics {self.get_missing_inputs()} are not available, waiting to start executing actions...",
-                once=True,
             )
             _timeout += 1 / self.config.loop_rate
             time.sleep(1 / self.config.loop_rate)
@@ -838,9 +838,12 @@ class VLA(ModelComponent):
                     # send input for inference
                     self.model_client.inference(model_observations)
                 else:
-                    self.get_logger().warning(
-                        "Could not prepare inference input, skipping this step..."
+                    self.log_once(
+                        "no_inference_input",
+                        "Could not prepare inference input, skipping this step...",
                     )
+                    # Retry as soon as possible
+                    time.sleep(0.001)  # but let the component's other threads run
                     continue
 
                 # Compute errors and publish feedback
