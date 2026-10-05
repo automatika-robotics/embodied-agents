@@ -65,6 +65,44 @@ class StreamingStringCallback(TextCallback):
             return self.msg.data
 
 
+class DecisionCallback(GenericCallback):
+    """Decision Callback class for Decision msg"""
+
+    def __init__(self, input_topic, node_name: Optional[str] = None) -> None:
+        super().__init__(input_topic, node_name)
+        self.msg = input_topic.fixed if self._is_fixed else None
+
+    def _get_output(self, **_) -> Optional[str]:
+        """Gives the answer as text
+
+        :returns: The answer as text
+        :rtype: str
+        """
+        if self.msg is None:
+            return None
+        # a fixed input is already text
+        if isinstance(self.msg, str):
+            return self.msg
+        if self.msg.type == "noul":
+            answer = "yes" if self.msg.noul >= 0.5 else "no"
+            probability = max(self.msg.noul, 1.0 - self.msg.noul)
+        elif self.msg.type == "choice":
+            answer = self.msg.choice
+            probability = max(self.msg.probabilities, default=0.0)
+        else:
+            level = round(self.msg.score)
+            options = list(self.msg.options)
+            answer = (
+                options[level] if 0 <= level < len(options) else f"{self.msg.score:.2f}"
+            )
+            probability = max(self.msg.probabilities, default=0.0)
+        return f"{self.msg.id}: {answer} ({probability:.2f})"
+
+    def _get_ui_content(self, **_) -> str:
+        """Get UI content for Decision: the answer as text"""
+        return self._get_output() or ""
+
+
 class VideoCallback(GenericCallback):
     """
     Video Callback class. Its get method saves a video as an array of arrays
@@ -230,9 +268,7 @@ class DetectionsMultiSourceCallback(GenericCallback):
             self.msg
             if isinstance(self.msg, list)  # a fixed input is already a list of labels
             else [
-                label
-                for detection in self.msg.detections
-                for label in detection.labels
+                label for detection in self.msg.detections for label in detection.labels
             ]
         )
         return ", ".join(labels) if labels else None

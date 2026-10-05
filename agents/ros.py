@@ -92,6 +92,7 @@ from automatika_embodied_agents.msg import (
     Detections3D as ROSDetections3D,
 )
 from automatika_embodied_agents.msg import (
+    Decision as ROSDecision,
     StreamingString as ROSStreamingString,
     Video as ROSVideo,
     Trackings as ROSTrackings,
@@ -100,6 +101,7 @@ from automatika_embodied_agents.msg import (
 )
 from automatika_embodied_agents.action import MoveManipulator, VisionLanguageAction
 from .callbacks import (
+    DecisionCallback,
     DetectionsCallback,
     TrackingsCallback,
     Detections3DCallback,
@@ -116,6 +118,7 @@ from .utils.actions import JointsData
 __all__ = [
     "String",
     "StreamingString",
+    "Decision",
     "Video",
     "Audio",
     "Bool",
@@ -305,6 +308,54 @@ class StreamingString(SupportedType):
         msg.stream = stream
         msg.done = done
         msg.data = output
+        return msg
+
+
+class Decision(SupportedType):
+    """
+    Wraps the `automatika_embodied_agents.msg.Decision` message type.
+
+    This type represents the answer of a decision model to one typed question
+    about a state: a choice, a score or a yes/no (noul) answer, with the
+    probability of every option.
+
+    **ROS2 Message Type**: `automatika_embodied_agents/msg/Decision`
+    """
+
+    callback = DecisionCallback
+    _ros_type = ROSDecision
+
+    @classmethod
+    def convert(cls, output: Dict, id: str = "", **_) -> ROSDecision:
+        """
+        Takes one answer of the /v1/systemone API and the id of its question
+        and converts it into a ROS message of type Decision
+
+        :param output: The answer, as the API returns it
+        :param id: The id of the question answered
+        :return: Decision
+        """
+        msg = ROSDecision()
+        msg.id = id
+        msg.type = output.get("type", "")
+        if msg.type == "noul":
+            # A noul answer is one probability
+            msg.noul = float(output["noul"])
+            msg.confidence = abs(2.0 * msg.noul - 1.0)
+            msg.options = ["false", "true"]
+            msg.probabilities = [1.0 - msg.noul, msg.noul]
+            return msg
+        probabilities = output.get("probabilities") or {}
+        msg.confidence = float(output.get("confidence", 0.0))
+        if msg.type == "choice":
+            msg.choice = output.get("choice", "")
+            msg.options = list(probabilities)
+        else:
+            # the levels of a score are described in its legend by index
+            msg.score = float(output.get("score", 0.0))
+            legend = output.get("legend") or {}
+            msg.options = [str(legend.get(key, key)) for key in probabilities]
+        msg.probabilities = [float(p) for p in probabilities.values()]
         return msg
 
 
@@ -862,6 +913,7 @@ class JointState(SupportedType):
 
 agent_types = [
     StreamingString,
+    Decision,
     Video,
     Detections,
     Detections3D,

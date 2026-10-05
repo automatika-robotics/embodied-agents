@@ -19,6 +19,7 @@ The following custom messages are defined in the `automatika_embodied_agents` pa
 | `StreamingString` | `StreamingString.msg` | A string with `stream` (bool) and `done` (bool) flags for token-by-token LLM output. |
 | `Video` | `Video.msg` | A sequence of `Image` and/or `CompressedImage` frames bundled as a single message. |
 | `PointsOfInterest` | `PointsOfInterest.msg` | A list of `Point2D` coordinates on an image, plus the source image/depth. |
+| `Decision` | `Decision.msg` | A decision model's answer to one typed question: the question `id` and `type`, the `choice`, `score` or `noul` (probability of yes) answer with its `confidence`, and the `options` with their `probabilities`. |
 
 ### Action Types
 

@@ -1,6 +1,7 @@
 from typing import Dict
 
 from .ros import (
+    Decision,
     Detections,
     Detections3D,
     DetectionsMultiSource,
@@ -47,6 +48,8 @@ OUTPUT_ELEMENTS = {
     Video: _out_image_element,
     # 3D detections dont have an image; displayed as text
     Detections3D: _log_text_element,
+    # an answer is displayed as text
+    Decision: _log_text_element,
 }
 
 INPUT_ELEMENTS = {}
