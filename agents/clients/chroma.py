@@ -141,7 +141,6 @@ class ChromaClient(DBClient):
                 To install ChromaDB, follow instructions on https://docs.trychroma.com/docs/overview/getting-started
                 """
             )
-            self.client.close()
             raise
 
     def _initialize(self) -> None:
@@ -168,14 +167,13 @@ class ChromaClient(DBClient):
         metadata: Optional[Dict[str, Any]] = None,
         get_only: bool = False,
     ):
-        effective_metadata = metadata or {}
-        effective_metadata["hnsw:space"] = distance_func
+        effective_metadata = dict(metadata or {})
+        if distance_func:
+            effective_metadata["hnsw:space"] = distance_func
 
-        payload = {
-            "name": collection_name,
-            "metadata": effective_metadata,
-            "get_or_create": True,
-        }
+        payload = {"name": collection_name, "get_or_create": True}
+        if effective_metadata:
+            payload["metadata"] = effective_metadata
         try:
             if get_only:
                 collection_info = self._api_call(
@@ -375,11 +373,10 @@ class ChromaClient(DBClient):
         return {"output": output} if output else None
 
     def _deinitialize(self) -> None:
-        """Deinitialize DB client"""
-        if self.db_init_params["ollama"]:
-            self.embeddings_client.initialize()
-        self.client.close()
-        self.logger.info("ChromaDB HTTP client closed.")
+        """Deinitialize the embeddings model."""
+        if self.db_init_params["embeddings"] == "ollama":
+            self.embeddings_client.deinitialize()
+        self.logger.info("ChromaDB client deinitialized.")
 
     def _embed(self, input: Union[str, List[str]]) -> Optional[List[List]]:
         # Create embeddings

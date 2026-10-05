@@ -1,5 +1,6 @@
 """What clients say when they would send data unencrypted off this machine."""
 
+import json
 import ssl
 import sys
 from unittest.mock import MagicMock
@@ -14,6 +15,7 @@ from agents.clients.lerobot import LeRobotClient
 from agents.clients.ollama import OllamaClient
 from agents.clients.roboml import RoboMLHTTPClient, RoboMLWSClient
 from agents.utils import plain_text_warning, tls_verify
+from agents.vectordbs import ChromaDB
 
 
 class TestPlainTextWarning:
@@ -390,3 +392,56 @@ class TestOllamaModelsAreLoaded:
         with pytest.raises(ollama.ResponseError):
             client._initialize()
         client.client.pull.assert_not_called()
+
+
+class TestChromaClientLifecycle:
+    """A deinitialized Chroma client can be initialized and used again, as when
+    its component restarts, and a failed connection check can be retried"""
+
+    def _client(self, monkeypatch, handler):
+        monkeypatch.setattr(ChromaClient, "_check_connection", lambda self: None)
+        client = ChromaClient(ChromaDB())
+        monkeypatch.undo()
+        client.client = httpx.Client(
+            transport=httpx.MockTransport(handler), base_url=client.url
+        )
+        client.embeddings_client = MagicMock()
+        return client
+
+    def test_deinitialize_unloads_the_embeddings_and_keeps_the_connection(
+        self, monkeypatch
+    ):
+        client = self._client(monkeypatch, lambda request: httpx.Response(200, json={}))
+
+        client.deinitialize()
+
+        client.embeddings_client.deinitialize.assert_called_once()
+        client.embeddings_client.initialize.assert_not_called()
+        assert client._api_call("GET", "/heartbeat") == {}
+
+    def test_a_failed_connection_check_can_be_retried(self, monkeypatch):
+        replies = iter([httpx.Response(500), httpx.Response(200, json={})])
+        client = self._client(monkeypatch, lambda request: next(replies))
+
+        with pytest.raises(httpx.HTTPStatusError):
+            client.check_connection()
+        client.check_connection()
+
+    def test_a_collection_is_created_without_a_distance_function(self, monkeypatch):
+        sent = []
+
+        def handle(request):
+            sent.append(json.loads(request.content))
+            return httpx.Response(200, json={"id": "c1"})
+
+        client = self._client(monkeypatch, handle)
+        metadata = {"owner": "robot"}
+
+        client._get_or_create_collection("plain")
+        client._get_or_create_collection("cosine", distance_func="cosine")
+        client._get_or_create_collection("described", metadata=metadata)
+
+        assert "metadata" not in sent[0]
+        assert sent[1]["metadata"] == {"hnsw:space": "cosine"}
+        assert sent[2]["metadata"] == {"owner": "robot"}
+        assert metadata == {"owner": "robot"}
