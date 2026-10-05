@@ -96,17 +96,24 @@ class OllamaClient(ModelClient):
 
     def _initialize(self) -> None:
         """
-        Initialize the model on platform using the paramters provided in the model specification class
+        Initialize the model on platform using the paramters provided in the model specification class.
         """
+        from ollama import ResponseError
+
         self.logger.info(f"Initializing {self.model_name} on ollama")
+        checkpoint = self.model_init_params["checkpoint"]
         try:
             # set timeout on underlying httpx client
             self.client._client.timeout = self.init_timeout
-            r = self.client.pull(self.model_init_params["checkpoint"])
-            if r.get("status") != "success":  # type: ignore
-                raise Exception(
-                    f"Could not pull model {self.model_init_params['checkpoint']}"
-                )
+            try:
+                self.client.show(checkpoint)
+            except ResponseError as e:
+                if e.status_code != 404:
+                    raise
+                self.logger.info(f"{checkpoint} is not installed in Ollama, pulling it")
+                r = self.client.pull(checkpoint)
+                if r.get("status") != "success":  # type: ignore
+                    raise Exception(f"Could not pull model {checkpoint}") from e
             # Cache capability check so _deinitialize can use it too
             self._is_embedding = self._is_embedding_model()
             # load model in memory with an appropriate empty request
@@ -221,7 +228,7 @@ class OllamaClient(ModelClient):
     def _deinitialize(self):
         """Deinitialize the model on the platform"""
 
-        self.logger.error(f"Deinitializing {self.model_name} model on ollama")
+        self.logger.info(f"Deinitializing {self.model_name} model on ollama")
         try:
             if getattr(self, "_is_embedding", False):
                 self.client.embed(

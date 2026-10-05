@@ -193,8 +193,7 @@ def ca_cert(tmp_path):
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "gpu-box")])
     now = datetime.datetime.now(datetime.timezone.utc)
     cert = (
-        x509
-        .CertificateBuilder()
+        x509.CertificateBuilder()
         .subject_name(name)
         .issuer_name(name)
         .public_key(key.public_key())
@@ -337,7 +336,7 @@ class TestTheLeRobotClientsHost:
         return client, grpc.insecure_channel.call_args.args[0], logger
 
     def test_a_bare_host_is_used_as_given(self, monkeypatch):
-        client, target, logger = self._client(monkeypatch, "10.0.0.5")
+        _, target, logger = self._client(monkeypatch, "10.0.0.5")
 
         assert target == "10.0.0.5:8080"
         assert not logger.warning.called
@@ -349,3 +348,45 @@ class TestTheLeRobotClientsHost:
         assert (client.host, client.port) == ("10.0.0.5", 9000)
         logger.warning.assert_called_once()
         assert "https://10.0.0.5:9000" in logger.warning.call_args.args[0]
+
+
+class TestOllamaModelsAreLoaded:
+    """An installed model is loaded without reaching the Ollama registry, so it
+    starts offline and is not affected by changes on the registry. A model that
+    is not installed is pulled first"""
+
+    MODEL = {
+        **TestClientsWarnWhenStarted.MODEL,
+        "model_type": "OllamaModel",
+        "model_init_params": {"checkpoint": "qwen3:0.6b"},
+    }
+
+    def _client(self, show_error=None):
+        client = OllamaClient(self.MODEL)
+        client.client = MagicMock()
+        client.client.show.side_effect = show_error
+        client.client.pull.return_value = {"status": "success"}
+        return client
+
+    def test_an_installed_model_is_loaded_without_a_pull(self):
+        client = self._client()
+
+        client._initialize()
+
+        client.client.pull.assert_not_called()
+        client.client.generate.assert_called_once()
+
+    def test_a_model_that_is_not_installed_is_pulled(self):
+        client = self._client(ollama.ResponseError("model not found", 404))
+
+        client._initialize()
+
+        client.client.pull.assert_called_once_with("qwen3:0.6b")
+        client.client.generate.assert_called_once()
+
+    def test_other_errors_are_raised_without_a_pull(self):
+        client = self._client(ollama.ResponseError("server error", 500))
+
+        with pytest.raises(ollama.ResponseError):
+            client._initialize()
+        client.client.pull.assert_not_called()
