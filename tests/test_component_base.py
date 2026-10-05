@@ -109,9 +109,7 @@ class TestTriggerPartitionTiming:
         assert probe.callbacks["side_in"]._transform_provider is not None
         assert probe.trig_callbacks["trig_in"]._transform_provider is not None
 
-    def test_replacing_a_trigger_before_activation_renames_the_bookkeeping(
-        self, probe
-    ):
+    def test_replacing_a_trigger_before_activation_renames_the_bookkeeping(self, probe):
         """Pre-activation the trigger is a plain callback, so the parent
         replaces it there — and the partition must follow the rename."""
         error = probe._replace_input_topic("trig_in", "elsewhere", "String")
@@ -143,7 +141,7 @@ class TestAnEventTrigger:
         probe._execution_step = MagicMock()
         event = Event(Topic(name="trig_in", msg_type="String"))
         # What custom_on_configure registers for an event trigger
-        event.register_actions(Action(probe._run_triggered_step))
+        event.register_actions(Action(probe._run_event_triggered_step))
         errors = []
         monkeypatch.setattr(ros_sugar.utils.logger, "error", errors.append)
         monkeypatch.setattr(ros_sugar.core.event.logger, "error", errors.append)
@@ -157,7 +155,7 @@ class TestAnEventTrigger:
     def test_a_step_that_raises_is_a_failure(self, probe):
         probe._execution_step = MagicMock(side_effect=RuntimeError("no model"))
 
-        success, message = Action(probe._run_triggered_step)()
+        success, message = Action(probe._run_event_triggered_step)()
 
         assert success is False
         assert "no model" in message
