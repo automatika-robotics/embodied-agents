@@ -172,18 +172,14 @@ class RoboMLHTTPClient(ModelClient):
         return result
 
     def _deinitialize(self) -> None:
-        """Deinitialize the model on the platform"""
+        """Deinitialize the model on the platform."""
 
         self.logger.info(f"Deinitializing {self.model_name} model on RoboML remote")
         stop_params = {"node_name": self.model_name}
         try:
             self.client.post("/remove_node", params=stop_params).raise_for_status()
-            self.client.close()
         except Exception as e:
             self.__handle_exceptions(e)
-            if hasattr(self, "client") and self.client and not self.client.is_closed:
-                self.logger.info("Closing HTTPX client.")
-                self.client.close()
 
     def __handle_exceptions(self, excep: Exception) -> None:
         """__handle_exceptions.
@@ -496,14 +492,13 @@ class RoboMLRESPClient(ModelClient):
         return result
 
     def _deinitialize(self) -> None:
-        """Deinitialize the model on the platform"""
+        """Deinitialize the model on the platform."""
 
-        self.logger.error(f"Deinitializing {self.model_name} on RoboML remote")
+        self.logger.info(f"Deinitializing {self.model_name} on RoboML remote")
         stop_params = {"node_name": self.model_name}
         try:
             stop_params_b = msgpack.packb(stop_params)
             self.redis.execute_command("remove_node", stop_params_b)
-            self.redis.close()
         except Exception as e:
             self.__handle_exceptions(e)
 

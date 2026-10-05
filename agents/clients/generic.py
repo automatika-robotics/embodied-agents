@@ -415,10 +415,10 @@ class GenericHTTPClient(ModelClient):
 
     def _deinitialize(self) -> None:
         """
-        Deinitializes the client by closing the httpx client.
+        Deinitialize the client. OpenAI-compatible servers have no call to unload a
+        model.
         """
         self.logger.info("Deinitializing GenericHTTPClient...")
-        self.client.close()
 
     def __handle_images(self, inference_input: Dict[str, Any]) -> Dict[str, Any]:
         """Handles images in multimodal input"""

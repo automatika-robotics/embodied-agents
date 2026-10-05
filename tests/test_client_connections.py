@@ -6,6 +6,7 @@ import sys
 from unittest.mock import MagicMock
 
 import httpx
+import msgpack
 import ollama
 import pytest
 
@@ -13,7 +14,7 @@ from agents.clients.chroma import ChromaClient
 from agents.clients.generic import GenericHTTPClient
 from agents.clients.lerobot import LeRobotClient
 from agents.clients.ollama import OllamaClient
-from agents.clients.roboml import RoboMLHTTPClient, RoboMLWSClient
+from agents.clients.roboml import RoboMLHTTPClient, RoboMLRESPClient, RoboMLWSClient
 from agents.utils import plain_text_warning, tls_verify
 from agents.vectordbs import ChromaDB
 
@@ -445,3 +446,88 @@ class TestChromaClientLifecycle:
         assert sent[1]["metadata"] == {"hnsw:space": "cosine"}
         assert sent[2]["metadata"] == {"owner": "robot"}
         assert metadata == {"owner": "robot"}
+
+
+class TestClientsCanBeInitializedAgain:
+    """Deinitializing a client releases its model on the platform but keeps its
+    connection, so the client can be initialized again: when the component
+    reconfigures it (safe_restart) or switches back to it (change_model_client)"""
+
+    MODEL = {
+        **TestClientsWarnWhenStarted.MODEL,
+        "model_name": "llm",
+        "model_init_params": {"checkpoint": "m"},
+    }
+
+    @staticmethod
+    def _construct(monkeypatch, cls, model):
+        """Construct a client without its server, which the RoboML clients check
+        for when constructed"""
+        monkeypatch.setattr(cls, "_check_connection", lambda self: None)
+        client = cls(model)
+        monkeypatch.undo()
+        return client
+
+    @staticmethod
+    def _transport(client, reply):
+        paths = []
+
+        def handle(request):
+            paths.append(request.url.path)
+            return httpx.Response(200, json=reply)
+
+        client.client = httpx.Client(
+            transport=httpx.MockTransport(handle), base_url=client.url
+        )
+        return paths
+
+    def test_the_generic_client(self):
+        client = GenericHTTPClient(self.MODEL)
+        self._transport(client, {"data": [{"id": "m"}]})
+
+        client.initialize()
+        client.deinitialize()
+        client.initialize()
+
+        assert not client.client.is_closed
+
+    def test_the_roboml_http_client(self, monkeypatch):
+        client = self._construct(
+            monkeypatch,
+            RoboMLHTTPClient,
+            {**self.MODEL, "model_type": "TransformersLLM"},
+        )
+        paths = self._transport(client, {})
+
+        client.initialize()
+        client.deinitialize()
+        client.initialize()
+
+        assert paths == [
+            "/add_node",
+            "/llm/initialize",
+            "/remove_node",
+            "/add_node",
+            "/llm/initialize",
+        ]
+        assert not client.client.is_closed
+
+    def test_the_roboml_resp_client(self, monkeypatch):
+        client = self._construct(
+            monkeypatch,
+            RoboMLRESPClient,
+            {**self.MODEL, "model_type": "TransformersLLM"},
+        )
+        client.redis = MagicMock()
+        client.redis.execute_command.side_effect = lambda command, *_: (
+            msgpack.packb("READY") if command == "llm.get_status" else None
+        )
+
+        client.initialize()
+        client.deinitialize()
+        client.initialize()
+
+        commands = [c.args[0] for c in client.redis.execute_command.call_args_list]
+        assert commands.count("remove_node") == 1
+        assert commands.count("add_node") == 2
+        client.redis.close.assert_not_called()

@@ -78,6 +78,14 @@ def chat(text: str, stream: bool = False, **params) -> dict:
     }
 
 
+def initialized_again(client):
+    """Deinitialize a client and initialize it again, as its component does when
+    it reconfigures it or switches back to it"""
+    client.deinitialize()
+    client.initialize()
+    return client
+
+
 def text_of(chunk) -> str:
     """Text of a streamed chunk, from Ollama or from an OpenAI-compatible server"""
     if "message" in chunk:
@@ -168,6 +176,12 @@ class TestRoboMLHTTPClient:
         result = roboml_http.inference(chat("Say hello in five words.", stream=True))
         assert "".join(result["output"]).strip()
 
+    def test_inference_after_initializing_again(self, roboml_http):
+        result = initialized_again(roboml_http).inference(
+            chat("Say hello in five words.")
+        )
+        assert result and result["output"].strip()
+
     def test_inference_with_an_image(self, roboml_http_mllm):
         image = cv2.cvtColor(cv2.imread(str(IMAGE)), cv2.COLOR_BGR2RGB)
         result = roboml_http_mllm.inference(
@@ -186,6 +200,12 @@ class TestRoboMLWSClient:
 class TestRoboMLRESPClient:
     def test_inference(self, roboml_resp):
         result = roboml_resp.inference(chat("Say hello in five words."))
+        assert result and result["output"].strip()
+
+    def test_inference_after_initializing_again(self, roboml_resp):
+        result = initialized_again(roboml_resp).inference(
+            chat("Say hello in five words.")
+        )
         assert result and result["output"].strip()
 
 
@@ -247,6 +267,10 @@ class TestOllamaClient:
         )
         assert result and result["output"].strip()
 
+    def test_inference_after_initializing_again(self, ollama):
+        result = initialized_again(ollama).inference(chat("Say hello in five words."))
+        assert result and result["output"].strip()
+
 
 class TestGenericHTTPClient:
     def test_inference(self, generic):
@@ -256,3 +280,7 @@ class TestGenericHTTPClient:
     def test_streamed_inference(self, generic):
         result = generic.inference(chat("Say hello in five words.", stream=True))
         assert "".join(text_of(chunk) for chunk in result["output"]).strip()
+
+    def test_inference_after_initializing_again(self, generic):
+        result = initialized_again(generic).inference(chat("Say hello in five words."))
+        assert result and result["output"].strip()
