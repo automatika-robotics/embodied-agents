@@ -1,4 +1,4 @@
-from typing import Any, Dict, Generator, Optional, Union, MutableMapping
+from typing import Any, Dict, Generator, List, Optional, Union, MutableMapping
 import os
 import json
 import io
@@ -17,6 +17,7 @@ from ..models import (
 )
 from ..utils import (
     encode_img_base64,
+    parse_tool_arguments,
     plain_text_warning,
     tls_verify,
     validate_func_args,
@@ -69,7 +70,9 @@ class GenericHTTPClient(ModelClient):
         :type ca_cert: Optional[str]
         """
         if isinstance(model, Model):
-            ok = isinstance(model, (GenericLLM, GenericSTT, GenericTTS, TransformersLLM))
+            ok = isinstance(
+                model, (GenericLLM, GenericSTT, GenericTTS, TransformersLLM)
+            )
         else:
             ok = model.get("model_type") in (
                 "GenericLLM",
@@ -327,7 +330,7 @@ class GenericHTTPClient(ModelClient):
 
         payload = {
             "model": self.model_init_params["checkpoint"],
-            "messages": inference_input.pop("query"),
+            "messages": self._serialize_tool_arguments(inference_input.pop("query")),
             **inference_input,
         }
 
@@ -367,10 +370,48 @@ class GenericHTTPClient(ModelClient):
         model_resp = {}
 
         if tool_calls := message.get("tool_calls"):
-            model_resp["tool_calls"] = tool_calls
+            model_resp["tool_calls"] = self._parse_tool_calls(tool_calls)
 
         model_resp["output"] = message.get("content") or ""
         return model_resp
+
+    def _parse_tool_calls(self, tool_calls: List[Dict]) -> List[Dict]:
+        """Get the arguments of the tool calls as dicts. Tool calls with
+        arguments that are not a JSON object are dropped"""
+        parsed = []
+        for tool_call in tool_calls:
+            function = tool_call.get("function", {})
+            try:
+                arguments = parse_tool_arguments(function.get("arguments"))
+            except ValueError as e:
+                self.logger.error(
+                    f"Dropping tool call to '{function.get('name')}' with invalid arguments: {e}"
+                )
+                continue
+            parsed.append({
+                **tool_call,
+                "function": {**function, "arguments": arguments},
+            })
+        return parsed
+
+    def _serialize_tool_arguments(self, messages: List[Dict]) -> List[Dict]:
+        """Send the arguments of the tool calls in assistant messages as JSON
+        strings for OpenAI-compatible servers"""
+        serialized = []
+        for message in messages:
+            if tool_calls := message.get("tool_calls"):
+                calls = []
+                for tool_call in tool_calls:
+                    arguments = tool_call["function"]["arguments"]
+                    if not isinstance(arguments, str):
+                        arguments = json.dumps(arguments)
+                    calls.append({
+                        **tool_call,
+                        "function": {**tool_call["function"], "arguments": arguments},
+                    })
+                message = {**message, "tool_calls": calls}
+            serialized.append(message)
+        return serialized
 
     def _deinitialize(self) -> None:
         """

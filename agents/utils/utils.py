@@ -342,6 +342,50 @@ def strip_think_tokens(text: str) -> str:
     return re.sub(r"<think>.*?(?:</think>|\Z)", "", text, flags=re.DOTALL).strip()
 
 
+def parse_tool_arguments(arguments: Union[str, Dict, None]) -> Dict:
+    """Get the arguments of a model's tool call as a dict.
+
+    OpenAI-compatible servers send them as a JSON string, while others like Ollama
+    send a JSON object.
+
+    :param arguments: Arguments of the tool call
+    :type arguments: Union[str, Dict, None]
+    :raises ValueError: If the arguments are not a JSON object
+    :returns: Arguments of the tool call
+    :rtype: Dict
+    """
+    if isinstance(arguments, dict):
+        return arguments
+    if arguments is None or (isinstance(arguments, str) and not arguments.strip()):
+        return {}
+    if isinstance(arguments, str):
+        parsed = json.loads(arguments)
+        if isinstance(parsed, dict):
+            return parsed
+    raise ValueError(f"not a JSON object: {arguments!r}")
+
+
+def decode_json_values(arguments: Dict) -> Dict:
+    """Decode the values of a tool call's arguments that a model wrote as JSON
+    strings. Other strings are kept and stripped.
+
+    :param arguments: Arguments of the tool call
+    :type arguments: Dict
+    :returns: Arguments with their JSON string values decoded
+    :rtype: Dict
+    """
+    decoded = {}
+    for key, value in arguments.items():
+        if isinstance(value, str):
+            value = value.strip()
+            try:
+                value = json.loads(value) if value else value
+            except json.JSONDecodeError:
+                pass
+        decoded[key] = value
+    return decoded
+
+
 class VADStatus(Enum):
     """VAD Status for start and end of detected speech"""
 

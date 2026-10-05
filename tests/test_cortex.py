@@ -530,9 +530,10 @@ class _PtzCamera(SensorPlugin):
         )
         self.aimed = []
         self.refuse = False
-        self.actions = ActionRegistry(
-            {"look_at": self._make_look_at, "stop": self._make_stop}
-        )
+        self.actions = ActionRegistry({
+            "look_at": self._make_look_at,
+            "stop": self._make_stop,
+        })
 
     @plugin_action(
         description={
@@ -771,9 +772,7 @@ class TestCortexRobotDescription:
     """``set_robot_description`` augments the planning prompt with the
     attached robot's identity so the agent answers "who are you" correctly."""
 
-    def test_description_augments_planning_prompt(
-        self, rclpy_init, mock_model_client
-    ):
+    def test_description_augments_planning_prompt(self, rclpy_init, mock_model_client):
         plugin = _make_mock_plugin_with_describe(
             name="Lite3", description="A nimble quadruped."
         )
@@ -838,9 +837,7 @@ class TestCortexRobotDescription:
         comp._augment_planning_prompt_for_memory()
         assert "Robot Identity" in comp._effective_planning_prompt
 
-    def test_compose_is_single_source_of_truth(
-        self, rclpy_init, mock_model_client
-    ):
+    def test_compose_is_single_source_of_truth(self, rclpy_init, mock_model_client):
         """Both addendum slots compose into the prompt regardless of which
         augmentation ran -- the composer always rebuilds from both."""
         plugin = _make_mock_plugin_with_describe(name="Lite3")
@@ -1683,6 +1680,24 @@ class TestEventsAsTools:
         assert "topic_qos_config" in condition
         assert event["name"] == "e"
         assert event["handle_once"] is True and event["on_change"] is False
+        assert actions == [
+            {"ref": "vision/take_picture", "kwargs": {"topic_name": "/cam"}}
+        ]
+
+    def test_action_arguments_written_as_a_json_string_are_read(
+        self, rclpy_init, mock_model_client
+    ):
+        """The model can write the arguments it nests in an action as a JSON
+        string, unlike the arguments of its own tool call"""
+        comp = self._cortex(mock_model_client, "test_cortex_events_string_args")
+        take = {**self.TAKE, "arguments": json.dumps(self.TAKE["arguments"])}
+
+        _, actions = comp._event_spec({
+            "event_id": "e",
+            "conditions": [self.PERSON],
+            "actions": [take],
+        })
+
         assert actions == [
             {"ref": "vision/take_picture", "kwargs": {"topic_name": "/cam"}}
         ]

@@ -37,7 +37,12 @@ from ..ros import (
     get_ros_msg_fields_dict,
     ros_msg_to_str,
 )
-from ..utils import strip_think_tokens, validate_func_args
+from ..utils import (
+    decode_json_values,
+    parse_tool_arguments,
+    strip_think_tokens,
+    validate_func_args,
+)
 from ..utils.actions import goal_type_to_json_properties
 from .model_component import ModelComponent
 
@@ -1841,8 +1846,7 @@ class Cortex(ModelComponent, Monitor):
         if tool_name == "list_events":
             return self._run_event_tool(tool_name, args)
         if tool_name in self._planning_tools and tool_name in self._tool_refs:
-            parsed_args = self._parse_tool_args(args)
-            return self._call_component_action(tool_name, parsed_args)
+            return self._call_component_action(tool_name, args)
         return f"Error: Unknown planning tool '{tool_name}'."
 
     # =========================================================================
@@ -1850,31 +1854,14 @@ class Cortex(ModelComponent, Monitor):
     # =========================================================================
 
     def _parse_tool_args(self, fn_args) -> Dict:
-        """Parse tool arguments, deserializing JSON strings where needed."""
-        # OpenAI-compatible endpoints return tool-call arguments as a
-        # JSON string and Ollama returns a dict. Normalize to a dict first.
-        if isinstance(fn_args, str):
-            fn_args = fn_args.strip()
-            try:
-                fn_args = json.loads(fn_args) if fn_args else {}
-            except json.JSONDecodeError:
-                fn_args = {}
-        if not isinstance(fn_args, dict):
+        """Parse tool arguments, decoding the values the model wrote as JSON
+        strings. Clients give the arguments of a tool call as a dict, but
+        arguments the model nests in one (the actions of an event) can come as a
+        JSON string. Arguments that are not a JSON object are dropped"""
+        try:
+            return decode_json_values(parse_tool_arguments(fn_args))
+        except ValueError:
             return {}
-        parsed_args = {}
-        for key, arg in fn_args.items():
-            if isinstance(arg, str):
-                arg_str = arg.strip()
-                if not arg_str:
-                    parsed_args[key] = ""
-                    continue
-                try:
-                    parsed_args[key] = json.loads(arg_str)
-                except json.JSONDecodeError:
-                    parsed_args[key] = arg_str
-            else:
-                parsed_args[key] = arg
-        return parsed_args
 
     def _build_confirmation_message(
         self,

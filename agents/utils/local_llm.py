@@ -4,6 +4,10 @@ import re
 import threading
 from typing import Dict, Generator, List, Optional, Tuple, Union
 
+from rclpy.logging import get_logger
+
+from .utils import parse_tool_arguments
+
 # Reserved keys in model_options that are not llama_cpp.Llama parameters
 _FILENAME_KEY = "filename"
 
@@ -52,9 +56,7 @@ class LocalLLM:
         llama_params = inspect.signature(Llama.__init__).parameters
         for key in options:
             if key not in llama_params:
-                valid = sorted(
-                    p for p in llama_params if p not in ("self", "kwargs")
-                )
+                valid = sorted(p for p in llama_params if p not in ("self", "kwargs"))
                 raise ValueError(
                     f"Unknown local_model_options key '{key}' for llama-cpp. "
                     f"Valid options: {valid}. Reserved: '{_FILENAME_KEY}'."
@@ -122,18 +124,20 @@ class LocalLLM:
 
         result = {"output": content}
 
-        if tool_calls:
-            result["tool_calls"] = [
-                {
-                    "function": {
-                        "name": tc["function"]["name"],
-                        "arguments": json.loads(tc["function"]["arguments"])
-                        if isinstance(tc["function"]["arguments"], str)
-                        else tc["function"]["arguments"],
-                    }
-                }
-                for tc in tool_calls
-            ]
+        # Tool calls with arguments that are not a JSON object are dropped
+        calls = []
+        for tc in tool_calls or []:
+            name = tc["function"]["name"]
+            try:
+                arguments = parse_tool_arguments(tc["function"]["arguments"])
+            except ValueError as e:
+                get_logger("local_llm").error(
+                    f"Dropping tool call to '{name}' with invalid arguments: {e}"
+                )
+                continue
+            calls.append({"function": {"name": name, "arguments": arguments}})
+        if calls:
+            result["tool_calls"] = calls
 
         return result
 
@@ -153,14 +157,12 @@ class LocalLLM:
             except json.JSONDecodeError:
                 continue
             if name := parsed.get("name"):
-                calls.append(
-                    {
-                        "function": {
-                            "name": name,
-                            "arguments": parsed.get("arguments") or {},
-                        }
+                calls.append({
+                    "function": {
+                        "name": name,
+                        "arguments": parsed.get("arguments") or {},
                     }
-                )
+                })
         if calls:
             content = _TOOL_CALL_RE.sub("", content).strip()
         return content, calls or None

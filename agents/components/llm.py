@@ -24,6 +24,7 @@ from ..ros import (
     run_external_processor,
 )
 from ..utils import (
+    decode_json_values,
     get_prompt_template,
     validate_func_args,
     strip_think_tokens,
@@ -376,22 +377,18 @@ class LLM(ModelComponent):
             return result
 
         response_flags = []
+        # tool calls of the assistant message and the messages with their
+        # results, added to the history once all the calls ran
+        calls = []
+        tool_messages = []
 
         # make tool calls
-        for tool in result["tool_calls"]:
+        for i, tool in enumerate(result["tool_calls"]):
             tool_name = tool["function"]["name"]
             function_to_call = self._external_processors[tool_name][0][0]
 
             try:
-                # HACK: Read function argument as serialized datatypes
-                # if they are returned as string
-                arg_json = {}
-                for key, arg in tool["function"]["arguments"].items():
-                    try:
-                        arg = json.loads(arg) if isinstance(arg, str) else arg
-                    except json.JSONDecodeError:
-                        pass  # Keep it as a normal string if it's not valid JSON
-                    arg_json[key] = arg
+                arg_json = decode_json_values(tool["function"]["arguments"])
                 function_response = run_external_processor(
                     self.node_name,
                     tool_name,
@@ -406,11 +403,28 @@ class LLM(ModelComponent):
             # make last function call output the publishable output
             result["output"] = function_response
 
-            # Add function response to the messages
-            self.messages.append({"role": "tool", "content": function_response})
+            # NOTE: OpenAI-compatible servers match each result to its call by id
+            call_id = tool.get("id") or f"call_{i}"
+            calls.append({
+                "id": call_id,
+                "type": "function",
+                "function": {
+                    "name": tool_name,
+                    "arguments": tool["function"]["arguments"],
+                },
+            })
+            tool_messages.append({
+                "role": "tool",
+                "tool_call_id": call_id,
+                "content": function_response,
+            })
 
             # check for response flags
             response_flags.append(self.config._tool_response_flags[tool_name])
+
+        # Add the calls to the assistant message and their results to the messages
+        self.messages[-1]["tool_calls"] = calls
+        self.messages.extend(tool_messages)
 
         # make call to model again if any tool requires response to be sent back
         if any(response_flags):

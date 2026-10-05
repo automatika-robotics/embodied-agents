@@ -204,7 +204,107 @@ class TestLLMExecutionStep:
         llm._execution_step(topic=Topic(name="in", msg_type="String"))
 
         assert calls == [(2, 3)]
-        assert {"role": "tool", "content": "sum is 5"} in llm.messages
+        assert llm.messages[-1]["role"] == "tool"
+        assert llm.messages[-1]["content"] == "sum is 5"
+
+
+class TestLLMToolCallHistory:
+    """The history records a tool call exchange as OpenAI-compatible servers
+    expect it: the assistant message with its tool calls, then one tool message
+    per call with the call's id"""
+
+    def _call_tools(self, llm, mock_model_client, tool_calls, tool, to_model=False):
+        llm.config._tool_descriptions = [{"function": {"name": "get_battery"}}]
+        llm.config._tool_response_flags = {"get_battery": to_model}
+        llm._external_processors = {"get_battery": ([tool], "Function")}
+        mock_model_client.inference.return_value = {
+            "output": "",
+            "tool_calls": tool_calls,
+        }
+        mock_cb = MagicMock()
+        mock_cb.get_output.return_value = "battery?"
+        llm.trig_callbacks = {"in": mock_cb}
+        llm.callbacks = {}
+        llm._execution_step(topic=Topic(name="in", msg_type="String"))
+
+    def test_the_calls_and_their_results_are_paired_by_id(self, llm, mock_model_client):
+        calls = [
+            {
+                "id": "call_abc",
+                "function": {"name": "get_battery", "arguments": {"unit": "percent"}},
+            }
+        ]
+
+        self._call_tools(llm, mock_model_client, calls, lambda unit: f"87 {unit}")
+
+        assistant, tool = llm.messages[-2:]
+        assert assistant["role"] == "assistant"
+        assert assistant["tool_calls"] == [
+            {
+                "id": "call_abc",
+                "type": "function",
+                "function": {"name": "get_battery", "arguments": {"unit": "percent"}},
+            }
+        ]
+        assert tool == {
+            "role": "tool",
+            "tool_call_id": "call_abc",
+            "content": "87 percent",
+        }
+
+    def test_values_written_as_json_strings_reach_the_tool_decoded(
+        self, llm, mock_model_client
+    ):
+        received = {}
+
+        def get_battery(**kwargs):
+            received.update(kwargs)
+            return "87"
+
+        arguments = {"count": "3", "where": ' {"room": "lab"} ', "name": " kitchen "}
+        calls = [{"function": {"name": "get_battery", "arguments": arguments}}]
+
+        self._call_tools(llm, mock_model_client, calls, get_battery)
+
+        assert received == {"count": 3, "where": {"room": "lab"}, "name": "kitchen"}
+
+    def test_calls_without_an_id_get_one(self, llm, mock_model_client):
+        """Ollama and the built-in local model give no ids"""
+        calls = [{"function": {"name": "get_battery", "arguments": {"unit": "%"}}}]
+
+        self._call_tools(llm, mock_model_client, calls, lambda unit: "87")
+
+        assistant, tool = llm.messages[-2:]
+        assert assistant["tool_calls"][0]["id"] == tool["tool_call_id"] == "call_0"
+
+    def test_a_failed_call_leaves_no_unanswered_calls(self, llm, mock_model_client):
+        def failing(unit):
+            raise RuntimeError("boom")
+
+        calls = [{"function": {"name": "get_battery", "arguments": {"unit": "%"}}}]
+
+        self._call_tools(llm, mock_model_client, calls, failing)
+
+        assert llm.messages[-1]["role"] == "assistant"
+        assert "tool_calls" not in llm.messages[-1]
+
+    def test_the_results_sent_back_to_the_model_follow_their_calls(
+        self, llm, mock_model_client
+    ):
+        calls = [
+            {
+                "id": "call_abc",
+                "function": {"name": "get_battery", "arguments": {"unit": "%"}},
+            }
+        ]
+
+        self._call_tools(
+            llm, mock_model_client, calls, lambda unit: "87", to_model=True
+        )
+
+        follow_up = mock_model_client.inference.call_args_list[-1].args[0]["query"]
+        assert follow_up[-2]["tool_calls"][0]["id"] == "call_abc"
+        assert follow_up[-1]["tool_call_id"] == "call_abc"
 
 
 class TestLLMThinkTokens:
