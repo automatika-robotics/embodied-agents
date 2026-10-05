@@ -1,19 +1,26 @@
-"""Tool calls through the client for OpenAI-compatible servers.
+"""Tool calls and decisions through the client for OpenAI-compatible servers.
 
 Components get the arguments of a tool call as a dict from every client. Most
 OpenAI-compatible servers (vLLM, SGLang, llama.cpp, lmdeploy, ...) send them as
 a JSON string, while some (e.g. TGI before 3.2) send a JSON object; both are
 read. They are sent back to the server as a JSON string, as the OpenAI format
 expects.
+
+A decision model is asked its questions at the TypeSafe-compatible
+/v1/systemone endpoint, and the client gives back the answers keyed by question
+id.
 """
 
+import base64
 import json
 from unittest.mock import MagicMock
 
 import httpx
+import numpy as np
 import pytest
 
 from agents.clients.generic import GenericHTTPClient
+from agents.models import GenericDecisionModel, GenericLLM
 
 MODEL = {
     "model_type": "GenericLLM",
@@ -124,3 +131,108 @@ def test_tool_call_arguments_are_sent_as_a_json_string(server):
     assert request["messages"][2]["tool_call_id"] == "call_abc"
     # the component's own messages are left as they are
     assert messages[1]["tool_calls"][0]["function"]["arguments"] == {"unit": "percent"}
+
+
+# --- Decisions ---------------------------------------------------------------
+
+QUESTIONS = {
+    "stop": {
+        "type": "noul",
+        "instructions": "Is the person telling the robot to stop?",
+    },
+    "room": {
+        "type": "choice",
+        "instructions": "Which room is this?",
+        "criteria": {"kitchen": None, "bedroom": None},
+    },
+}
+
+ANSWERS = {
+    "stop": {"type": "noul", "noul": 0.97},
+    "room": {
+        "type": "choice",
+        "choice": "kitchen",
+        "probabilities": {"kitchen": 0.9, "bedroom": 0.1},
+        "confidence": 0.8,
+    },
+}
+
+
+@pytest.fixture
+def decision_server():
+    """A client with a decision model, talking to a fake server, which records
+    the decision requests it gets and replies with the answers or the error it
+    is given"""
+    requests = []
+    replies = {"status": 200}
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/models":
+            return httpx.Response(200, json={"data": [{"id": "lev"}]})
+        requests.append((request.url.path, json.loads(request.content)))
+        if replies["status"] != 200:
+            return httpx.Response(
+                replies["status"],
+                json={"error": {"message": "This model is not a decision model"}},
+            )
+        return httpx.Response(200, json={"model": "lev", "answers": ANSWERS})
+
+    client = GenericHTTPClient(GenericDecisionModel(name="lev", checkpoint="lev"))
+    client.client = httpx.Client(
+        transport=httpx.MockTransport(handle), base_url="http://server"
+    )
+    client.logger = MagicMock()
+    client.initialize()
+    return client, requests, replies
+
+
+def test_a_decision_model_is_asked_at_systemone(decision_server):
+    client, requests, _ = decision_server
+
+    result = client.inference({"state": "Stop!", "questions": QUESTIONS})
+
+    assert result == {"output": ANSWERS}
+    ((path, body),) = requests
+    assert path == "/v1/systemone"
+    assert body == {"model": "lev", "state": "Stop!", "questions": QUESTIONS}
+
+
+def test_images_are_sent_as_data_urls(decision_server):
+    client, requests, _ = decision_server
+    image = np.zeros((4, 4, 3), dtype=np.uint8)
+
+    client.inference({"state": {}, "questions": QUESTIONS, "images": [image]})
+
+    ((_, body),) = requests
+    (url,) = body["images"]
+    prefix = "data:image/png;base64,"
+    assert url.startswith(prefix)
+    assert base64.b64decode(url[len(prefix) :]).startswith(b"\x89PNG")
+
+
+def test_a_server_error_gives_no_answers(decision_server):
+    client, _, replies = decision_server
+    replies["status"] = 501
+
+    assert client.inference({"state": "Stop!", "questions": QUESTIONS}) is None
+    client.logger.error.assert_called_once()
+
+
+def test_a_decision_model_takes_questions_not_tools():
+    decision = GenericHTTPClient(GenericDecisionModel(name="lev", checkpoint="lev"))
+    llm = GenericHTTPClient(GenericLLM(name="m", checkpoint="m"))
+
+    assert decision.supports_decisions and not decision.supports_tool_calls
+    assert llm.supports_tool_calls and not llm.supports_decisions
+
+
+def test_a_serialized_decision_client_is_rebuilt():
+    """As a component's client is rebuilt in its own process"""
+    client = GenericHTTPClient(
+        GenericDecisionModel(name="lev", checkpoint="lev"), port=8090
+    )
+
+    rebuilt = GenericHTTPClient(**client.serialize())
+
+    assert rebuilt.supports_decisions
+    assert rebuilt.model_init_params == {"checkpoint": "lev"}

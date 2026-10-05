@@ -105,6 +105,16 @@ class ModelClient(ABC):
         """
         return False
 
+    @property
+    def supports_decisions(self) -> bool:
+        """
+        Check if the client serves a decision model, which answers typed questions
+        about a state. Defaults to False. Override in subclasses if supported.
+
+        :rtype: bool
+        """
+        return False
+
     def check_connection(self) -> None:
         """initialize.
         :rtype: None

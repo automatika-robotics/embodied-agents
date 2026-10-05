@@ -16,6 +16,9 @@ deselects them. Hosts, ports and models are set with environment variables:
 - Chroma (``chroma run --path <dir> --port 8001``): CHROMA_HOST (127.0.0.1),
   CHROMA_PORT (8001), with embeddings from Ollama's CHROMA_EMBEDDINGS
   (bge-large:latest)
+- A decision model on llama.cpp's llama-server (``llama-server -m <model.gguf>
+  --alias lev --port 8090``), for GenericHTTPClient's decisions: DECISION_HOST
+  (127.0.0.1), DECISION_PORT (8090), DECISION_MODEL (lev)
 
 RoboML's tests run first: on one GPU, a model Ollama has loaded stays in memory
 for a few minutes after its last use, and can leave too little for RoboML's.
@@ -37,7 +40,13 @@ from agents.clients import (
     RoboMLRESPClient,
     RoboMLWSClient,
 )
-from agents.models import GenericLLM, OllamaModel, TransformersLLM, TransformersMLLM
+from agents.models import (
+    GenericDecisionModel,
+    GenericLLM,
+    OllamaModel,
+    TransformersLLM,
+    TransformersMLLM,
+)
 from agents.vectordbs import ChromaDB
 
 pytestmark = pytest.mark.local_only
@@ -53,6 +62,9 @@ ROBOML_MLLM = os.environ.get("ROBOML_MLLM", "Qwen/Qwen2.5-VL-3B-Instruct")
 CHROMA_HOST = os.environ.get("CHROMA_HOST", "127.0.0.1")
 CHROMA_PORT = int(os.environ.get("CHROMA_PORT", 8001))
 CHROMA_EMBEDDINGS = os.environ.get("CHROMA_EMBEDDINGS", "bge-large:latest")
+DECISION_HOST = os.environ.get("DECISION_HOST", "127.0.0.1")
+DECISION_PORT = int(os.environ.get("DECISION_PORT", 8090))
+DECISION_MODEL = os.environ.get("DECISION_MODEL", "lev")
 
 IMAGE = Path(__file__).parents[1] / "agents" / "resources" / "test.jpeg"
 
@@ -104,6 +116,14 @@ def ollama():
 def generic():
     model = GenericLLM(name="llm", checkpoint=OLLAMA_MODEL)
     client = started(GenericHTTPClient(model, host=HOST, port=OLLAMA_PORT))
+    yield client
+    client.deinitialize()
+
+
+@pytest.fixture(scope="class")
+def decision():
+    model = GenericDecisionModel(name="decision", checkpoint=DECISION_MODEL)
+    client = started(GenericHTTPClient(model, host=DECISION_HOST, port=DECISION_PORT))
     yield client
     client.deinitialize()
 
@@ -284,3 +304,44 @@ class TestGenericHTTPClient:
     def test_inference_after_initializing_again(self, generic):
         result = initialized_again(generic).inference(chat("Say hello in five words."))
         assert result and result["output"].strip()
+
+
+class TestGenericHTTPClientDecisions:
+    QUESTIONS = {
+        "stop": {
+            "type": "noul",
+            "instructions": "Is the person telling the robot to stop?",
+        },
+        "route": {
+            "type": "choice",
+            "instructions": "Which route should handle this input?",
+            "criteria": {
+                "goto": "go somewhere, or fetch and bring an object",
+                "chat": "a general question or chit-chat",
+            },
+        },
+        "urgency": {
+            "type": "score",
+            "instructions": "How urgent is this?",
+            "criteria": ["can wait", "soon", "right now"],
+        },
+    }
+
+    def test_inference(self, decision):
+        result = decision.inference({
+            "state": "Speech heard by the robot: 'Stop right now!'",
+            "questions": self.QUESTIONS,
+        })
+        answers = result["output"]
+        assert set(answers) == set(self.QUESTIONS)
+        assert answers["stop"]["noul"] > 0.5
+        assert answers["route"]["choice"] in ("goto", "chat")
+        assert sum(answers["route"]["probabilities"].values()) == pytest.approx(1.0)
+        assert 0.0 <= answers["urgency"]["score"] <= 2.0
+
+    def test_inference_after_initializing_again(self, decision):
+        result = initialized_again(decision).inference({
+            "state": {"speech": "Please continue"},
+            "questions": {"stop": self.QUESTIONS["stop"]},
+        })
+        assert result["output"]["stop"]["noul"] < 0.5

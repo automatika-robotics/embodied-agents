@@ -10,6 +10,7 @@ import httpx
 from .model_base import ModelClient
 from ..models import (
     Model,
+    GenericDecisionModel,
     GenericLLM,
     GenericSTT,
     GenericTTS,
@@ -30,6 +31,7 @@ __all__ = ["GenericHTTPClient"]
 class GenericHTTPClient(ModelClient):
     """
     A generic client for interacting with OpenAI-compatible APIs, including vLLM, ms-swift, lmdeploy, Google Gemini etc. This client works with LLM multimodal LLM models and supports both standard and streaming responses. It is designed to be compatible with any API that follows the OpenAI standard.
+    With a GenericDecisionModel, it asks typed questions of a decision model through the TypeSafe-compatible /v1/systemone API.
     """
 
     @validate_func_args
@@ -71,7 +73,14 @@ class GenericHTTPClient(ModelClient):
         """
         if isinstance(model, Model):
             ok = isinstance(
-                model, (GenericLLM, GenericSTT, GenericTTS, TransformersLLM)
+                model,
+                (
+                    GenericLLM,
+                    GenericSTT,
+                    GenericTTS,
+                    GenericDecisionModel,
+                    TransformersLLM,
+                ),
             )
         else:
             ok = model.get("model_type") in (
@@ -79,12 +88,13 @@ class GenericHTTPClient(ModelClient):
                 "GenericMLLM",
                 "GenericSTT",
                 "GenericTTS",
+                "GenericDecisionModel",
                 "TransformersLLM",
                 "TransformersMLLM",
             )
         if not ok:
             raise TypeError(
-                "A generic client can only take models of type GenericLLM, GenericTTS, GenericSTT, GenericMLLM, TransformersLLM and TransformersMLLM"
+                "A generic client can only take models of type GenericLLM, GenericTTS, GenericSTT, GenericMLLM, GenericDecisionModel, TransformersLLM and TransformersMLLM"
             )
 
         # NOTE: init_on_activation is not user-configurable for the generic client (no
@@ -127,10 +137,19 @@ class GenericHTTPClient(ModelClient):
     @property
     def supports_tool_calls(self) -> bool:
         """
-        Generic HTTP client (OpenAI compatible) supports tool calling.
+        Generic HTTP client (OpenAI compatible) supports tool calling, except with a
+        decision model, which does not generate text.
         :rtype: bool
         """
-        return True
+        return not self.supports_decisions
+
+    @property
+    def supports_decisions(self) -> bool:
+        """
+        Generic HTTP client answers typed questions with a decision model.
+        :rtype: bool
+        """
+        return self.model_type == "GenericDecisionModel"
 
     def _check_connection(self) -> None:
         """
@@ -174,6 +193,9 @@ class GenericHTTPClient(ModelClient):
         elif self.model_type == "GenericSTT":
             self.api_endpoint = "/v1/audio/transcriptions"
             self.request_type = "multipart"  # Special handling for file upload
+        elif self.model_type == "GenericDecisionModel":
+            self.api_endpoint = "/v1/systemone"
+            self.request_type = "decision"  # Typed questions in, answers out
         else:
             # Fallback or error for unknown model types
             self.logger.warning(
@@ -307,6 +329,10 @@ class GenericHTTPClient(ModelClient):
                 response.raise_for_status()
                 return {"output": response.json().get("text", "")}
 
+            # Decision (state and questions as input, typed answers as output)
+            elif self.request_type == "decision":
+                return self._inference_decision(inference_input)
+
         except Exception as e:
             self.__handle_exceptions(e)
 
@@ -341,6 +367,21 @@ class GenericHTTPClient(ModelClient):
             response = self.client.post(self.api_endpoint, json=payload)
             response.raise_for_status()
             return self._parse_chat_response(response.json())
+
+    def _inference_decision(self, inference_input: Dict[str, Any]) -> Dict[str, Any]:
+        """Helper for asking a decision model typed questions about a state"""
+        payload = {
+            "model": self.model_init_params["checkpoint"],
+            "state": inference_input["state"],
+            "questions": inference_input["questions"],
+        }
+        if images := inference_input.get("images"):
+            payload["images"] = [
+                f"data:image/png;base64,{encode_img_base64(img)}" for img in images
+            ]
+        response = self.client.post(self.api_endpoint, json=payload)
+        response.raise_for_status()
+        return {"output": response.json()["answers"]}
 
     def _stream_generator(
         self, payload: Dict[str, Any]
@@ -437,7 +478,7 @@ class GenericHTTPClient(ModelClient):
                 for img_b64 in b64_images:
                     content_parts.append({
                         "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"},
+                        "image_url": {"url": f"data:image/png;base64,{img_b64}"},
                     })
 
                 # Replace the original content with the new list of parts
