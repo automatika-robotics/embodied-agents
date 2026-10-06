@@ -99,18 +99,18 @@ class DecisionComponent(ModelComponent):
         gives `ask` the state to decide about, and there are no standing
         questions.
     :type inputs: Optional[list[Union[Topic, FixedInput]]]
-    :param model_client: A model client with a decision model, such as
-        GenericHTTPClient with a GenericDecisionModel.
-    :type model_client: ModelClient
-    :param questions: The standing questions to ask on every trigger, keyed
-        by id, in the API format. Each gets an output topic. Needs inputs or
-        action states to be asked about.
-    :type questions: Optional[dict[str, dict]]
     :param action_states: Component actions whose results are part of the
         state, keyed by the name each result has in the state, e.g.
         ``{"task": vla.get_current_task}``. They are called on every trigger,
         in whatever process their components run.
     :type action_states: Optional[dict[str, Callable]]
+    :param questions: The standing questions to ask on every trigger, keyed
+        by id, in the API format. Each gets an output topic. Needs inputs or
+        action states to be asked about.
+    :type questions: Optional[dict[str, dict]]
+    :param model_client: A model client with a decision model, such as
+        GenericHTTPClient with a GenericDecisionModel.
+    :type model_client: ModelClient
     :param config: The configuration for the component. Defaults to DecisionConfig().
     :type config: Optional[DecisionConfig]
     :param trigger: The trigger for asking the questions: input topic(s), a rate
@@ -125,11 +125,11 @@ class DecisionComponent(ModelComponent):
     speech = Topic(name="speech", msg_type="String")
     decider = DecisionComponent(
         inputs=[speech],
-        model_client=GenericHTTPClient(GenericDecisionModel(name="lev", checkpoint="lev")),
         questions={
             "stop": {"type": "noul", "instructions": "Is the person telling the robot to stop?"},
             "addressed": {"type": "noul", "instructions": "Is this speech directed at the robot?"},
         },
+        model_client=GenericHTTPClient(GenericDecisionModel(name="lev", checkpoint="lev")),
         trigger=speech,
         component_name="speech_decider",
     )
@@ -146,9 +146,9 @@ class DecisionComponent(ModelComponent):
         self,
         *,
         inputs: Optional[List[Union[Topic, FixedInput]]] = None,
-        model_client: ModelClient,
-        questions: Optional[Dict[str, Dict]] = None,
         action_states: Optional[Dict[str, Callable]] = None,
+        questions: Optional[Dict[str, Dict]] = None,
+        model_client: ModelClient,
         config: Optional[DecisionConfig] = None,
         trigger: Union[Topic, List[Topic], float, Event] = 1.0,
         component_name: str,

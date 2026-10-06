@@ -15,6 +15,7 @@ BaseComponent (ros_sugar)
         │     │     └── SemanticRouter
         │     ├── Vision                (+ DepthLiftMixin)
         │     ├── VLA
+        │     ├── DecisionComponent
         │     ├── SpeechToText
         │     ├── TextToSpeech
         │     └── Cortex                (+ Monitor from ros_sugar)
@@ -146,6 +147,7 @@ BaseComponentConfig (ros_sugar)
         ├── SpeechToTextConfig
         ├── TextToSpeechConfig
         ├── SemanticRouterConfig
+        ├── DecisionConfig
         └── MotionDetectorConfig
   └── MapConfig (extends BaseComponentConfig directly)
 ```
