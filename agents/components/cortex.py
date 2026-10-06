@@ -62,9 +62,12 @@ class Cortex(ModelComponent, Monitor):
     1. **Planning** -- A single LLM call with all available actions as tools
        produces a step-by-step plan (returned as multiple tool_calls).
        Optional RAG context from a vector DB is injected during this phase.
-    2. **Execution** -- Each planned step is executed sequentially. Before each
-       step, a brief LLM confirmation call decides: EXECUTE, SKIP, or ABORT,
-       based on the original plan and results so far.
+    2. **Execution** -- Consecutive steps whose arguments are all known run as
+       one routine. Before every other step, a brief LLM confirmation call
+       decides to execute it, skip it, abort the plan, or wait for an action that
+       is still running, based on the original plan and results so far.
+       To execute a step that depends on an earlier one, it returns the step's
+       tool call with the arguments filled in.
 
     The component runs as a ROS2 action server, receiving task goals and
     providing feedback during execution.
@@ -140,22 +143,41 @@ class Cortex(ModelComponent, Monitor):
     )
 
     _CONFIRMATION_PROMPT = (
-        "You are monitoring task execution on a robot. "
-        "Given the original plan and results so far, decide what to do next. "
-        "Respond with exactly one of:\n"
-        "  EXECUTE - proceed with the next step\n"
-        "  SKIP - skip the next step\n"
-        "  ABORT - abort the entire plan\n"
-        "  CONTINUE - wait for ongoing async actions to complete before proceeding\n"
-        "Use CONTINUE when there are active async actions that should finish "
-        "before moving on. Optionally follow with a brief reason after a colon.\n\n"
-        "When you respond EXECUTE, you may also return a tool call for the next "
-        "action with updated arguments based on the results of previous steps. "
-        "For example, if a previous step produced text output, use that text as "
-        "the argument for the next step instead of the placeholder from the plan."
-        " But this is not just limited to text outputs, you can also use structured"
-        " outputs from previous steps to fill input parameters of next steps."
+        "You are monitoring task execution on a robot. Given the original plan "
+        "and the results so far, decide what happens with the next action by "
+        "calling exactly one tool:\n"
+        "  execute_step - run the next action as planned\n"
+        "  the next action's own tool - run it with its arguments filled in. Do "
+        "this when its planned arguments hold a placeholder such as "
+        "<output from step N>: replace the placeholder with the output of that "
+        "step. This is not limited to text, structured outputs of previous steps "
+        "can fill the arguments too\n"
+        "  skip_step - skip the next action, when the results show it is no "
+        "longer needed\n"
+        "  abort_plan - abort the entire plan, when it cannot or should not go on\n"
+        "  continue_executing - hold the next action while an action started "
+        "earlier is still running and should finish first\n"
+        "Do not respond with text."
     )
+
+    # The decisions of a confirmation call, each made by calling a tool of that
+    # name. Tool name -> (decision, tool description)
+    _CONFIRMATION_TOOLS = {
+        "execute_step": ("EXECUTE", "Run the next action as planned."),
+        "skip_step": (
+            "SKIP",
+            "Skip the next action: the results so far show it is no longer needed.",
+        ),
+        "abort_plan": (
+            "ABORT",
+            "Abort the entire plan: it cannot or should not go on.",
+        ),
+        "continue_executing": (
+            "CONTINUE",
+            "Let the action already running continue executing, and hold the "
+            "next action until it has finished.",
+        ),
+    }
 
     @validate_func_args
     def __init__(
@@ -1815,10 +1837,14 @@ class Cortex(ModelComponent, Monitor):
         """
         tool_calls_msg = []
         for i, step in enumerate(plan):
+            # NOTE: Show the planner the call that actually ran. Which can differ
+            # from the planned one when the confirmation filled in its arguments or
+            # returned another tool to run
+            ran = executed_results[i] if i < len(executed_results) else {}
             tool_calls_msg.append({
                 "id": f"exec_{i}",
                 "type": "function",
-                "function": step["function"],
+                "function": ran.get("function", step["function"]),
             })
 
         messages.append({
@@ -1833,6 +1859,11 @@ class Cortex(ModelComponent, Monitor):
                 "tool_call_id": f"exec_{i}",
                 "content": result["result"],
             })
+
+        # Actions servers/Routines the plan started and is still running
+        active_status = self._monitor_active_clients()
+        if active_status and executed_results:
+            messages[-1]["content"] += f"\n\n{active_status}"
 
     def _execute_planning_tool(self, tool_name: str, args: Dict) -> str:
         """Execute a planning-phase tool.
@@ -1898,14 +1929,51 @@ class Cortex(ModelComponent, Monitor):
             message += f"\n\nNext action: {fn_name}" + (
                 f" with arguments {fn_args}" if fn_args else ""
             )
+            if self._has_placeholder(self._parse_tool_args(fn_args)):
+                message += (
+                    "\n\nThe arguments of the next action hold a placeholder. To "
+                    f"run it, call {fn_name} with the placeholder replaced by the "
+                    "output of that step."
+                )
 
         # Include active async action status if any
         active_status = self._monitor_active_clients()
         if active_status:
             message += f"\n\n{active_status}"
 
-        message += "\n\nRespond EXECUTE, SKIP, ABORT, or CONTINUE."
+        if step_index >= len(plan):
+            message += (
+                "\n\nAll the steps of the plan have been run. Call "
+                "continue_executing while the actions above should be waited for, "
+                "or abort_plan to abort the task. Otherwise reply that the plan "
+                "is done."
+            )
         return message
+
+    def _confirmation_tools(self, plan: List[Dict], step_index: int) -> List[Dict]:
+        """The tools a confirmation call chooses from."""
+        offered = set(self._CONFIRMATION_TOOLS)
+        # do not offer execute/skip at the end of the plan
+        if step_index >= len(plan):
+            offered -= {"execute_step", "skip_step"}
+        # do not offer execute if a tool call with placeholder is required
+        elif self._has_placeholder(
+            self._parse_tool_args(plan[step_index]["function"].get("arguments", {}))
+        ):
+            offered.discard("execute_step")
+        decisions = [
+            {
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": description,
+                    "parameters": {"type": "object", "properties": {}, "required": []},
+                },
+            }
+            for name, (_, description) in self._CONFIRMATION_TOOLS.items()
+            if name in offered
+        ]
+        return decisions + self._execution_tool_descriptions
 
     def _confirm_step(
         self,
@@ -1913,19 +1981,20 @@ class Cortex(ModelComponent, Monitor):
         executed_results: List[Dict],
         step_index: int,
     ) -> Tuple[str, Optional[Dict]]:
-        """Ask the LLM whether the next planned step should be executed.
+        """Ask the LLM what happens with the next planned step.
 
-        The confirmation call includes execution tools so the LLM can
-        return a tool call with resolved arguments (e.g. using output
-        from a previous step as input to the next).
+        The LLM answers by calling one tool: a decision (execute_step,
+        skip_step, abort_plan, continue_executing), or an execution tool to run
+        in place of the planned step.
 
         :param plan: Full list of planned tool_calls
         :param executed_results: Results of already-executed steps
         :param step_index: Index of the next step to confirm
         :returns: Tuple of (decision, resolved_step) where decision is
-            one of "EXECUTE", "SKIP", "ABORT", "CONTINUE" and
-            resolved_step is a tool_call dict with updated arguments
-            (or None to use the pre-planned arguments)
+            one of "EXECUTE", "SKIP", "ABORT", "CONTINUE", or "UNUSABLE" when
+            the call failed or made no tool call, and resolved_step is the
+            tool_call to run in place of the planned step (or None to run the
+            step as planned)
         """
         user_message = self._build_confirmation_message(
             plan, executed_results, step_index
@@ -1939,38 +2008,29 @@ class Cortex(ModelComponent, Monitor):
             "temperature": self.config.confirmation_temperature,
             "max_new_tokens": self.config.confirmation_max_tokens,
             "stream": False,
+            "tools": self._confirmation_tools(plan, step_index),
         }
-
-        # Include execution tools so the LLM can return a tool call
-        # with arguments resolved from prior step results
-        if self._execution_tool_descriptions:
-            inference_input["tools"] = self._execution_tool_descriptions
 
         result = self._call_inference(inference_input)
         if not result:
-            self.get_logger().warning(
-                "Confirmation inference failed; defaulting to EXECUTE."
-            )
-            return "EXECUTE", None
+            self.get_logger().warning("Confirmation inference failed.")
+            return "UNUSABLE", None
 
-        output = (result.get("output") or "").strip()
-        if self.config.strip_think_tokens:
-            output = strip_think_tokens(output).strip()
-
-        # Check for a tool call with resolved arguments
-        resolved_step = None
-        if tool_calls := result.get("tool_calls"):
-            resolved_step = tool_calls[0]
+        tool_calls = result.get("tool_calls")
+        if not tool_calls:
             self.get_logger().debug(
-                f"Confirmation returned resolved tool call: {resolved_step}"
+                f"Confirmation made no tool call. It said: {result.get('output')!r}"
             )
+            return "UNUSABLE", None
 
-        upper = output.upper()
-        for token in ("ABORT", "SKIP", "CONTINUE"):
-            if upper.startswith(token):
-                return token, None
-        # EXECUTE, either explicitly stated or implied by a tool call
-        return "EXECUTE", resolved_step
+        name = tool_calls[0]["function"]["name"]
+        if name in self._CONFIRMATION_TOOLS:
+            return self._CONFIRMATION_TOOLS[name][0], None
+        # for an execution tool, run this call in place of the planned step
+        self.get_logger().debug(
+            f"Confirmation returned the call to run: {tool_calls[0]}"
+        )
+        return "EXECUTE", tool_calls[0]
 
     def _wait_for_active_clients(
         self, goal_handle, feedback_msg, plan, executed_results, step_index, label: str
@@ -2235,14 +2295,19 @@ class Cortex(ModelComponent, Monitor):
             )
             return next_index, True
         # Failed at a step. Back to planning with the failure in view
-        for index in range(next_index, len(plan)):
+        self._mark_not_run(plan, next_index, executed_results)
+        return len(plan), False
+
+    @staticmethod
+    def _mark_not_run(plan: List[Dict], start: int, executed_results: List[Dict]):
+        """Record the steps from `start` on as not run, after a failed step"""
+        for index in range(start, len(plan)):
             executed_results.append({
                 "step": index,
                 "action": plan[index]["function"]["name"],
                 "result": "NOT RUN: an earlier step failed",
                 "failed": False,
             })
-        return len(plan), False
 
     def _follow_routine(
         self, routine: Routine, first: int, goal_handle, feedback_msg
@@ -2339,7 +2404,7 @@ class Cortex(ModelComponent, Monitor):
             label = f"Step {i + 1}/{total} ({fn_name})"
 
             # Confirm (may wait for async actions via CONTINUE).
-            # The LLM may also return a tool call with resolved arguments.
+            # The model may also return the tool call to run in place of the step.
             decision, resolved_step = self._wait_for_active_clients(
                 goal_handle, feedback_msg, plan, executed_results, i, label
             )
@@ -2363,28 +2428,33 @@ class Cortex(ModelComponent, Monitor):
                 i += 1
                 continue
 
-            # Use resolved arguments from the confirmation call if available,
-            # otherwise fall back to the pre-planned arguments
+            # Run the call the confirmation returned if it gave one, otherwise
+            # the step as planned
             effective_step = resolved_step if resolved_step else step
-            fn_args = effective_step["function"].get("arguments", {})
-
-            # EXECUTE
-            args_str = f" with {fn_args}" if fn_args else ""
-            self._send_feedback(
-                goal_handle, feedback_msg, i + 1, f"Executing {label}{args_str}"
+            fn_name = effective_step["function"]["name"]
+            label = f"Step {i + 1}/{total} ({fn_name})"
+            step_result = self._run_confirmed_step(
+                decision, effective_step, goal_handle, feedback_msg, i + 1, label
             )
-
-            step_result = self._execute_action_step(effective_step)
+            failed = step_result.startswith("Error")
             executed_results.append({
                 "step": i,
                 "action": fn_name,
+                "function": effective_step["function"],  # the call that ran
                 "result": step_result,
-                "failed": step_result.startswith("Error"),
+                "failed": failed,
             })
             self._send_feedback(
-                goal_handle, feedback_msg, i + 1, f"{label} completed: {step_result}"
+                goal_handle,
+                feedback_msg,
+                i + 1,
+                f"{label} {'failed' if failed else 'completed'}: {step_result}",
             )
             self.get_logger().info(f"[{label}] {step_result}")
+            if failed:
+                # Back to planning with the failure in view
+                self._mark_not_run(plan, i + 1, executed_results)
+                return executed_results, False
             i += 1
 
         # Wait for any remaining async actions after the last step
@@ -2407,6 +2477,21 @@ class Cortex(ModelComponent, Monitor):
                 return executed_results, True
 
         return executed_results, False
+
+    def _run_confirmed_step(
+        self, decision: str, step: Dict, goal_handle, feedback_msg, number: int, label
+    ) -> str:
+        """Run a step its confirmation let through, and return its result."""
+        fn_args = step["function"].get("arguments", {})
+        if decision == "UNUSABLE":
+            return "Error: the step was not run, its confirmation gave no decision"
+        if self._has_placeholder(self._parse_tool_args(fn_args)):
+            return f"Error: the step was not run, its arguments were not resolved: {fn_args}"
+        args_str = f" with {fn_args}" if fn_args else ""
+        self._send_feedback(
+            goal_handle, feedback_msg, number, f"Executing {label}{args_str}"
+        )
+        return self._execute_action_step(step)
 
     def _cancel_task(self, goal_handle) -> None:
         """End the task as cancelled, stopping everything it started"""
@@ -2573,9 +2658,16 @@ class Cortex(ModelComponent, Monitor):
                 feedback = "Plan finished despite errors along the way."
                 self.get_logger().info(feedback)
             else:
-                feedback = f"All {plan_len} steps completed."
+                skipped = sum(r["result"] == "SKIPPED" for r in executed_results)
+                executed = len(executed_results) - skipped
+                feedback = (
+                    f"{executed} steps completed, {skipped} skipped."
+                    if skipped
+                    else f"All {plan_len} steps completed."
+                )
                 self.get_logger().info(
-                    f"Task completed: {len(executed_results)} steps executed."
+                    f"Task completed: {executed} steps executed"
+                    + (f", {skipped} skipped." if skipped else ".")
                 )
             self._send_feedback(
                 goal_handle, feedback_msg, plan_len, feedback, completed=True
@@ -2691,12 +2783,12 @@ class Cortex(ModelComponent, Monitor):
                 return result_msg
 
             # Feed execution results back into the planning conversation
-            # so the LLM can continue with the next steps
+            # so the model can continue with the next steps
             self._append_execution_results_to_planning(
                 planning_messages, plan, executed_results
             )
 
-        # Loop exited voluntarily (LLM stopped) or exhausted
+        # Loop exited voluntarily (model stopped) or exhausted
         self._finalize_goal(
             goal_handle,
             feedback_msg,

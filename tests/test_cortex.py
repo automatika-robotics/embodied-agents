@@ -415,96 +415,260 @@ class TestCortexPlanning:
         assert mock_model_client.inference.call_count == 3
 
 
+def _decides(tool, **arguments):
+    """A confirmation reply: the one tool call it makes"""
+    return {
+        "output": "",
+        "tool_calls": [{"function": {"name": tool, "arguments": arguments}}],
+    }
+
+
 class TestCortexConfirmation:
-    def test_confirm_execute(self, rclpy_init, mock_model_client):
-        mock_model_client.inference.return_value = {"output": "EXECUTE"}
-        comp = Cortex(
-            outputs=[Topic(name="out", msg_type="String")],
-            actions=[_make_mock_action()],
-            model_client=mock_model_client,
-            config=CortexConfig(),
-            component_name="test_cortex_confirm_exec",
-        )
-        mock_component_internals(comp)
+    """The confirmation of a step is one tool call: a decision, or the call to
+    run in place of the step. Its text is not read"""
 
-        plan = [{"function": {"name": "navigate", "arguments": {}}}]
-        decision, resolved = comp._confirm_step(plan, [], 0)
+    def _cortex(self, mock_model_client, name):
+        comp = _make_cortex([_make_mock_action()], mock_model_client, name)
+        mock_component_internals(comp)
+        return comp
+
+    @pytest.mark.parametrize(
+        "tool, decision",
+        [
+            ("execute_step", "EXECUTE"),
+            ("skip_step", "SKIP"),
+            ("abort_plan", "ABORT"),
+            ("continue_executing", "CONTINUE"),
+        ],
+    )
+    def test_a_decision_is_a_tool_call(
+        self, rclpy_init, mock_model_client, tool, decision
+    ):
+        mock_model_client.inference.return_value = _decides(tool)
+        comp = self._cortex(mock_model_client, f"test_cortex_confirm_{tool}")
+
+        assert comp._confirm_step([_step("navigate")], [], 0) == (decision, None)
+
+    @pytest.mark.parametrize(
+        "text", ["EXECUTE", "ABORT: unsafe", "Sure, go ahead!", ""]
+    )
+    def test_text_is_not_a_decision(self, rclpy_init, mock_model_client, text):
+        mock_model_client.inference.return_value = {"output": text}
+        comp = self._cortex(mock_model_client, "test_cortex_confirm_text")
+
+        assert comp._confirm_step([_step("navigate")], [], 0) == ("UNUSABLE", None)
+
+    def test_a_failed_inference_is_no_decision(self, rclpy_init, mock_model_client):
+        mock_model_client.inference.return_value = None
+        comp = self._cortex(mock_model_client, "test_cortex_confirm_failed")
+
+        assert comp._confirm_step([_step("navigate")], [], 0) == ("UNUSABLE", None)
+
+    def test_an_execution_tool_is_the_call_to_run(self, rclpy_init, mock_model_client):
+        """How the arguments of a step are filled from the results before it"""
+        mock_model_client.inference.return_value = _decides(
+            "tts-say", text="A red cup on the table"
+        )
+        comp = self._cortex(mock_model_client, "test_cortex_confirm_resolved")
+
+        plan = [_step("vlm-describe"), _step("tts-say", text="<output from step 1>")]
+        decision, resolved = comp._confirm_step(plan, [{"result": "A red cup"}], 1)
+
         assert decision == "EXECUTE"
-        assert resolved is None
-
-    def test_confirm_skip(self, rclpy_init, mock_model_client):
-        mock_model_client.inference.return_value = {"output": "SKIP: already done"}
-        comp = Cortex(
-            outputs=[Topic(name="out", msg_type="String")],
-            actions=[_make_mock_action()],
-            model_client=mock_model_client,
-            config=CortexConfig(),
-            component_name="test_cortex_confirm_skip",
-        )
-        mock_component_internals(comp)
-
-        plan = [{"function": {"name": "navigate", "arguments": {}}}]
-        decision, resolved = comp._confirm_step(plan, [], 0)
-        assert decision == "SKIP"
-        assert resolved is None
-
-    def test_confirm_abort(self, rclpy_init, mock_model_client):
-        mock_model_client.inference.return_value = {"output": "ABORT: unsafe condition"}
-        comp = Cortex(
-            outputs=[Topic(name="out", msg_type="String")],
-            actions=[_make_mock_action()],
-            model_client=mock_model_client,
-            config=CortexConfig(),
-            component_name="test_cortex_confirm_abort",
-        )
-        mock_component_internals(comp)
-
-        plan = [{"function": {"name": "navigate", "arguments": {}}}]
-        decision, resolved = comp._confirm_step(plan, [], 0)
-        assert decision == "ABORT"
-        assert resolved is None
-
-    def test_confirm_defaults_to_execute(self, rclpy_init, mock_model_client):
-        mock_model_client.inference.return_value = {"output": "Sure, go ahead!"}
-        comp = Cortex(
-            outputs=[Topic(name="out", msg_type="String")],
-            actions=[_make_mock_action()],
-            model_client=mock_model_client,
-            config=CortexConfig(),
-            component_name="test_cortex_confirm_default",
-        )
-        mock_component_internals(comp)
-
-        plan = [{"function": {"name": "navigate", "arguments": {}}}]
-        decision, _ = comp._confirm_step(plan, [], 0)
-        assert decision == "EXECUTE"
-
-    def test_confirm_execute_with_resolved_args(self, rclpy_init, mock_model_client):
-        """When the LLM returns EXECUTE with a tool call, the resolved step is returned."""
-        mock_model_client.inference.return_value = {
-            "output": "EXECUTE",
-            "tool_calls": [
-                {
-                    "function": {
-                        "name": "tts-say",
-                        "arguments": {"text": "A red cup on the table"},
-                    }
-                },
-            ],
-        }
-        comp = Cortex(
-            actions=[_make_mock_action()],
-            model_client=mock_model_client,
-            config=CortexConfig(),
-            component_name="test_cortex_confirm_resolved",
-        )
-        mock_component_internals(comp)
-
-        plan = [{"function": {"name": "tts-say", "arguments": {"text": "placeholder"}}}]
-        decision, resolved = comp._confirm_step(plan, [], 0)
-        assert decision == "EXECUTE"
-        assert resolved is not None
         assert resolved["function"]["arguments"]["text"] == "A red cup on the table"
+
+    def _offered(self, mock_model_client):
+        sent = mock_model_client.inference.call_args.args[0]
+        return [t["function"]["name"] for t in sent["tools"]], sent["query"][-1][
+            "content"
+        ]
+
+    def test_the_decisions_are_offered_with_the_execution_tools(
+        self, rclpy_init, mock_model_client
+    ):
+        mock_model_client.inference.return_value = _decides("execute_step")
+        comp = self._cortex(mock_model_client, "test_cortex_confirm_tools")
+
+        comp._confirm_step([_step("test_action")], [], 0)
+
+        tools, _ = self._offered(mock_model_client)
+        assert tools == [
+            "execute_step",
+            "skip_step",
+            "abort_plan",
+            "continue_executing",
+            "test_action",
+        ]
+
+    def test_a_step_with_a_placeholder_cannot_run_as_planned(
+        self, rclpy_init, mock_model_client
+    ):
+        mock_model_client.inference.return_value = _decides("tts-say", text="A red cup")
+        comp = self._cortex(mock_model_client, "test_cortex_confirm_placeholder")
+
+        plan = [_step("vlm-describe"), _step("tts-say", text="<output from step 1>")]
+        comp._confirm_step(plan, [{"result": "A red cup"}], 1)
+
+        tools, message = self._offered(mock_model_client)
+        assert "execute_step" not in tools and "skip_step" in tools
+        assert "call tts-say with the placeholder replaced" in message
+
+    def test_after_the_last_step_there_is_nothing_to_run_or_skip(
+        self, rclpy_init, mock_model_client
+    ):
+        mock_model_client.inference.return_value = _decides("continue_executing")
+        comp = self._cortex(mock_model_client, "test_cortex_confirm_post")
+
+        decision, _ = comp._confirm_step([_step("navigate")], [{"result": "ok"}], 1)
+
+        tools, message = self._offered(mock_model_client)
+        assert decision == "CONTINUE"
+        assert tools[:2] == ["abort_plan", "continue_executing"]
+        assert "execute_step" not in tools and "skip_step" not in tools
+        assert "All the steps of the plan have been run" in message
+
+
+class TestGatedSteps:
+    """Steps that are not compiled into a routine run one at a time, each after
+    its confirmation"""
+
+    def _cortex(self, mock_model_client, name, decisions, results=("done",)):
+        comp = _make_cortex([], mock_model_client, name)
+        mock_component_internals(comp)
+        comp.config.compile_routines = False
+        comp._confirm_step = MagicMock(side_effect=decisions)
+        comp._execute_action_step = MagicMock(side_effect=results)
+        return comp
+
+    def test_a_failed_step_ends_the_batch(self, rclpy_init, mock_model_client):
+        comp = self._cortex(
+            mock_model_client,
+            "test_cortex_gated_failure",
+            decisions=[("EXECUTE", None)] * 3,
+            results=["arrived", "Error: gripper fault"],
+        )
+        plan = [_step("nav-go"), _step("arm-pick"), _step("tts-say", text="done")]
+
+        results, aborted = comp._execute_plan(plan, _Handle(), MagicMock())
+
+        assert not aborted
+        assert [r["result"] for r in results] == [
+            "arrived",
+            "Error: gripper fault",
+            "NOT RUN: an earlier step failed",
+        ]
+        assert [bool(r["failed"]) for r in results] == [False, True, False]
+        assert comp._execute_action_step.call_count == 2
+
+    def test_a_step_without_a_decision_is_not_run(self, rclpy_init, mock_model_client):
+        comp = self._cortex(
+            mock_model_client, "test_cortex_gated_unusable", [("UNUSABLE", None)]
+        )
+
+        results, aborted = comp._execute_plan(
+            [_step("nav-go"), _step("arm-pick")], _Handle(), MagicMock()
+        )
+
+        assert not aborted and results[0]["failed"]
+        assert "no decision" in results[0]["result"]
+        assert results[1]["result"].startswith("NOT RUN")
+        comp._execute_action_step.assert_not_called()
+
+    def test_a_step_with_an_unresolved_argument_is_not_run(
+        self, rclpy_init, mock_model_client
+    ):
+        comp = self._cortex(
+            mock_model_client,
+            "test_cortex_gated_placeholder",
+            decisions=[("EXECUTE", None)] * 2,
+            results=["A red cup"],
+        )
+        plan = [_step("vlm-describe"), _step("tts-say", text="<output from step 1>")]
+
+        results, _ = comp._execute_plan(plan, _Handle(), MagicMock())
+
+        assert results[1]["failed"] and "not resolved" in results[1]["result"]
+        comp._execute_action_step.assert_called_once_with(plan[0])
+
+    def test_the_call_the_confirmation_returned_is_run_and_recorded(
+        self, rclpy_init, mock_model_client
+    ):
+        filled = _step("tts-say", text="A red cup")
+        replaced = _step("nav-go", location="dock")
+        comp = self._cortex(
+            mock_model_client,
+            "test_cortex_gated_resolved",
+            decisions=[("EXECUTE", None), ("EXECUTE", filled), ("EXECUTE", replaced)],
+            results=["A red cup", "said", "arrived"],
+        )
+        plan = [
+            _step("vlm-describe"),
+            _step("tts-say", text="<output from step 1>"),
+            _step("arm-pick"),
+        ]
+
+        results, _ = comp._execute_plan(plan, _Handle(), MagicMock())
+
+        assert comp._execute_action_step.call_args_list[1].args == (filled,)
+        assert [r["action"] for r in results] == ["vlm-describe", "tts-say", "nav-go"]
+        assert results[1]["function"] == filled["function"]
+
+        # the planner sees the calls that ran, not the planned ones
+        messages = []
+        comp._append_execution_results_to_planning(messages, plan, results)
+        calls = [c["function"] for c in messages[0]["tool_calls"]]
+        assert calls[1] == filled["function"] and calls[2] == replaced["function"]
+
+    def test_the_planner_is_told_what_is_still_running(
+        self, rclpy_init, mock_model_client
+    ):
+        comp = self._cortex(mock_model_client, "test_cortex_gated_running", [])
+        comp._monitor_active_clients = MagicMock(
+            return_value="[Active Tools Status]\n- send_goal_to_nav: running\n"
+        )
+        plan = [_step("send_goal_to_nav", wait_to_finish=False), _step("arm-pick")]
+        results = [
+            {"step": 0, "action": "send_goal_to_nav", "result": "dispatched"},
+            {
+                "step": 1,
+                "action": "arm-pick",
+                "result": "Error: no grasp",
+                "failed": True,
+            },
+        ]
+        messages = []
+
+        comp._append_execution_results_to_planning(messages, plan, results)
+
+        assert messages[-1]["content"].startswith("Error: no grasp")
+        assert "send_goal_to_nav: running" in messages[-1]["content"]
+
+    def test_the_final_message_says_what_was_skipped(
+        self, rclpy_init, mock_model_client
+    ):
+        comp = self._cortex(mock_model_client, "test_cortex_gated_final", [])
+        results = [
+            {"step": 0, "action": "door-check", "result": "The door is already open"},
+            {"step": 1, "action": "door-open", "result": "SKIPPED"},
+            {"step": 2, "action": "nav-go", "result": "arrived"},
+        ]
+        handle, feedback = MagicMock(is_active=True), MagicMock()
+
+        comp._finalize_goal(
+            handle, feedback, MagicMock(), results, 3, False, voluntarily_stopped=True
+        )
+        assert feedback.feedback == "2 steps completed, 1 skipped."
+
+        comp._finalize_goal(
+            handle,
+            feedback,
+            MagicMock(),
+            [results[0], results[2]],
+            2,
+            False,
+            voluntarily_stopped=True,
+        )
+        assert feedback.feedback == "All 2 steps completed."
 
 
 class TestNoLLMMethods:

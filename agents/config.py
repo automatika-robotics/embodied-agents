@@ -187,8 +187,11 @@ class CortexConfig(LLMConfig):
        the execution plan. RAG context from a vector DB is also available during
        this phase. Controlled by ``max_planning_steps``.
     2. **Execution** — Each planned step is executed sequentially. Before each
-       step, a brief LLM confirmation call decides: EXECUTE, SKIP, or ABORT,
-       based on the original plan and results so far. After a plan is fully
+       step that is not run as part of a routine, a brief LLM confirmation call
+       decides, by calling a tool, to execute it, skip it, abort the plan, or
+       wait for an action that is still running, based on the original plan and
+       results so far. A step that fails, or that gets no decision, ends the
+       batch and returns to the planner. After a plan is fully
        executed, Cortex feeds the results back to the planner and may produce
        a follow-up plan, repeating the plan-execute loop until the planner
        signals completion. Both the per-plan length and the number of
@@ -214,7 +217,7 @@ class CortexConfig(LLMConfig):
     :type confirmation_temperature: float
     :param confirmation_max_tokens: Maximum tokens for confirmation responses.
         Must be large enough to accommodate a tool call with resolved arguments
-        when the LLM returns EXECUTE. Default is 500.
+        when the LLM returns the next step's own tool call. Default is 500.
     :type confirmation_max_tokens: int
     :param monitoring_interval: Seconds between checks on running goals and
         routines while a plan executes. Default is 2.0.
