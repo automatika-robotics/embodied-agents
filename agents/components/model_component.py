@@ -413,15 +413,23 @@ class ModelComponent(Component):
             "_warmup method needs to be implemented by child components."
         )
 
-    def _create_component_client(self, component_name: str) -> None:
-        """Create the service client for calling a component's actions, if
-        this component does not have one for it yet"""
-        if not self._component_clients.get(component_name):
-            self._component_clients[component_name] = ServiceClientHandler(
-                self,
-                srv_name=f"{component_name}/execute_method",
-                srv_type=ExecuteMethod,
-            )
+    @property
+    def _component_methods(self) -> List[str]:
+        """The actions of other components this component calls, each as
+        "component_name.method_name". None by default"""
+        return []
+
+    def create_all_service_clients(self):
+        """Create a client for each component whose actions this component calls"""
+        super().create_all_service_clients()
+        for method in self._component_methods:
+            component_name = method.split(".")[0]
+            if component_name not in self._component_clients:
+                self._component_clients[component_name] = ServiceClientHandler(
+                    self,
+                    srv_name=f"{component_name}/execute_method",
+                    srv_type=ExecuteMethod,
+                )
 
     def destroy_all_service_clients(self):
         """Destroy the clients for other components' actions with the rest"""

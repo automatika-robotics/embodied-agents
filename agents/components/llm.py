@@ -202,21 +202,23 @@ class LLM(ModelComponent):
         # deactivate the rest
         super().custom_on_deactivate()
 
+    @property
+    def _component_methods(self) -> List[str]:
+        """The component actions registered as tools"""
+        return self.config._component_tool_names
+
     def create_all_service_clients(self):
         """Override create all clients in the LLM"""
+        # the clients for the components whose actions are tools
         super().create_all_service_clients()
 
-        # Add custom clients to external processors for tool calling on
-        # component methods
+        # Add the component actions to external processors, for tool calling
         for tool_name in self.config._component_tool_names:
             comp_name, method_name = tool_name.split(".")
-            # Add the tool
             self._external_processors[method_name] = (
                 [partial(self._execute_component_method, comp_name, method_name)],
                 ExternalProcessorType.FUNCTION,
             )
-            # Create a service client only if it doesnt exist for a node
-            self._create_component_client(comp_name)
 
     def _execute_component_method(
         self,

@@ -4,7 +4,7 @@
         <g id="backgrounds" transform="matrix(1.32789,0,0,1,-22.3892,0)">
             <rect x="0" y="0" width="71" height="20" style="fill:rgb(85,85,85);"/>
         </g>
-        <rect x="71" y="0" width="47" height="20" data-interrogate="color" style="fill:#a4a61d"/>
+        <rect x="71" y="0" width="47" height="20" data-interrogate="color" style="fill:#97CA00"/>
         <g transform="matrix(1.19746,0,0,1,-22.3744,-4.85723e-16)">
             <rect x="0" y="0" width="118" height="20" style="fill:url(#_Linear1);"/>
         </g>
