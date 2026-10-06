@@ -11,6 +11,8 @@ from ..clients.roboml import RoboMLWSClient
 from ..config import ModelComponentConfig
 from ..ros import (
     ActionReturnType,
+    ExecuteMethod,
+    ServiceClientHandler,
     FixedInput,
     Topic,
     SupportedType,
@@ -40,6 +42,9 @@ class ModelComponent(Component):
         # setup model client/local model
         self.model_client = model_client if model_client else None
         self.local_model = None
+
+        # Service clients for calling the actions of other components
+        self._component_clients: Dict[str, ServiceClientHandler] = {}
 
         self.handled_outputs: List[Type[SupportedType]]
 
@@ -407,6 +412,48 @@ class ModelComponent(Component):
         raise NotImplementedError(
             "_warmup method needs to be implemented by child components."
         )
+
+    def _create_component_client(self, component_name: str) -> None:
+        """Create the service client for calling a component's actions, if
+        this component does not have one for it yet"""
+        if not self._component_clients.get(component_name):
+            self._component_clients[component_name] = ServiceClientHandler(
+                self,
+                srv_name=f"{component_name}/execute_method",
+                srv_type=ExecuteMethod,
+            )
+
+    def destroy_all_service_clients(self):
+        """Destroy the clients for other components' actions with the rest"""
+        super().destroy_all_service_clients()
+        for client in self._component_clients.values():
+            self.destroy_client(client.client)
+
+    def _call_component_method(
+        self, component_name: str, method_name: str, **kwargs
+    ) -> ActionReturnType:
+        """Call an action of another component over its ExecuteMethod service,
+        whatever process that component runs in.
+
+        :return: Whether the action succeeded, with its message or why not
+        :rtype: ActionReturnType
+        """
+        request = ExecuteMethod.Request()
+        request.name = method_name
+        request.kwargs_json = json.dumps(kwargs)
+        try:
+            response = self._component_clients[component_name].send_request(
+                req_msg=request
+            )
+        except Exception as e:
+            return False, str(e)
+        if response is None:
+            return False, "got no response from the component for given action"
+        if not response.success:
+            return False, response.error_msg
+        return True, json.loads(
+            response.response_json
+        ) if response.response_json else ""
 
     def _deploy_local_model(self):
         """Deploy local model on demand. Override in subclasses."""

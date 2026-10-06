@@ -835,6 +835,31 @@ class TestVLAComponent:
         comp._action_cleanup = MagicMock()
         return comp
 
+    def test_the_task_of_the_running_goal_can_be_asked_for(
+        self, rclpy_init, vla_topics
+    ):
+        """Another component, such as one deciding whether the task is done,
+        gets the task of the goal through this action. No goal, no task"""
+        comp = self._prepare_goal_execution(vla_topics, "test_vla_current_task")
+        comp._current_task = None
+        assert VLA.get_current_task.__wrapped__(comp) == (False, "No goal is running")
+
+        # the task is known while the goal runs
+        seen = []
+        comp._create_input = MagicMock(
+            side_effect=lambda task: seen.append(VLA.get_current_task.__wrapped__(comp))
+        )
+        goal_handle = MagicMock()
+        goal_handle.request.task = "pick up the orange"
+        goal_handle.is_active = True
+        type(goal_handle).is_cancel_requested = PropertyMock(
+            side_effect=[False] * 3 + [True] * 5
+        )
+
+        comp.main_action_callback(goal_handle)
+
+        assert seen and seen[0] == (True, "pick up the orange")
+
     def test_cancel_requested_goal_transitions_to_canceled(
         self, rclpy_init, vla_topics
     ):
