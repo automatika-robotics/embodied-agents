@@ -32,7 +32,7 @@ A Component is the main execution unit in _EmbodiedAgents_ and in essence each c
   - Provides a graph-based spatio-temporal memory primitive powered by eMEM. Encodes perception streams (e.g., VLM descriptions, detections) and interoception streams (internal body state) into a memory indexed by meaning, location, and time. Exposes structured retrieval tools (semantic, spatial, temporal, entity, episode) as component actions and supports episode-based consolidation with entity tracking.
 
 * - **[SemanticRouter](agents.components.semantic_router.md)**
-  - Routes information between topics based on semantic content and predefined routing rules. Uses a vector DB for semantic matching or an LLM for decision-making. This allows for creating complex graphs of components where a single input source can trigger different information processing pathways.
+  - Routes information between topics based on semantic content and predefined routing rules. Uses a vector DB for semantic matching, an LLM for decision-making, or a decision model that chooses the route in one forward pass. This allows for creating complex graphs of components where a single input source can trigger different information processing pathways.
 
 * - **[DecisionComponent](agents.components.decision.md)**
   - Asks a decision model (served by a TypeSafe-compatible /v1/systemone API) typed questions about its inputs: yes/no, a choice among options, or a score on ordered levels, each answered in one forward pass with a probability for every option. Publishes each question's answers on its own topic as Decision messages, so events can act on them with thresholds.

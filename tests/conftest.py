@@ -26,6 +26,7 @@ def mock_model_client():
     client.initialize.return_value = None
     client.deinitialize.return_value = None
     type(client).supports_tool_calls = PropertyMock(return_value=True)
+    type(client).supports_decisions = PropertyMock(return_value=False)
     type(client).inference_timeout = PropertyMock(return_value=30)
     return client
 

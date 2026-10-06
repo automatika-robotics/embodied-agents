@@ -1382,10 +1382,12 @@ class SemanticRouterConfig(ModelComponentConfig):
 
     :param router_name: The name of the router.
     :type router_name: str
-    :param distance_func: The function used to calculate distance from route samples in vectordb. Can be one of "l2" (L2 distance), "ip" (Inner Product), or "cosine" (Cosine similarity). Default is "l2".
+    :param distance_func: The function used to calculate distance from route samples in vectordb. Can be one of "l2" (L2 distance), "ip" (Inner Product), or "cosine" (Cosine similarity). Default is "l2". This parameter is only effective in vector mode (when the router is given a db client).
     :type distance_func: str
-    :param maximum_distance: The maximum distance threshold for routing. A value between 0.1 and 1.0. Defaults to 0.4
+    :param maximum_distance: The maximum distance threshold for routing. A value between 0.1 and 1.0. Beyond it, the input goes to the default route, if one is set. Defaults to 0.4. This parameter is only effective in vector mode (when the router is given a db client).
     :type maximum_distance: float
+    :param minimum_confidence: The confidence the decision model's choice needs for routing. A value between 0.0 and 1.0. Below it, the input goes to the default route, if one is set. Defaults to 0.3. This parameter is only effective in decision mode (when the router is given a model client with a decision model).
+    :type minimum_confidence: float
 
     Example of usage:
     ```python
@@ -1401,6 +1403,9 @@ class SemanticRouterConfig(ModelComponentConfig):
     )
     maximum_distance: float = field(
         default=0.4, validator=base_validators.in_range(min_value=0.1, max_value=1.0)
+    )
+    minimum_confidence: float = field(
+        default=0.3, validator=base_validators.in_range(min_value=0.0, max_value=1.0)
     )
     _default_route: Optional[str] = field(default=None, alias="_default_route")
 
