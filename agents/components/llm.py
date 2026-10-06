@@ -18,8 +18,6 @@ from ..ros import (
     Detections3D,
     StreamingString,
     BaseComponent,
-    ServiceClientHandler,
-    ExecuteMethod,
     ExternalProcessorType,
     run_external_processor,
 )
@@ -133,9 +131,6 @@ class LLM(ModelComponent):
             else []
         )
 
-        # Mapping for service clients used for calling component actions as tools
-        self._component_clients: Dict[str, ServiceClientHandler] = {}
-
         super().__init__(
             inputs,
             outputs,
@@ -221,16 +216,7 @@ class LLM(ModelComponent):
                 ExternalProcessorType.FUNCTION,
             )
             # Create a service client only if it doesnt exist for a node
-            if not self._component_clients.get(comp_name):
-                self._component_clients[comp_name] = ServiceClientHandler(
-                    self, srv_name=f"{comp_name}/execute_method", srv_type=ExecuteMethod
-                )
-
-    def destroy_all_service_clients(self):
-        """Override destroy all clients in the LLM"""
-        super().destroy_all_service_clients()
-        for client in self._component_clients.values():
-            self.destroy_client(client.client)
+            self._create_component_client(comp_name)
 
     def _execute_component_method(
         self,
@@ -238,20 +224,14 @@ class LLM(ModelComponent):
         method_name: str,
         **kwargs: Dict,
     ) -> str:
+        """Call a component action as a tool and give its result as the tool
+        result the model sees"""
         tool_name = f"{component_name}.{method_name}"
-        srv_client: ServiceClientHandler = self._component_clients[component_name]
-        srv_request = ExecuteMethod.Request()
-        srv_request.name = method_name
-        srv_request.kwargs_json = json.dumps(kwargs)
-        try:
-            response = srv_client.send_request(req_msg=srv_request)
-        except Exception as e:
-            return f"Error calling {tool_name}: {e}"
-        if response is None:
-            return f"Error: {tool_name} got no response from the component"
-        if not response.success:
-            return f"Error: {tool_name} failed with error: {response.error_msg}"
-        message = json.loads(response.response_json) if response.response_json else ""
+        success, message = self._call_component_method(
+            component_name, method_name, **kwargs
+        )
+        if not success:
+            return f"Error: {tool_name} failed with error: {message}"
         return message or f"{tool_name} executed successfully"
 
     @validate_func_args
