@@ -15,6 +15,7 @@ import time
 from ..ros import (
     Event,
     Action,
+    ActionPhase,
     ActionReturnType,
     RGBD,
     Image,
@@ -26,6 +27,7 @@ from ..ros import (
     MutuallyExclusiveCallbackGroup,
     VisionLanguageAction,
     ExternalProcessorType,
+    component_action,
     run_external_processor,
 )
 from ..callbacks import RGBDCallback
@@ -191,6 +193,8 @@ class VLA(ModelComponent):
         self._last_executed_timestep_lock = threading.Lock()
         self._last_executed_timestep = -1
 
+        # the task of the goal that is running
+        self._current_task: Optional[str] = None
         # track task status
         self._task_completed = False
 
@@ -693,6 +697,34 @@ class VLA(ModelComponent):
 
         # reset task status
         self._task_completed = False
+        self._current_task = None
+
+    @component_action(
+        description={
+            "type": "function",
+            "function": {
+                "name": "get_current_task",
+                "description": (
+                    "Get the task the VLA manipulation policy is carrying out right "
+                    "now. Fails when no goal is running."
+                ),
+                "parameters": {"type": "object", "properties": {}, "required": []},
+            },
+        },
+        active=True,
+        # Not used as an execution tool as no task running returns a failure
+        phase=ActionPhase.PLANNING,
+    )
+    def get_current_task(self) -> ActionReturnType:
+        """The task of the goal that is running, as the goal gave it.
+        Fails when no task is running.
+
+        :return: Whether a goal is running, with its task
+        :rtype: ActionReturnType
+        """
+        if not self._current_task:
+            return False, "No goal is running"
+        return True, self._current_task
 
     def set_aggregation_function(
         self, agg_fn: Callable[[np.ndarray, np.ndarray], np.ndarray]
@@ -754,6 +786,7 @@ class VLA(ModelComponent):
 
         # Get request
         task: str = goal_handle.request.task
+        self._current_task = task
 
         # Setup feedback of the action
         task_feedback_msg = VisionLanguageAction.Feedback()
