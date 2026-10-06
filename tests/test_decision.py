@@ -1,15 +1,16 @@
 """Tests for the DecisionComponent and the Decision message — requires rclpy."""
 
 import json
-from unittest.mock import MagicMock, PropertyMock
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import numpy as np
 import pytest
 
 from agents.clients.model_base import ModelClient
+from agents.components.component_base import Component
 from agents.components.decision import DecisionComponent
 from agents.config import DecisionConfig
-from agents.ros import Decision, Topic
+from agents.ros import ActionReturnType, Decision, Topic, component_action
 from tests.conftest import mock_component_internals
 from tests.test_vision import _callback
 
@@ -214,15 +215,139 @@ class TestToolOnly:
         decision_client.inference.assert_not_called()
 
 
+class _Arm(Component):
+    """A component with an action that reports what it is doing"""
+
+    def _execution_step(self, **kwargs):
+        pass
+
+    @component_action
+    def get_current_task(self) -> ActionReturnType:
+        """The task being carried out"""
+        return True, "pick up the orange"
+
+
+class TestActionStates:
+    """The state can hold what other components report when asked"""
+
+    @pytest.fixture
+    def checker(self, rclpy_init, decision_client):
+        arm = _Arm(component_name="arm")
+        comp = DecisionComponent(
+            inputs=[Topic(name="camera", msg_type="Image")],
+            model_client=decision_client,
+            questions={"stop": QUESTIONS["stop"]},
+            action_states={"task": arm.get_current_task},
+            component_name="checker",
+        )
+        mock_component_internals(comp)
+        comp.publishers_dict = {t.name: MagicMock() for t in comp.out_topics}
+        comp.callbacks = {
+            "camera": _callback(output=np.zeros((2, 2, 3), np.uint8), name="camera")
+        }
+        comp.trig_callbacks = {}
+        comp._call_component_method = MagicMock(
+            return_value=(True, "pick up the orange")
+        )
+        comp.log_once = MagicMock()
+        return comp
+
+    def test_they_travel_by_name_in_the_config(
+        self, rclpy_init, decision_client, checker
+    ):
+        assert checker.config._action_states == {"task": "arm.get_current_task"}
+        assert "task: arm.get_current_task" in checker.inspect_component()
+
+        config = DecisionConfig()
+        config.from_json(checker.config.to_json())
+        rebuilt = DecisionComponent(
+            model_client=decision_client, config=config, component_name="checker"
+        )
+        assert rebuilt.config._action_states == {"task": "arm.get_current_task"}
+
+    def test_a_client_is_made_for_each_component(self, checker):
+        with (
+            patch.object(Component, "create_all_service_clients"),
+            patch("agents.components.model_component.ServiceClientHandler") as handler,
+        ):
+            checker.create_all_service_clients()
+        assert list(checker._component_clients) == ["arm"]
+        assert handler.call_args.kwargs["srv_name"] == "arm/execute_method"
+
+    def test_only_component_actions_are_taken(self, rclpy_init, decision_client):
+        with pytest.raises(TypeError, match="action of a component"):
+            DecisionComponent(
+                model_client=decision_client,
+                action_states={"task": lambda: "pick"},
+                component_name="checker",
+            )
+
+    def test_questions_can_be_asked_about_action_states_alone(
+        self, rclpy_init, decision_client
+    ):
+        arm = _Arm(component_name="arm_alone")
+        comp = DecisionComponent(
+            model_client=decision_client,
+            questions={"stop": QUESTIONS["stop"]},
+            action_states={"task": arm.get_current_task},
+            component_name="checker_alone",
+        )
+        assert [t.name for t in comp.out_topics] == ["checker_alone/stop"]
+
+    def test_the_result_joins_the_state(self, checker, decision_client):
+        decision_client.inference.return_value = {"output": {"stop": NOUL}}
+
+        checker._execution_step()
+
+        checker._call_component_method.assert_called_once_with(
+            "arm", "get_current_task"
+        )
+        sent = decision_client.inference.call_args.args[0]
+        assert (
+            sent["state"] == {"task": "pick up the orange"} and len(sent["images"]) == 1
+        )
+        checker.publishers_dict["checker/stop"].publish.assert_called_once()
+
+    def test_a_failed_action_state_skips_the_cycle(self, checker, decision_client):
+        checker._call_component_method.return_value = (False, "No goal is running")
+
+        checker._execution_step()
+
+        decision_client.inference.assert_not_called()
+        checker.publishers_dict["checker/stop"].publish.assert_not_called()
+        assert "No goal is running" in checker.log_once.call_args.args[1]
+
+    def test_ask_reads_them_too_unless_given_a_state(self, checker, decision_client):
+        decision_client.inference.return_value = {"output": {"ask": NOUL}}
+
+        ok, _ = ask(checker, instructions="Is the task done?")
+        assert ok
+        assert decision_client.inference.call_args.args[0]["state"] == {
+            "task": "pick up the orange"
+        }
+
+        checker._call_component_method.reset_mock()
+        ask(
+            checker,
+            instructions="Is the task done?",
+            state="The orange is on the plate",
+        )
+        checker._call_component_method.assert_not_called()
+
+        checker._call_component_method.return_value = (False, "No goal is running")
+        ok, why = ask(checker, instructions="Is the task done?")
+        assert not ok and "No goal is running" in why
+
+
 class TestAskingOnTrigger:
     def test_text_is_the_state_and_images_are_images(self, decider):
-        inference_input = decider._create_input()
+        inference_input, _ = decider._create_input()
         assert inference_input["state"] == {"speech": "Stop right now!"}
         assert len(inference_input["images"]) == 1
 
     def test_a_trigger_input_is_part_of_the_state(self, decider):
         decider.trig_callbacks = {"speech": decider.callbacks.pop("speech")}
-        assert decider._create_input()["state"] == {"speech": "Stop right now!"}
+        assert decider._create_input()[0]["state"] == {"speech": "Stop right now!"}
 
     def test_each_answer_is_published_on_its_question_topic(
         self, decider, decision_client

@@ -1,12 +1,13 @@
 import json
 import threading
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from ..clients.model_base import ModelClient
 from ..config import DecisionConfig
 from ..ros import (
     ActionPhase,
     ActionReturnType,
+    BaseComponent,
     Decision,
     Detections,
     Detections3D,
@@ -75,6 +76,10 @@ class DecisionComponent(ModelComponent):
     On each trigger, all questions are asked about the current inputs in one
     request: text inputs make up the state, as a JSON object keyed by topic
     name, and image inputs are given as images (with a model that reads images).
+    The state can also hold what other components report when asked: each of
+    the `action_states` is a component action that is called before the
+    questions are asked, and its result joins the state under the given name.
+    When one of them fails the questions are not asked on that trigger.
 
     **The component does not need to be given output topics.** Each question is
     published on its own topic, named `<component_name>/<question_id>`, with a
@@ -98,9 +103,14 @@ class DecisionComponent(ModelComponent):
         GenericHTTPClient with a GenericDecisionModel.
     :type model_client: ModelClient
     :param questions: The standing questions to ask on every trigger, keyed
-        by id, in the API format. Each gets an output topic. Needs inputs to be
-        asked about.
+        by id, in the API format. Each gets an output topic. Needs inputs or
+        action states to be asked about.
     :type questions: Optional[dict[str, dict]]
+    :param action_states: Component actions whose results are part of the
+        state, keyed by the name each result has in the state, e.g.
+        ``{"task": vla.get_current_task}``. They are called on every trigger,
+        in whatever process their components run.
+    :type action_states: Optional[dict[str, Callable]]
     :param config: The configuration for the component. Defaults to DecisionConfig().
     :type config: Optional[DecisionConfig]
     :param trigger: The trigger for asking the questions: input topic(s), a rate
@@ -138,6 +148,7 @@ class DecisionComponent(ModelComponent):
         inputs: Optional[List[Union[Topic, FixedInput]]] = None,
         model_client: ModelClient,
         questions: Optional[Dict[str, Dict]] = None,
+        action_states: Optional[Dict[str, Callable]] = None,
         config: Optional[DecisionConfig] = None,
         trigger: Union[Topic, List[Topic], float, Event] = 1.0,
         component_name: str,
@@ -167,12 +178,22 @@ class DecisionComponent(ModelComponent):
         config = config or DecisionConfig()
         if questions is not None:
             config._questions = questions
+        # verify action states are component methods
+        for name, action in (action_states or {}).items():
+            component = getattr(action, "__self__", None)
+            if not isinstance(component, BaseComponent):
+                raise TypeError(
+                    f"Action state '{name}' must be an action of a component, "
+                    f"such as vla.get_current_task; got {action!r}"
+                )
+            config._action_states[name] = f"{component.node_name}.{action.__name__}"
         # if questions are provided at init then some state should always be given
-        if config._questions and not inputs:
+        if config._questions and not inputs and not config._action_states:
             raise ValueError(
-                "Standing questions are asked about the component's inputs, and "
-                "none were given. Give the inputs to ask about, or no questions "
-                "and use the component action as a tool with `ask`."
+                "Standing questions are asked about the component's inputs or "
+                "action states, and none were given. Give the inputs or action "
+                "states to ask about, or no questions and use the component "
+                "action as a tool with `ask`."
             )
         for question_id, question in config._questions.items():
             self._validate_question(question_id, question)
@@ -244,9 +265,19 @@ class DecisionComponent(ModelComponent):
                 "of 'true' and 'false' in a dictionary"
             )
 
+    @property
+    def _component_methods(self) -> List[str]:
+        """The component actions that give state"""
+        return list(self.config._action_states.values())
+
     def inspect_component(self) -> str:
         """Return component info including its questions and their topics"""
         result = super().inspect_component()
+        if self.config._action_states:
+            result += "\nAction states (asked for on every trigger):\n" + "\n".join(
+                f"  - {name}: {action}"
+                for name, action in self.config._action_states.items()
+            )
         if not self.config._questions:
             return result + "\nQuestions: none"
         lines = ["Questions (each answered on its own topic):"]
@@ -261,17 +292,19 @@ class DecisionComponent(ModelComponent):
     # Inference
     # =========================================================================
 
-    def _create_input(self, *_, **__) -> Optional[Dict[str, Any]]:
-        """Create inference input from the current inputs. Text inputs as
-        the state, keyed by topic name, and the images as images
+    def _create_input(self) -> Tuple[Optional[Dict[str, Any]], str]:  # type: ignore
+        """Gather the inference input. Text inputs and the results of the
+        action states as the state, keyed by name, and the images as images.
 
-        :rtype: dict[str, Any] | None
+        :return: The inference input, or None with why there is nothing to
+            decide about
         """
         state: Dict[str, Any] = {}
         images = []
         callbacks = list(self.callbacks.values()) + list(
             getattr(self, "trig_callbacks", {}).values()
         )
+        # gather all topic states
         for callback in callbacks:
             if (item := callback.get_output()) is None:
                 continue
@@ -279,12 +312,19 @@ class DecisionComponent(ModelComponent):
                 images.append(item)
             else:
                 state[callback.input_topic.name] = item
+        # gather all action states
+        for name, action in self.config._action_states.items():
+            component_name, method_name = action.split(".")
+            success, message = self._call_component_method(component_name, method_name)
+            if not success:
+                return None, f"action state '{name}' ({action}) gave nothing: {message}"
+            state[name] = message
         if not state and not images:
-            return None
+            return None, "no input has been received"
         inference_input: Dict[str, Any] = {"state": state}
         if images:
             inference_input["images"] = images
-        return inference_input
+        return inference_input, ""
 
     def _ask(
         self, inference_input: Dict[str, Any], questions: Dict[str, Dict]
@@ -301,9 +341,9 @@ class DecisionComponent(ModelComponent):
         if not self.config._questions:
             self.log_once("no_questions", "No standing questions to ask", level="debug")
             return
-        inference_input = self._create_input(*args, **kwargs)
-        if not inference_input:
-            self.get_logger().warning("Input not received, not calling model inference")
+        inference_input, why = self._create_input()
+        if inference_input is None:
+            self.log_once(why, f"Not asking the standing questions: {why}")
             return
         answers = self._ask(inference_input, self.config._questions)
         if answers is None:
@@ -383,7 +423,8 @@ class DecisionComponent(ModelComponent):
         :param instructions: The question
         :param type: noul (yes/no), choice or score
         :param criteria: The options of a choice or the levels of a score
-        :param state: What to ask about instead of the component's inputs
+        :param state: What to ask about instead of the component's inputs and
+            action states
         :return: Whether the answer was obtained, with the answer as JSON or why not
         :rtype: ActionReturnType
         """
@@ -394,12 +435,9 @@ class DecisionComponent(ModelComponent):
             return False, str(e)
 
         if state is None:
-            inference_input = self._create_input()
-            if not inference_input:
-                return False, (
-                    "Nothing to decide about: no state was given and no input "
-                    "has been received"
-                )
+            inference_input, why = self._create_input()
+            if inference_input is None:
+                return False, (f"Nothing to decide about: no state was given and {why}")
         else:
             inference_input = {"state": state}
 

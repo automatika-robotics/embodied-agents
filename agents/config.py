@@ -1373,6 +1373,10 @@ class DecisionConfig(ModelComponentConfig):
     """
 
     _questions: Dict[str, Dict] = field(default=Factory(dict), alias="_questions")
+    # State name -> "component_name.method_name"
+    _action_states: Dict[str, str] = field(
+        default=Factory(dict), alias="_action_states"
+    )
 
     def _get_inference_params(self):
         """A decision model takes no inference parameters"""
