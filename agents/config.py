@@ -16,6 +16,7 @@ __all__ = [
     "SpeechToTextConfig",
     "TextToSpeechConfig",
     "SemanticRouterConfig",
+    "DecisionConfig",
     "MapConfig",
     "MemoryConfig",
     "MotionDetectorConfig",
@@ -371,9 +372,13 @@ class MLLMConfig(LLMConfig):
     ] = field(
         default=None,
         validator=validators.optional(
-            base_validators.in_(
-                ["general", "pointing", "affordance", "trajectory", "grounding"]
-            )
+            base_validators.in_([
+                "general",
+                "pointing",
+                "affordance",
+                "trajectory",
+                "grounding",
+            ])
         ),
     )
     local_model_path: Optional[str] = field(
@@ -520,9 +525,12 @@ class VLAConfig(ModelComponentConfig):
     state_input_type: Literal["positions", "velocities", "accelerations", "efforts"] = (
         field(
             default="positions",
-            validator=base_validators.in_(
-                ["positions", "velocities", "accelerations", "efforts"]
-            ),
+            validator=base_validators.in_([
+                "positions",
+                "velocities",
+                "accelerations",
+                "efforts",
+            ]),
         )
     )
     # TODO: One can make models that produce multiple action output types.
@@ -531,9 +539,12 @@ class VLAConfig(ModelComponentConfig):
         "positions", "velocities", "accelerations", "efforts"
     ] = field(
         default="positions",
-        validator=base_validators.in_(
-            ["positions", "velocities", "accelerations", "efforts"]
-        ),
+        validator=base_validators.in_([
+            "positions",
+            "velocities",
+            "accelerations",
+            "efforts",
+        ]),
     )
     observation_sending_rate: float = field(
         default=10.0, validator=base_validators.in_range(min_value=1e-6, max_value=1e6)
@@ -554,9 +565,12 @@ class VLAConfig(ModelComponentConfig):
         "latest_only", "weighted_average", "average", "conservative"
     ] = field(
         default="latest_only",
-        validator=base_validators.in_(
-            ["latest_only", "weighted_average", "average", "conservative"]
-        ),
+        validator=base_validators.in_([
+            "latest_only",
+            "weighted_average",
+            "average",
+            "conservative",
+        ]),
     )
     _termination_mode: Literal["timesteps", "keyboard", "event"] = field(
         default="timesteps", alias="_termination_mode"
@@ -691,9 +705,7 @@ class MoveItConfig(BaseComponentConfig):
     planning_pipeline: str = field(default="")
     planner_id: str = field(default="")
     num_planning_attempts: int = field(default=5, validator=base_validators.gt(0))
-    allowed_planning_time: float = field(
-        default=5.0, validator=base_validators.gt(0.0)
-    )
+    allowed_planning_time: float = field(default=5.0, validator=base_validators.gt(0.0))
     max_velocity_scaling: float = field(
         default=0.1, validator=base_validators.in_range(min_value=1e-3, max_value=1.0)
     )
@@ -761,9 +773,7 @@ class MoveItConfig(BaseComponentConfig):
     def _check_grasp_orientation(self, _, value):
         """Grasp orientation validator"""
         if value is not None and len(value) != 4:
-            raise ValueError(
-                "grasp_orientation must be a quaternion as [x, y, z, w]"
-            )
+            raise ValueError("grasp_orientation must be a quaternion as [x, y, z, w]")
 
     @gripper_command_action.validator
     def _check_gripper_command_action(self, _, value):
@@ -1347,6 +1357,23 @@ class MemoryConfig(BaseComponentConfig):
     _position: Optional[Topic] = field(
         default=None, converter=_get_optional_topic, alias="_position"
     )
+
+
+@define(kw_only=True)
+class DecisionConfig(ModelComponentConfig):
+    """Configuration parameters for a decision component.
+
+    Example of usage:
+    ```python
+    config = DecisionConfig(warmup=True)
+    ```
+    """
+
+    _questions: Dict[str, Dict] = field(default=Factory(dict), alias="_questions")
+
+    def _get_inference_params(self):
+        """A decision model takes no inference parameters"""
+        return {}
 
 
 @define(kw_only=True)

@@ -34,6 +34,9 @@ A Component is the main execution unit in _EmbodiedAgents_ and in essence each c
 * - **[SemanticRouter](agents.components.semantic_router.md)**
   - Routes information between topics based on semantic content and predefined routing rules. Uses a vector DB for semantic matching or an LLM for decision-making. This allows for creating complex graphs of components where a single input source can trigger different information processing pathways.
 
+* - **[DecisionComponent](agents.components.decision.md)**
+  - Asks a decision model (served by a TypeSafe-compatible /v1/systemone API) typed questions about its inputs: yes/no, a choice among options, or a score on ordered levels, each answered in one forward pass with a probability for every option. Publishes each question's answers on its own topic as Decision messages, so events can act on them with thresholds.
+
 * - **[Vision](agents.components.vision.md)**
   - An essential component in all vision powered robots. Performs object detection and tracking on incoming images. Outputs object classes, bounding boxes, and confidence scores. It implements a low-latency small on-board classification model as well.
 
@@ -47,6 +50,7 @@ A Component is the main execution unit in _EmbodiedAgents_ and in essence each c
 
 from .component_base import Component
 from .cortex import Cortex
+from .decision import DecisionComponent
 from .imagestovideo import VideoMessageMaker
 from .motion_detection import MotionDetector
 from .llm import LLM
@@ -64,6 +68,7 @@ from .vla import VLA
 __all__ = [
     "Component",
     "Cortex",
+    "DecisionComponent",
     "ModelComponent",
     "MapEncoding",
     "Memory",
