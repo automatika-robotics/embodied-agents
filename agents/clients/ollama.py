@@ -166,6 +166,9 @@ class OllamaClient(ModelClient):
             if self.model_init_params.get("options")
             else inference_input
         )
+        # pass the thinking option
+        if (think := self.model_init_params.get("think")) is not None:
+            input["think"] = think
 
         self.logger.debug(f"Sending to ollama server: {input}")
 

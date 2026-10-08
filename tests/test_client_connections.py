@@ -395,6 +395,52 @@ class TestOllamaModelsAreLoaded:
         client.client.pull.assert_not_called()
 
 
+class TestOllamaThinkingSwitch:
+    """The `think` of an OllamaModel reaches the chat request at its top level,
+    where Ollama reads it (inside the options it would be ignored)"""
+
+    def _chat(self, think):
+        client = OllamaClient({
+            **TestOllamaModelsAreLoaded.MODEL,
+            "model_init_params": {
+                "checkpoint": "qwen3.5:latest",
+                "think": think,
+                "options": None,
+            },
+        })
+        client.client = MagicMock()
+        client.client.chat.return_value = {"message": {"content": "hi"}}
+        client._inference({
+            "query": [{"role": "user", "content": "hi"}],
+            "stream": False,
+            "max_new_tokens": 10,
+            "temperature": 0.1,
+        })
+        return client.client.chat.call_args.kwargs
+
+    def test_think_is_sent_at_the_top_level(self):
+        sent = self._chat(False)
+        assert sent["think"] is False
+        assert "think" not in sent["options"]
+        assert sent["options"]["num_predict"] == 10
+
+    def test_unset_leaves_the_models_default(self):
+        sent = self._chat(None)
+        assert "think" not in sent and "think" not in sent["options"]
+
+    def test_think_is_a_model_field_not_an_option(self):
+        from agents.models import OllamaModel
+
+        assert (
+            OllamaModel(
+                name="m", checkpoint="qwen3.5:latest", think=False
+            )._get_init_params()["think"]
+            is False
+        )
+        with pytest.raises(ValueError, match="Invalid key"):
+            OllamaModel(name="m", checkpoint="qwen3.5:latest", options={"think": False})
+
+
 class TestChromaClientLifecycle:
     """A deinitialized Chroma client can be initialized and used again, as when
     its component restarts, and a failed connection check can be retried"""

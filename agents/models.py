@@ -286,6 +286,11 @@ class OllamaModel(LLM):
     :type checkpoint: str
     :param init_timeout: The timeout in seconds for the initialization process. Defaults to None.
     :type init_timeout: int, optional
+    :param think: Whether a thinking model thinks before it answers. None, the
+        default, leaves it to the model's own default. False makes a planner or
+        a tool-calling component answer much faster, and keeps a thinking model
+        from using its whole token budget before it answers.
+    :type think: bool, optional
     :param options: Optional dictionary to configure generation behavior. Options that conflict with component config options such as (num_predict and temperature) will be overridden if set in component config. Only the following keys with their specified value types are allowed. For details check [Ollama api documentation](https://github.com/ollama/ollama/blob/main/docs/api.md#generate-request-with-options):
         - num_keep: int
         - seed: int
@@ -308,7 +313,6 @@ class OllamaModel(LLM):
         - main_gpu: int
         - use_mmap: bool
         - num_thread: int
-        - think: bool
     :type options: dict, optional
 
      Example usage:
@@ -322,6 +326,7 @@ class OllamaModel(LLM):
 
     checkpoint: str = field(default="llama3.2:3b")
     port: Optional[int] = field(default=11434)
+    think: Optional[bool] = field(default=None)
     options: Optional[Dict[str, Any]] = field(default=None)
 
     @options.validator
@@ -351,7 +356,6 @@ class OllamaModel(LLM):
             "main_gpu": int,
             "use_mmap": bool,
             "num_thread": int,
-            "think": bool,
         }
 
         for key, val in value.items():
@@ -372,6 +376,7 @@ class OllamaModel(LLM):
         """Get init params for model initialization."""
         return {
             "checkpoint": self.checkpoint,
+            "think": self.think,
             "options": self.options,
         }
 
