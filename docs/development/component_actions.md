@@ -166,6 +166,12 @@ Cortex runs two or more consecutive compilable steps of a plan, or a lone awaite
 
 A standing instruction, "whenever X happens, do Y", requires a sugarcoat runtime event rather than an action step. Tools that allow adding events while planning are off by default, since they are the most complex Cortex offers; `CortexConfig(enable_events=True)` registers them and adds the guidance to the planning prompt. The planner installs an event with `add_event`: an id, one or more conditions on topic fields joined by `all` or `any`, the actions to run as tool calls, and `once`, true by default. Conditions name a topic a managed component reads or writes, a dotted field path and one of sugarcoat's comparison operators. `inspect_component` lists the fields of every topic's message, and a topic or field that does not exist is refused before anything is installed. Instead of topic conditions, an event may name a condition a robot or sensor plugin offers, such as a low battery with its threshold, as `plugin_condition`; those conditions are listed in the prompt guidance when events are enabled. An event may run component actions, plugin actions, awaited goals and routine tools. With `once` false the event stays and fires each time the condition becomes true. `remove_event` and `list_events` complete the set. Events outlive the task that installed them, and a firing is not reported to the planner.
 
+## Written Functions
+
+When nothing available does what a task needs, the planner can write the missing piece itself. `CortexConfig(enable_scratch_functions=True)` adds `write_function`, `list_functions`, `read_function` and `remove_function` to the planning tools. A written function is Python source that travels in the tool call, is compiled and checked in Cortex, and is kept in memory for the life of the process. There are two kinds. An *action* is `def <name>(<typed parameters>) -> tuple[bool, str]` with a docstring: it becomes the execution tool `scratch-<name>`, with a schema built from its signature and docstring, so a plan step or an event can run it like any component action. A *condition* is `def <name>() -> bool` with a docstring: it becomes a `plugin_condition` of `add_event` named `scratch-<name>`, polled at the `check_rate` the event gives it, so a standing instruction can watch something no topic publishes. Both are registered in the action registry under the owner `scratch`, which is why no component may be named that.
+
+A written function runs in the launcher process. It has `run_action('<tool name>', **arguments)` in its namespace to run the robot's existing actions, which returns the action contract, and `os` for the environment. Action server goals cannot be run this way; the planner is told to plan them as steps. The contracts are enforced at write time, from the annotations, and at run time.
+
 ## Cortex's Own Tools
 
 | Tool | Phase | Description |
@@ -173,6 +179,8 @@ A standing instruction, "whenever X happens, do Y", requires a sugarcoat runtime
 | `inspect_component(component)` | planning | A component's topics with their message fields, configuration, model clients and tools |
 | `update_parameter(component, param_name, new_value)` | execution | Change one configuration parameter |
 | `wait(duration)` | execution | Hold for a number of seconds. Not for waiting on a running goal, whose progress the planner is shown. Cut short if the task is cancelled |
+| `write_function(name, kind, source)` | planning | Write an action or a condition as Python, with `enable_scratch_functions` |
+| `list_functions()`, `read_function(name)`, `remove_function(name)` | planning | The written functions, one's source, and forgetting one |
 
 ## Built-in Component Actions
 
