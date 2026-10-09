@@ -10,6 +10,9 @@ from ..clients.model_base import ModelClient
 from ..clients.roboml import RoboMLWSClient
 from ..config import ModelComponentConfig
 from ..ros import (
+    ActionReturnType,
+    ExecuteMethod,
+    ServiceClientHandler,
     FixedInput,
     Topic,
     SupportedType,
@@ -39,6 +42,9 @@ class ModelComponent(Component):
         # setup model client/local model
         self.model_client = model_client if model_client else None
         self.local_model = None
+
+        # Service clients for calling the actions of other components
+        self._component_clients: Dict[str, ServiceClientHandler] = {}
 
         self.handled_outputs: List[Type[SupportedType]]
 
@@ -111,7 +117,7 @@ class ModelComponent(Component):
             },
         }
     )
-    def fallback_to_local(self) -> str:
+    def fallback_to_local(self) -> ActionReturnType:
         """Switch from remote model_client to the built-in local model at runtime.
 
         The local model is deployed on first call (lazy initialization) to avoid
@@ -120,9 +126,9 @@ class ModelComponent(Component):
 
         This is commonly used as a target for Actions in the Event system.
 
-        :return: A confirmation message describing the switch.
-        :rtype: str
-        :raises RuntimeError: If the local model could not be deployed.
+        :return: Whether the switch happened, with a confirmation message or
+            why the local model could not be deployed.
+        :rtype: ActionReturnType
 
         :Example:
 
@@ -147,7 +153,7 @@ class ModelComponent(Component):
         try:
             self._deploy_local_model()
         except Exception as e:
-            raise RuntimeError(f"Failed to deploy local model: {e}") from e
+            return False, f"Failed to deploy local model: {e}"
 
         # Deinitialize remote client
         if self.model_client:
@@ -158,7 +164,10 @@ class ModelComponent(Component):
             self.model_client = None
 
         self.get_logger().info("Switched to local model for inference.")
-        return f"Component '{self.node_name}' switched to local model for inference."
+        return (
+            True,
+            f"Component '{self.node_name}' switched to local model for inference.",
+        )
 
     @component_fallback(
         description={
@@ -179,7 +188,7 @@ class ModelComponent(Component):
             },
         }
     )
-    def change_model_client(self, model_client_name: str) -> str:
+    def change_model_client(self, model_client_name: str) -> ActionReturnType:
         """
         Hot-swap the active model client at runtime.
 
@@ -191,10 +200,10 @@ class ModelComponent(Component):
 
         :param model_client_name: The key corresponding to the desired client in ``additional_model_clients``.
         :type model_client_name: str
-        :return: A confirmation message describing the swap.
-        :rtype: str
-        :raises RuntimeError: If no additional clients are registered, the
-            requested client name is not found, or initialization fails.
+        :return: Whether the swap happened, with a confirmation message or why
+            not: no additional clients are registered, the requested client
+            name is not found, or its initialization failed.
+        :rtype: ActionReturnType
 
         :Example:
 
@@ -213,13 +222,13 @@ class ModelComponent(Component):
         ```
         """
         if not self._additional_model_clients:
-            raise RuntimeError(
+            return False, (
                 "Cannot change model client as the component was not given any "
                 "additional model clients at init."
             )
         new_client = self._additional_model_clients.get(model_client_name, None)
         if not new_client:
-            raise RuntimeError(
+            return False, (
                 f"No additional client named '{model_client_name}' is available. "
                 f"Available clients: {list(self._additional_model_clients.keys())}"
             )
@@ -235,11 +244,12 @@ class ModelComponent(Component):
             self.model_client = new_client
             self.model_client.initialize()  # initialize the new client
         except Exception as e:
-            raise RuntimeError(
-                f"Error initializing new model client '{model_client_name}': {e}"
-            ) from e
+            return (
+                False,
+                f"Error initializing new model client '{model_client_name}': {e}",
+            )
 
-        return (
+        return True, (
             f"Component '{self.node_name}' switched to model client "
             f"'{model_client_name}'."
         )
@@ -402,6 +412,56 @@ class ModelComponent(Component):
         raise NotImplementedError(
             "_warmup method needs to be implemented by child components."
         )
+
+    @property
+    def _component_methods(self) -> List[str]:
+        """The actions of other components this component calls, each as
+        "component_name.method_name". None by default"""
+        return []
+
+    def create_all_service_clients(self):
+        """Create a client for each component whose actions this component calls"""
+        super().create_all_service_clients()
+        for method in self._component_methods:
+            component_name = method.split(".")[0]
+            if component_name not in self._component_clients:
+                self._component_clients[component_name] = ServiceClientHandler(
+                    self,
+                    srv_name=f"{component_name}/execute_method",
+                    srv_type=ExecuteMethod,
+                )
+
+    def destroy_all_service_clients(self):
+        """Destroy the clients for other components' actions with the rest"""
+        super().destroy_all_service_clients()
+        for client in self._component_clients.values():
+            self.destroy_client(client.client)
+
+    def _call_component_method(
+        self, component_name: str, method_name: str, **kwargs
+    ) -> ActionReturnType:
+        """Call an action of another component over its ExecuteMethod service,
+        whatever process that component runs in.
+
+        :return: Whether the action succeeded, with its message or why not
+        :rtype: ActionReturnType
+        """
+        request = ExecuteMethod.Request()
+        request.name = method_name
+        request.kwargs_json = json.dumps(kwargs)
+        try:
+            response = self._component_clients[component_name].send_request(
+                req_msg=request
+            )
+        except Exception as e:
+            return False, str(e)
+        if response is None:
+            return False, "got no response from the component for given action"
+        if not response.success:
+            return False, response.error_msg
+        return True, json.loads(
+            response.response_json
+        ) if response.response_json else ""
 
     def _deploy_local_model(self):
         """Deploy local model on demand. Override in subclasses."""

@@ -51,10 +51,14 @@ def _mock_stream_chunks(tokens):
     """Build mock streaming chunks from a list of token strings."""
     chunks = []
     # First chunk: role announcement
-    chunks.append({"choices": [{"delta": {"role": "assistant"}, "finish_reason": None}]})
+    chunks.append({
+        "choices": [{"delta": {"role": "assistant"}, "finish_reason": None}]
+    })
     # Content chunks
     for token in tokens:
-        chunks.append({"choices": [{"delta": {"content": token}, "finish_reason": None}]})
+        chunks.append({
+            "choices": [{"delta": {"content": token}, "finish_reason": None}]
+        })
     # Final chunk
     chunks.append({"choices": [{"delta": {}, "finish_reason": "stop"}]})
     return chunks
@@ -89,9 +93,7 @@ class TestCallStreaming:
         chunks = _mock_stream_chunks(["Hello", " world"])
         local_llm.llm.create_chat_completion.return_value = iter(chunks)
 
-        result = local_llm(
-            {"query": [{"role": "user", "content": "Hi"}]}, stream=True
-        )
+        result = local_llm({"query": [{"role": "user", "content": "Hi"}]}, stream=True)
         assert "output" in result
         tokens = list(result["output"])
         assert tokens == ["Hello", " world"]
@@ -114,12 +116,32 @@ class TestCallWithTools:
         )
 
         tools = [{"type": "function", "function": {"name": "route_to_nav"}}]
-        result = local_llm(
-            {"query": [{"role": "user", "content": "Go"}], "tools": tools}
-        )
+        result = local_llm({
+            "query": [{"role": "user", "content": "Go"}],
+            "tools": tools,
+        })
         assert "tool_calls" in result
         assert result["tool_calls"][0]["function"]["name"] == "route_to_nav"
         assert result["tool_calls"][0]["function"]["arguments"] == {"x": 1}
+
+    def test_a_tool_call_with_invalid_arguments_is_dropped(self, local_llm):
+        tool_calls = [
+            {"function": {"name": "route_to_nav", "arguments": '{"x": '}},
+            {"function": {"name": "route_to_vision", "arguments": json.dumps({})}},
+        ]
+        local_llm.llm.create_chat_completion.return_value = _mock_response(
+            content=None, tool_calls=tool_calls
+        )
+
+        tools = [{"type": "function", "function": {"name": "route_to_nav"}}]
+        result = local_llm({
+            "query": [{"role": "user", "content": "Go"}],
+            "tools": tools,
+        })
+
+        assert [call["function"]["name"] for call in result["tool_calls"]] == [
+            "route_to_vision"
+        ]
 
     def test_inline_tool_calls_extracted_from_text(self, local_llm):
         """llama-cpp's GGUF-template handler leaves Qwen/Hermes tool calls as
@@ -131,9 +153,10 @@ class TestCallWithTools:
         local_llm.llm.create_chat_completion.return_value = _mock_response(content)
 
         tools = [{"type": "function", "function": {"name": "route_to_vision"}}]
-        result = local_llm(
-            {"query": [{"role": "user", "content": "what do you see"}], "tools": tools}
-        )
+        result = local_llm({
+            "query": [{"role": "user", "content": "what do you see"}],
+            "tools": tools,
+        })
         assert "<tool_call>" not in result["output"]
         assert result["tool_calls"][0]["function"]["name"] == "route_to_vision"
         assert result["tool_calls"][0]["function"]["arguments"] == {}
@@ -151,18 +174,17 @@ class TestCallWithTools:
         local_llm.llm.create_chat_completion.return_value = _mock_response(content)
 
         tools = [{"type": "function", "function": {"name": "fn"}}]
-        result = local_llm(
-            {"query": [{"role": "user", "content": "Hi"}], "tools": tools}
-        )
+        result = local_llm({
+            "query": [{"role": "user", "content": "Hi"}],
+            "tools": tools,
+        })
         assert "tool_calls" not in result
 
     def test_passes_tools_to_api(self, local_llm):
         local_llm.llm.create_chat_completion.return_value = _mock_response("ok")
 
         tools = [{"type": "function", "function": {"name": "test_fn"}}]
-        local_llm(
-            {"query": [{"role": "user", "content": "Hi"}], "tools": tools}
-        )
+        local_llm({"query": [{"role": "user", "content": "Hi"}], "tools": tools})
 
         call_kwargs = local_llm.llm.create_chat_completion.call_args[1]
         assert call_kwargs["tools"] == tools
@@ -246,9 +268,7 @@ class TestLocalLLMModelOptions:
 
         gguf = tmp_path / "model.gguf"
         gguf.touch()
-        LocalLLM(
-            str(gguf), device="cpu", ncpu=2, model_options={"n_batch": 1024}
-        )
+        LocalLLM(str(gguf), device="cpu", ncpu=2, model_options={"n_batch": 1024})
         assert calls["init"]["n_batch"] == 1024
         # context defaults to the model's trained length, not llama-cpp's 512
         assert calls["init"]["n_ctx"] == 0

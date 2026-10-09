@@ -26,6 +26,7 @@ def mock_model_client():
     client.initialize.return_value = None
     client.deinitialize.return_value = None
     type(client).supports_tool_calls = PropertyMock(return_value=True)
+    type(client).supports_decisions = PropertyMock(return_value=False)
     type(client).inference_timeout = PropertyMock(return_value=30)
     return client
 
@@ -72,14 +73,33 @@ def mock_component_internals(component):
     component.health_status.set_fail_algorithm = MagicMock()
     component.inference_params = component.config._get_inference_params()
     component.run_type = ComponentRunType.EVENT
-    component.get_ros_time = MagicMock(
-        return_value=MagicMock(sec=0, nanosec=0)
-    )
+    component.get_ros_time = MagicMock(return_value=MagicMock(sec=0, nanosec=0))
 
-    # Setup publishers_dict
+    # Setup publishers_dict. Components route on what a publisher publishes,
+    # so it carries the component's real output topic rather than a mock one
     mock_pub = MagicMock()
     mock_pub.publish = MagicMock()
-    mock_pub.output_topic = MagicMock()
+    out_topics = getattr(component, "out_topics", None)
+    mock_pub.output_topic = out_topics[0] if out_topics else MagicMock()
     component.publishers_dict = {"out": mock_pub}
 
     return component
+
+
+@pytest.fixture
+def launcher_processors():
+    """Serve a component's external processors from the launcher, as in a
+    multiprocess launch, and return the serialized processors to be given to the
+    component as in the component's own process."""
+    from ros_sugar import Launcher as SugarLauncher
+
+    launcher = SugarLauncher()
+
+    def serve(component) -> str:
+        launcher._setup_external_processors(component)
+        return component._external_processors_json
+
+    yield serve
+
+    if launcher._processor_server:
+        launcher._processor_server.close()

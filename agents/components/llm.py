@@ -2,8 +2,6 @@ import json
 from pathlib import Path
 from typing import Any, Optional, Union, Callable, List, Dict, MutableMapping
 from functools import partial
-import msgpack
-import msgpack_numpy as m_pack
 
 from ..callbacks import TextCallback
 from ..clients.db_base import DBClient
@@ -17,22 +15,20 @@ from ..ros import (
     Topic,
     DetectionsMultiSource,
     Detections,
+    Detections3D,
     StreamingString,
     BaseComponent,
-    ServiceClientHandler,
-    ExecuteMethod,
+    ExternalProcessorType,
+    run_external_processor,
 )
 from ..utils import (
+    decode_json_values,
     get_prompt_template,
     validate_func_args,
     strip_think_tokens,
-    execute_method_response_to_str,
 )
 from .model_component import ModelComponent
 from .component_base import ComponentRunType
-
-# patch msgpack for numpy arrays
-m_pack.patch()
 
 
 class LLM(ModelComponent):
@@ -107,7 +103,7 @@ class LLM(ModelComponent):
             if kwargs.get("allowed_inputs")
             else {
                 "Required": [String],
-                "Optional": [DetectionsMultiSource, Detections],
+                "Optional": [DetectionsMultiSource, Detections, Detections3D],
             }
         )
         self.handled_outputs = [String, StreamingString]
@@ -134,9 +130,6 @@ class LLM(ModelComponent):
             if self.config._system_prompt
             else []
         )
-
-        # Mapping for service clients used for calling component actions as tools
-        self._component_clients: Dict[str, ServiceClientHandler] = {}
 
         super().__init__(
             inputs,
@@ -209,30 +202,23 @@ class LLM(ModelComponent):
         # deactivate the rest
         super().custom_on_deactivate()
 
+    @property
+    def _component_methods(self) -> List[str]:
+        """The component actions registered as tools"""
+        return self.config._component_tool_names
+
     def create_all_service_clients(self):
         """Override create all clients in the LLM"""
+        # the clients for the components whose actions are tools
         super().create_all_service_clients()
 
-        # Add custom clients to external processors for tool calling on
-        # component methods
+        # Add the component actions to external processors, for tool calling
         for tool_name in self.config._component_tool_names:
             comp_name, method_name = tool_name.split(".")
-            # Add the tool
             self._external_processors[method_name] = (
                 [partial(self._execute_component_method, comp_name, method_name)],
-                "tool",
+                ExternalProcessorType.FUNCTION,
             )
-            # Create a service client only if it doesnt exist for a node
-            if not self._component_clients.get(comp_name):
-                self._component_clients[comp_name] = ServiceClientHandler(
-                    self, srv_name=f"{comp_name}/execute_method", srv_type=ExecuteMethod
-                )
-
-    def destroy_all_service_clients(self):
-        """Override destroy all clients in the LLM"""
-        super().destroy_all_service_clients()
-        for client in self._component_clients.values():
-            self.destroy_client(client.client)
 
     def _execute_component_method(
         self,
@@ -240,16 +226,15 @@ class LLM(ModelComponent):
         method_name: str,
         **kwargs: Dict,
     ) -> str:
+        """Call a component action as a tool and give its result as the tool
+        result the model sees"""
         tool_name = f"{component_name}.{method_name}"
-        srv_client: ServiceClientHandler = self._component_clients[component_name]
-        srv_request = ExecuteMethod.Request()
-        srv_request.name = method_name
-        srv_request.kwargs_json = json.dumps(kwargs)
-        try:
-            response = srv_client.send_request(req_msg=srv_request)
-        except Exception as e:
-            return f"Error calling {tool_name}: {e}"
-        return execute_method_response_to_str(tool_name, response)
+        success, message = self._call_component_method(
+            component_name, method_name, **kwargs
+        )
+        if not success:
+            return f"Error: {tool_name} failed with error: {message}"
+        return message or f"{tool_name} executed successfully"
 
     @validate_func_args
     def add_documents(
@@ -258,7 +243,7 @@ class LLM(ModelComponent):
         """Add documents to vector DB for Retrieval Augmented Generation (RAG).
 
         ```{important}
-        Documents can be provided after parsing them using a document parser. Checkout various document parsers, available in packages like [langchain_community](https://github.com/langchain-ai/langchain/tree/master/libs/community/langchain_community/document_loaders/parsers)
+        Documents can be provided after parsing them using a document parser. Checkout various document parsers, available in packages like [langchain_community](https://github.com/langchain-ai/langchain-community/tree/main/libs/community/langchain_community/document_loaders/parsers)
         ```
 
         :param ids: List of unique string ids for each document
@@ -374,32 +359,25 @@ class LLM(ModelComponent):
             return result
 
         response_flags = []
+        # tool calls of the assistant message and the messages with their
+        # results, added to the history once all the calls ran
+        calls = []
+        tool_messages = []
 
         # make tool calls
-        for tool in result["tool_calls"]:
-            function_to_call = self._external_processors[tool["function"]["name"]][0][0]
+        for i, tool in enumerate(result["tool_calls"]):
+            tool_name = tool["function"]["name"]
+            function_to_call = self._external_processors[tool_name][0][0]
 
             try:
-                # HACK: Read function argument as serialized datatypes
-                # if they are returned as string
-                arg_json = {}
-                for key, arg in tool["function"]["arguments"].items():
-                    try:
-                        arg = json.loads(arg) if isinstance(arg, str) else arg
-                    except json.JSONDecodeError:
-                        pass  # Keep it as a normal string if it's not valid JSON
-                    arg_json[key] = arg
-                if isinstance(function_to_call, Callable):
-                    function_response = function_to_call(**arg_json)
-                else:
-                    payload = msgpack.packb(arg_json)
-                    if not payload:
-                        raise Exception(
-                            f"Could not serialize the following function arguments for tool calling: {arg_json}"
-                        )
-                    function_to_call.sendall(payload)
-                    result_b = function_to_call.recv(1024)
-                    function_response = msgpack.unpackb(result_b)
+                arg_json = decode_json_values(tool["function"]["arguments"])
+                function_response = run_external_processor(
+                    self.node_name,
+                    tool_name,
+                    function_to_call,
+                    arg_json,
+                    processor_type=ExternalProcessorType.FUNCTION,
+                )
             except Exception as e:
                 self.get_logger().error(f"Exception in tool calling. {e}")
                 return result
@@ -407,13 +385,28 @@ class LLM(ModelComponent):
             # make last function call output the publishable output
             result["output"] = function_response
 
-            # Add function response to the messages
-            self.messages.append({"role": "tool", "content": function_response})
+            # NOTE: OpenAI-compatible servers match each result to its call by id
+            call_id = tool.get("id") or f"call_{i}"
+            calls.append({
+                "id": call_id,
+                "type": "function",
+                "function": {
+                    "name": tool_name,
+                    "arguments": tool["function"]["arguments"],
+                },
+            })
+            tool_messages.append({
+                "role": "tool",
+                "tool_call_id": call_id,
+                "content": function_response,
+            })
 
             # check for response flags
-            response_flags.append(
-                self.config._tool_response_flags[tool["function"]["name"]]
-            )
+            response_flags.append(self.config._tool_response_flags[tool_name])
+
+        # Add the calls to the assistant message and their results to the messages
+        self.messages[-1]["tool_calls"] = calls
+        self.messages.extend(tool_messages)
 
         # make call to model again if any tool requires response to be sent back
         if any(response_flags):
@@ -423,10 +416,12 @@ class LLM(ModelComponent):
                 "query": self.messages,
                 **self.config._get_inference_params(),
             }
-            if self.model_client:
-                return self.model_client.inference(input)
-            elif hasattr(self, "local_model"):
-                return self.local_model(input)
+            result = self._call_inference(input)
+            # the model's reply to the results, handled as its first reply
+            if result:
+                result["output"] = self._strip_think_tokens(result["output"])
+                self.messages.append({"role": "assistant", "content": result["output"]})
+            return result
 
         else:
             # return result with its output set to last function response
@@ -470,10 +465,9 @@ class LLM(ModelComponent):
             msg_type = i.input_topic.msg_type
             # set trigger equal to a topic with type String if trigger not found
             if msg_type == String:
-                if not query:
-                    query = item
+                query = query or item
                 context[i.input_topic.name] = item
-            elif msg_type in [DetectionsMultiSource, Detections]:
+            elif msg_type in [DetectionsMultiSource, Detections, Detections3D]:
                 context[i.input_topic.name] = item
 
         if query is None:
@@ -791,7 +785,7 @@ class LLM(ModelComponent):
         else:
             self._external_processors[tool_description["function"]["name"]] = (
                 [tool],
-                "tool",
+                ExternalProcessorType.FUNCTION,
             )
         self.config._tool_descriptions.append(tool_description)
         self.config._tool_response_flags[tool_description["function"]["name"]] = (

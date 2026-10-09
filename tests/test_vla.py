@@ -5,11 +5,13 @@ import json
 import pickle
 import queue
 import threading
+import time
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, PropertyMock
 
 import numpy as np
 import pytest
+from ros_sugar.io.ipc import ExternalProcessorClient
 
 from agents.clients.lerobot import LeRobotClient, SERVER_SUPPORTED_POLICIES
 from agents.clients.lerobot_transport.utils import (
@@ -207,6 +209,7 @@ def _queue_harness(preset: str) -> VLA:
     comp._last_executed_timestep_lock = threading.Lock()
     comp._last_executed_timestep = -1
     comp._aggregator_function = AGGREGATE_FUNCTIONS[preset]
+    comp._external_processors = {}
     return comp
 
 
@@ -253,6 +256,129 @@ class TestActionsQueueAggregation:
         actions = list(comp._actions_received.queue)
         # 0.7 * old + 0.3 * new
         assert np.allclose(actions[0].action, [0.7 * 1.0 + 0.3 * 9.0])
+
+
+def average(x, y):
+    return (x + y) / 2
+
+
+class TestCustomAggregator:
+    """A custom aggregation function set in the recipe, called in the component's
+    own process (single process launch) or in the launcher process
+    (multiprocess launch)"""
+
+    @pytest.fixture
+    def vla(self, rclpy_init, dataset_info_file, request):
+        model = LeRobotPolicy(name="policy", dataset_info_file=dataset_info_file)
+        camera = Topic(name="camera_rgb", msg_type="Image")
+        depth = Topic(name="camera_depth", msg_type="Image")
+        comp = VLA(
+            inputs=[Topic(name="joint_states", msg_type="JointState"), camera, depth],
+            outputs=[Topic(name="joint_cmd", msg_type="JointState")],
+            model_client=_mock_lerobot_client(model),
+            config=VLAConfig(
+                joint_names_map={
+                    "shoulder_pan.pos": "joint1",
+                    "elbow_flex.pos": "joint2",
+                },
+                camera_inputs_map={"front": camera, "depth_front": depth},
+            ),
+            component_name=f"test_vla_{request.node.name}",
+        )
+        comp.get_logger = MagicMock()
+        # queue state created at activation
+        comp._actions_received = queue.Queue()
+        comp._last_executed_timestep_lock = threading.Lock()
+        comp._last_executed_timestep = -1
+        return comp
+
+    @staticmethod
+    def _merge(comp, old, new):
+        """Send two actions for the same timestep and return the queued action"""
+        for value in (old, new):
+            comp._update_actions_queue([
+                TimedAction(
+                    timestamp=1.0,
+                    timestep=1,
+                    action=np.array(value, dtype=np.float32),
+                )
+            ])
+        (action,) = comp._actions_received.queue
+        return action.action
+
+    def test_in_process(self, vla):
+        vla.set_aggregation_function(average)
+
+        assert np.allclose(self._merge(vla, [1.0, 2.0], [3.0, 6.0]), [2.0, 4.0])
+
+    def test_across_processes(self, vla, launcher_processors):
+        vla.set_aggregation_function(average)
+        # as in the component's process, which gets the serialized processors
+        vla._external_processors_json = launcher_processors(vla)
+
+        (client,), _ = vla._external_processors["aggregator_function"]
+        assert isinstance(client, ExternalProcessorClient)
+        merged = self._merge(vla, [1.0, 2.0], [3.0, 6.0])
+        assert np.allclose(merged, [2.0, 4.0])
+        assert merged.dtype == np.float32
+
+    def test_custom_aggregator_takes_precedence_over_preset(self, vla):
+        vla._aggregator_function = AGGREGATE_FUNCTIONS["weighted_average"]
+        vla.set_aggregation_function(average)
+
+        assert np.allclose(self._merge(vla, [1.0, 2.0], [3.0, 6.0]), [2.0, 4.0])
+
+    @pytest.mark.parametrize(
+        "bad_output",
+        [
+            lambda x, y: None,
+            lambda x, y: [0.0, 0.0],
+            lambda x, y: np.zeros(3, dtype=np.float32),
+            lambda x, y: np.zeros(2, dtype=np.float64),
+        ],
+        ids=["none", "not_array", "wrong_shape", "wrong_dtype"],
+    )
+    def test_invalid_output_uses_latest_action(self, vla, bad_output):
+        def bad_aggregator(x, y):
+            return bad_output(x, y)
+
+        vla.set_aggregation_function(bad_aggregator)
+
+        assert np.allclose(self._merge(vla, [1.0, 2.0], [3.0, 6.0]), [3.0, 6.0])
+        vla.get_logger().error.assert_called_once()
+
+    def test_failing_aggregator_uses_latest_action(self, vla):
+        calls = []
+
+        def failing(x, y):
+            calls.append(1)
+            raise RuntimeError("boom")
+
+        vla.set_aggregation_function(failing)
+
+        assert np.allclose(self._merge(vla, [1.0, 2.0], [3.0, 6.0]), [3.0, 6.0])
+        vla.get_logger().error.assert_called_once()
+        # still used for the next actions
+        vla._update_actions_queue([
+            TimedAction(
+                timestamp=1.0, timestep=1, action=np.array([5.0, 5.0], dtype=np.float32)
+            )
+        ])
+        assert len(calls) == 2
+
+    def test_failing_aggregator_across_processes(self, vla, launcher_processors):
+        def failing(x, y):
+            raise RuntimeError("boom")
+
+        vla.set_aggregation_function(failing)
+        vla._external_processors_json = launcher_processors(vla)
+
+        start = time.monotonic()
+        assert np.allclose(self._merge(vla, [1.0, 2.0], [3.0, 6.0]), [3.0, 6.0])
+        # the launcher replies with the error, the call does not wait for the
+        # timeout
+        assert time.monotonic() - start < vla.config.external_processor_timeout
+        vla.get_logger().error.assert_called_once()
 
 
 class TestJointLimitsUnitConversion:
@@ -424,8 +550,7 @@ class TestJointConverters:
         msg = JointTrajectory.convert(stub)
         assert len(msg.points) == 3
         times = [
-            p.time_from_start.sec + p.time_from_start.nanosec * 1e-9
-            for p in msg.points
+            p.time_from_start.sec + p.time_from_start.nanosec * 1e-9 for p in msg.points
         ]
         assert times == sorted(times)
         assert times[0] > 0.0
@@ -475,6 +600,32 @@ class TestVLAComponent:
         features = client.model_init_params["features"]
         assert "observation.state" in features
         assert "observation.images.front" in features
+
+    def test_signal_done_follows_the_action_contract(self, rclpy_init, vla_topics):
+        """signal_done ends a goal as the action of a termination event, so it
+        must return (success, message): sugarcoat treats anything else as a
+        failed action"""
+        from ros_sugar.utils import parse_action_result
+
+        model = LeRobotPolicy(name="policy")
+        comp = VLA(
+            inputs=[vla_topics["state"], vla_topics["camera"]],
+            outputs=[vla_topics["out"]],
+            model_client=_mock_lerobot_client(model),
+            config=VLAConfig(
+                joint_names_map={"shoulder_pan.pos": "joint1"},
+                camera_inputs_map={"front": vla_topics["camera"]},
+            ),
+            component_name="test_vla_signal_done",
+        )
+        # A node that was never started has no logger to write to
+        comp.get_logger = MagicMock()
+
+        success, message = parse_action_result(comp.signal_done(), "signal_done")
+
+        assert success is True
+        assert message
+        assert comp._task_completed
 
     def test_dataset_verification_and_camera_prefix_strip(
         self, rclpy_init, vla_topics, dataset_info_file
@@ -684,6 +835,31 @@ class TestVLAComponent:
         comp._action_cleanup = MagicMock()
         return comp
 
+    def test_the_task_of_the_running_goal_can_be_asked_for(
+        self, rclpy_init, vla_topics
+    ):
+        """Another component, such as one deciding whether the task is done,
+        gets the task of the goal through this action. No goal, no task"""
+        comp = self._prepare_goal_execution(vla_topics, "test_vla_current_task")
+        comp._current_task = None
+        assert VLA.get_current_task.__wrapped__(comp) == (False, "No goal is running")
+
+        # the task is known while the goal runs
+        seen = []
+        comp._create_input = MagicMock(
+            side_effect=lambda task: seen.append(VLA.get_current_task.__wrapped__(comp))
+        )
+        goal_handle = MagicMock()
+        goal_handle.request.task = "pick up the orange"
+        goal_handle.is_active = True
+        type(goal_handle).is_cancel_requested = PropertyMock(
+            side_effect=[False] * 3 + [True] * 5
+        )
+
+        comp.main_action_callback(goal_handle)
+
+        assert seen and seen[0] == (True, "pick up the orange")
+
     def test_cancel_requested_goal_transitions_to_canceled(
         self, rclpy_init, vla_topics
     ):
@@ -701,6 +877,30 @@ class TestVLAComponent:
         goal_handle.canceled.assert_called_once()
         goal_handle.abort.assert_not_called()
         comp._action_cleanup.assert_called_once()
+
+    def test_missing_inference_input_is_retried_at_once_and_logged_once(
+        self, rclpy_init, vla_topics, monkeypatch
+    ):
+        """While it cannot prepare an input, the loop retries after a short pause
+        that lets the threads receiving the inputs run, and logs the warning the
+        first time only"""
+        sleep = MagicMock()
+        monkeypatch.setattr("agents.components.vla.time.sleep", sleep)
+        comp = self._prepare_goal_execution(vla_topics, "test_vla_no_input")
+        comp._create_input = MagicMock(return_value=None)
+        goal_handle = MagicMock()
+        goal_handle.request.task = "pick"
+        goal_handle.is_active = True
+        type(goal_handle).is_cancel_requested = PropertyMock(
+            side_effect=[False] * 5 + [True] * 5
+        )
+
+        comp.main_action_callback(goal_handle)
+
+        assert comp._create_input.call_count == 5
+        assert [c.args for c in sleep.call_args_list] == [(0.001,)] * 5
+        comp.get_logger().warning.assert_called_once()
+        goal_handle.canceled.assert_called_once()
 
     def test_preempted_goal_not_transitioned_again(self, rclpy_init, vla_topics):
         """A goal already aborted by preemption is terminal — transitioning

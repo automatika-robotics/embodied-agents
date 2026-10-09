@@ -1,4 +1,4 @@
-from typing import Any, Dict, Generator, Optional, Union, MutableMapping
+from typing import Any, Dict, Generator, List, Optional, Union, MutableMapping
 import os
 import json
 import io
@@ -10,12 +10,19 @@ import httpx
 from .model_base import ModelClient
 from ..models import (
     Model,
+    GenericDecisionModel,
     GenericLLM,
     GenericSTT,
     GenericTTS,
     TransformersLLM,
 )
-from ..utils import encode_img_base64, validate_func_args
+from ..utils import (
+    encode_img_base64,
+    parse_tool_arguments,
+    plain_text_warning,
+    tls_verify,
+    validate_func_args,
+)
 
 
 __all__ = ["GenericHTTPClient"]
@@ -24,6 +31,7 @@ __all__ = ["GenericHTTPClient"]
 class GenericHTTPClient(ModelClient):
     """
     A generic client for interacting with OpenAI-compatible APIs, including vLLM, ms-swift, lmdeploy, Google Gemini etc. This client works with LLM multimodal LLM models and supports both standard and streaming responses. It is designed to be compatible with any API that follows the OpenAI standard.
+    With a GenericDecisionModel, it asks typed questions of a decision model through the TypeSafe-compatible /v1/systemone API.
     """
 
     @validate_func_args
@@ -33,8 +41,9 @@ class GenericHTTPClient(ModelClient):
         host: str = "127.0.0.1",
         port: Optional[int] = 8000,
         inference_timeout: int = 30,
-        api_key: Optional[str] = None,
+        api_key_env: Optional[str] = None,
         logging_level: str = "info",
+        ca_cert: Optional[str] = None,
         **kwargs,
     ):
         """
@@ -51,30 +60,45 @@ class GenericHTTPClient(ModelClient):
         :type port: Optional[int]
         :param inference_timeout: The timeout for inference requests.
         :type inference_timeout: int
-        :param api_key: The API key for authentication. If not provided, it will be
-                        retrieved from the OPENAI_API_KEY environment variable.
-        :type api_key: Optional[str]
+        :param api_key_env: Name of the environment variable holding the API
+                            key. Defaults to ``OPENAI_API_KEY``, the convention
+                            OpenAI style servers share, and no key is sent when
+                            that is unset. A variable named here must be set.
+        :type api_key_env: Optional[str]
         :param logging_level: The logging level.
         :type logging_level: str
+        :param ca_cert: Path to a PEM file holding the certificate to trust for
+                        a server that serves its own, instead of the system store.
+        :type ca_cert: Optional[str]
         """
         if isinstance(model, Model):
-            ok = isinstance(model, (GenericLLM, GenericSTT, GenericTTS, TransformersLLM))
+            ok = isinstance(
+                model,
+                (
+                    GenericLLM,
+                    GenericSTT,
+                    GenericTTS,
+                    GenericDecisionModel,
+                    TransformersLLM,
+                ),
+            )
         else:
             ok = model.get("model_type") in (
                 "GenericLLM",
                 "GenericMLLM",
                 "GenericSTT",
                 "GenericTTS",
+                "GenericDecisionModel",
                 "TransformersLLM",
                 "TransformersMLLM",
             )
         if not ok:
             raise TypeError(
-                "A generic client can only take models of type GenericLLM, GenericTTS, GenericSTT, GenericMLLM, TransformersLLM and TransformersMLLM"
+                "A generic client can only take models of type GenericLLM, GenericTTS, GenericSTT, GenericMLLM, GenericDecisionModel, TransformersLLM and TransformersMLLM"
             )
 
-        # init_on_activation is not user-configurable for the generic client (no
-        # model-loading step). Force it True and drop any serialized value
+        # NOTE: init_on_activation is not user-configurable for the generic client (no
+        # model loading step). Force it True and drop any serialized value
         kwargs.pop("init_on_activation", None)
         super().__init__(
             model=model,
@@ -83,11 +107,17 @@ class GenericHTTPClient(ModelClient):
             inference_timeout=inference_timeout,
             init_on_activation=True,
             logging_level=logging_level,
+            ca_cert=ca_cert,
             **kwargs,
         )
 
-        # try to get it from the environment variable otherwise default to empty string
-        self.api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
+        self.api_key_env = api_key_env
+        self.api_key = os.environ.get(api_key_env or "OPENAI_API_KEY", "")
+        if api_key_env and not self.api_key:
+            raise ValueError(
+                f"api_key_env names '{api_key_env}', but that environment variable "
+                "is not set in this process"
+            )
         header = {} if not self.api_key else {"Authorization": f"Bearer {self.api_key}"}
 
         self.url = self._build_url()
@@ -97,15 +127,29 @@ class GenericHTTPClient(ModelClient):
             base_url=self.url,
             timeout=self.inference_timeout,
             headers=header,
+            verify=tls_verify(self.ca_cert),
         )
+
+    def serialize(self) -> Dict:
+        """Get api key env variable serialized."""
+        return {**super().serialize(), "api_key_env": self.api_key_env}
 
     @property
     def supports_tool_calls(self) -> bool:
         """
-        Generic HTTP client (OpenAI compatible) supports tool calling.
+        Generic HTTP client (OpenAI compatible) supports tool calling, except with a
+        decision model, which does not generate text.
         :rtype: bool
         """
-        return True
+        return not self.supports_decisions
+
+    @property
+    def supports_decisions(self) -> bool:
+        """
+        Generic HTTP client answers typed questions with a decision model.
+        :rtype: bool
+        """
+        return self.model_type == "GenericDecisionModel"
 
     def _check_connection(self) -> None:
         """
@@ -126,6 +170,13 @@ class GenericHTTPClient(ModelClient):
         2. Verifying that the requested checkpoint exists on the server.
         """
         self.logger.info(f"Initializing {self.model_name}...")
+        # Servers on the LAN take a key over plain HTTP, so we only warn here
+        if self.api_key and plain_text_warning(self.host):
+            self.logger.warning(
+                "The API key goes with every request to this server."
+                " Use an https:// host when the server offers TLS, or a key that"
+                " is worthless elsewhere."
+            )
 
         # Determine Endpoint and Mode
         if self.model_type in [
@@ -142,6 +193,9 @@ class GenericHTTPClient(ModelClient):
         elif self.model_type == "GenericSTT":
             self.api_endpoint = "/v1/audio/transcriptions"
             self.request_type = "multipart"  # Special handling for file upload
+        elif self.model_type == "GenericDecisionModel":
+            self.api_endpoint = "/v1/systemone"
+            self.request_type = "decision"  # Typed questions in, answers out
         else:
             # Fallback or error for unknown model types
             self.logger.warning(
@@ -275,6 +329,10 @@ class GenericHTTPClient(ModelClient):
                 response.raise_for_status()
                 return {"output": response.json().get("text", "")}
 
+            # Decision (state and questions as input, typed answers as output)
+            elif self.request_type == "decision":
+                return self._inference_decision(inference_input)
+
         except Exception as e:
             self.__handle_exceptions(e)
 
@@ -298,7 +356,7 @@ class GenericHTTPClient(ModelClient):
 
         payload = {
             "model": self.model_init_params["checkpoint"],
-            "messages": inference_input.pop("query"),
+            "messages": self._serialize_tool_arguments(inference_input.pop("query")),
             **inference_input,
         }
 
@@ -309,6 +367,21 @@ class GenericHTTPClient(ModelClient):
             response = self.client.post(self.api_endpoint, json=payload)
             response.raise_for_status()
             return self._parse_chat_response(response.json())
+
+    def _inference_decision(self, inference_input: Dict[str, Any]) -> Dict[str, Any]:
+        """Helper for asking a decision model typed questions about a state"""
+        payload = {
+            "model": self.model_init_params["checkpoint"],
+            "state": inference_input["state"],
+            "questions": inference_input["questions"],
+        }
+        if images := inference_input.get("images"):
+            payload["images"] = [
+                f"data:image/png;base64,{encode_img_base64(img)}" for img in images
+            ]
+        response = self.client.post(self.api_endpoint, json=payload)
+        response.raise_for_status()
+        return {"output": response.json()["answers"]}
 
     def _stream_generator(
         self, payload: Dict[str, Any]
@@ -338,17 +411,55 @@ class GenericHTTPClient(ModelClient):
         model_resp = {}
 
         if tool_calls := message.get("tool_calls"):
-            model_resp["tool_calls"] = tool_calls
+            model_resp["tool_calls"] = self._parse_tool_calls(tool_calls)
 
         model_resp["output"] = message.get("content") or ""
         return model_resp
 
+    def _parse_tool_calls(self, tool_calls: List[Dict]) -> List[Dict]:
+        """Get the arguments of the tool calls as dicts. Tool calls with
+        arguments that are not a JSON object are dropped"""
+        parsed = []
+        for tool_call in tool_calls:
+            function = tool_call.get("function", {})
+            try:
+                arguments = parse_tool_arguments(function.get("arguments"))
+            except ValueError as e:
+                self.logger.error(
+                    f"Dropping tool call to '{function.get('name')}' with invalid arguments: {e}"
+                )
+                continue
+            parsed.append({
+                **tool_call,
+                "function": {**function, "arguments": arguments},
+            })
+        return parsed
+
+    def _serialize_tool_arguments(self, messages: List[Dict]) -> List[Dict]:
+        """Send the arguments of the tool calls in assistant messages as JSON
+        strings for OpenAI-compatible servers"""
+        serialized = []
+        for message in messages:
+            if tool_calls := message.get("tool_calls"):
+                calls = []
+                for tool_call in tool_calls:
+                    arguments = tool_call["function"]["arguments"]
+                    if not isinstance(arguments, str):
+                        arguments = json.dumps(arguments)
+                    calls.append({
+                        **tool_call,
+                        "function": {**tool_call["function"], "arguments": arguments},
+                    })
+                message = {**message, "tool_calls": calls}
+            serialized.append(message)
+        return serialized
+
     def _deinitialize(self) -> None:
         """
-        Deinitializes the client by closing the httpx client.
+        Deinitialize the client. OpenAI-compatible servers have no call to unload a
+        model.
         """
         self.logger.info("Deinitializing GenericHTTPClient...")
-        self.client.close()
 
     def __handle_images(self, inference_input: Dict[str, Any]) -> Dict[str, Any]:
         """Handles images in multimodal input"""
@@ -367,7 +478,7 @@ class GenericHTTPClient(ModelClient):
                 for img_b64 in b64_images:
                     content_parts.append({
                         "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"},
+                        "image_url": {"url": f"data:image/png;base64,{img_b64}"},
                     })
 
                 # Replace the original content with the new list of parts

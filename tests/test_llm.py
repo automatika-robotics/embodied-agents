@@ -167,6 +167,155 @@ class TestLLMExecutionStep:
         llm._execution_step(topic=trigger)
         mock_tool.assert_called_once()
 
+    def test_with_tool_calls_across_processes(
+        self, llm, mock_model_client, launcher_processors
+    ):
+        """A tool registered in the recipe lives in the launcher process in a
+        multiprocess launch, and is called from the component's own process"""
+        calls = []
+
+        def add_numbers(a: int, b: int) -> str:
+            calls.append((a, b))
+            return f"sum is {a + b}"
+
+        llm.register_tool(
+            tool=add_numbers,
+            tool_description={"function": {"name": "add_numbers"}},
+        )
+        # as in the component's process, which gets the serialized processors
+        llm._external_processors_json = launcher_processors(llm)
+
+        mock_model_client.inference.return_value = {
+            "output": "calling tool",
+            "tool_calls": [
+                {
+                    "function": {
+                        "name": "add_numbers",
+                        "arguments": {"a": 2, "b": "3"},
+                    }
+                }
+            ],
+        }
+        mock_cb = MagicMock()
+        mock_cb.get_output.return_value = "add 2 and 3"
+        llm.trig_callbacks = {"in": mock_cb}
+        llm.callbacks = {}
+
+        llm._execution_step(topic=Topic(name="in", msg_type="String"))
+
+        assert calls == [(2, 3)]
+        assert llm.messages[-1]["role"] == "tool"
+        assert llm.messages[-1]["content"] == "sum is 5"
+
+
+class TestLLMToolCallHistory:
+    """The history records a tool call exchange as OpenAI-compatible servers
+    expect it: the assistant message with its tool calls, then one tool message
+    per call with the call's id"""
+
+    def _call_tools(self, llm, mock_model_client, tool_calls, tool, follow_up=None):
+        """Run a step in which the model calls the tools. With a follow_up
+        reply, the results are sent back to the model, which replies with it"""
+        llm.config._tool_descriptions = [{"function": {"name": "get_battery"}}]
+        llm.config._tool_response_flags = {"get_battery": follow_up is not None}
+        llm._external_processors = {"get_battery": ([tool], "Function")}
+        replies = [{"output": "", "tool_calls": tool_calls}]
+        if follow_up is not None:
+            replies.append({"output": follow_up})
+        mock_model_client.inference.side_effect = replies
+        mock_cb = MagicMock()
+        mock_cb.get_output.return_value = "battery?"
+        llm.trig_callbacks = {"in": mock_cb}
+        llm.callbacks = {}
+        llm._execution_step(topic=Topic(name="in", msg_type="String"))
+
+    def test_the_calls_and_their_results_are_paired_by_id(self, llm, mock_model_client):
+        calls = [
+            {
+                "id": "call_abc",
+                "function": {"name": "get_battery", "arguments": {"unit": "percent"}},
+            }
+        ]
+
+        self._call_tools(llm, mock_model_client, calls, lambda unit: f"87 {unit}")
+
+        assistant, tool = llm.messages[-2:]
+        assert assistant["role"] == "assistant"
+        assert assistant["tool_calls"] == [
+            {
+                "id": "call_abc",
+                "type": "function",
+                "function": {"name": "get_battery", "arguments": {"unit": "percent"}},
+            }
+        ]
+        assert tool == {
+            "role": "tool",
+            "tool_call_id": "call_abc",
+            "content": "87 percent",
+        }
+
+    def test_values_written_as_json_strings_reach_the_tool_decoded(
+        self, llm, mock_model_client
+    ):
+        received = {}
+
+        def get_battery(**kwargs):
+            received.update(kwargs)
+            return "87"
+
+        arguments = {"count": "3", "where": ' {"room": "lab"} ', "name": " kitchen "}
+        calls = [{"function": {"name": "get_battery", "arguments": arguments}}]
+
+        self._call_tools(llm, mock_model_client, calls, get_battery)
+
+        assert received == {"count": 3, "where": {"room": "lab"}, "name": "kitchen"}
+
+    def test_calls_without_an_id_get_one(self, llm, mock_model_client):
+        """Ollama and the built-in local model give no ids"""
+        calls = [{"function": {"name": "get_battery", "arguments": {"unit": "%"}}}]
+
+        self._call_tools(llm, mock_model_client, calls, lambda unit: "87")
+
+        assistant, tool = llm.messages[-2:]
+        assert assistant["tool_calls"][0]["id"] == tool["tool_call_id"] == "call_0"
+
+    def test_a_failed_call_leaves_no_unanswered_calls(self, llm, mock_model_client):
+        def failing(unit):
+            raise RuntimeError("boom")
+
+        calls = [{"function": {"name": "get_battery", "arguments": {"unit": "%"}}}]
+
+        self._call_tools(llm, mock_model_client, calls, failing)
+
+        assert llm.messages[-1]["role"] == "assistant"
+        assert "tool_calls" not in llm.messages[-1]
+
+    def test_the_reply_to_the_results_is_recorded_without_think_tokens(
+        self, llm, mock_model_client
+    ):
+        calls = [
+            {
+                "id": "call_abc",
+                "function": {"name": "get_battery", "arguments": {"unit": "%"}},
+            }
+        ]
+
+        self._call_tools(
+            llm,
+            mock_model_client,
+            calls,
+            lambda unit: "87",
+            follow_up="<think>\nthe tool said 87\n</think>\n\nBattery is at 87%.",
+        )
+
+        call, result, reply = llm.messages[-3:]
+        assert call["tool_calls"][0]["id"] == "call_abc"
+        assert result["tool_call_id"] == "call_abc"
+        assert reply == {"role": "assistant", "content": "Battery is at 87%."}
+        assert (
+            llm.publishers_dict["out"].publish.call_args[0][0] == "Battery is at 87%."
+        )
+
 
 class TestLLMThinkTokens:
     THINKING = "<think>\nreasoning here\n</think>\n\nParis."
@@ -276,3 +425,63 @@ class TestLLMWarmup:
         comp.local_model = MagicMock(return_value={"output": "ok"})
         comp._warmup()
         assert comp.local_model.call_count == 2
+
+
+class TestDetections3DContext:
+    """A Detections3D input enriches the prompt with metric positions."""
+
+    def test_detections3d_string_reaches_the_prompt_template(self, llm):
+        from agents.utils import get_prompt_template
+
+        trigger = Topic(name="in", msg_type="String")
+        mock_cb = MagicMock()
+        mock_cb.get_output.return_value = "where is the orange?"
+        llm.trig_callbacks = {"in": mock_cb}
+
+        mock_d3 = MagicMock()
+        mock_d3.get_output.return_value = "In odom: orange at (2.00, 3.00, 0.05)"
+        mock_d3.input_topic = Topic(name="d3", msg_type="Detections3D")
+        llm.callbacks = {"d3": mock_d3}
+        llm.component_prompt = get_prompt_template("Visible objects: {{ d3 }}")
+
+        result = llm._create_input(topic=trigger)
+
+        assert "orange at (2.00, 3.00, 0.05)" in result["query"][-1]["content"]
+
+
+class TestComponentActionToolResults:
+    """The LLM component calls a component action over its ExecuteMethod
+    service and turns the response into the tool result the model sees"""
+
+    def _call(self, llm, response):
+        client = MagicMock()
+        client.send_request.return_value = response
+        llm._component_clients = {"memory": client}
+        return llm._execute_component_method("memory", "start_episode", name="tidy")
+
+    def _response(self, success, message=""):
+        response = MagicMock()
+        response.success = success
+        response.response_json = '"' + message + '"' if success and message else ""
+        response.error_msg = "" if success else message
+        return response
+
+    def test_the_actions_message_is_the_tool_result(self, llm):
+        result = self._call(llm, self._response(True, "Episode 'tidy' started"))
+
+        assert result == "Episode 'tidy' started"
+
+    def test_an_empty_message_is_a_confirmation(self, llm):
+        assert "executed successfully" in self._call(llm, self._response(True))
+
+    def test_a_failure_is_an_error_line(self, llm):
+        result = self._call(llm, self._response(False, "no such layer"))
+
+        assert result.startswith("Error:") and "no such layer" in result
+
+    def test_no_response_is_an_error_line(self, llm):
+        """The client returns None when the service is unavailable or the call
+        times out. That used to raise inside the result decoding"""
+        result = self._call(llm, None)
+
+        assert result.startswith("Error:") and "no response" in result
