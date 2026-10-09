@@ -1,6 +1,7 @@
 """Tests for Cortex component — requires rclpy."""
 
 import json
+import os
 import threading
 import time
 import pytest
@@ -21,6 +22,7 @@ from agents.ros import (
     Event,
     COMPONENT_ACTION_SERVER,
     COMPONENT_METHOD,
+    PLUGIN_ACTION,
     COMPONENT_SERVICE,
     MONITOR_METHOD,
     MONITOR_OWNER,
@@ -38,6 +40,7 @@ from agents.ros import (
     component_action,
 )
 from agents.components.cortex import Cortex
+from agents.utils.scratch import Scratchpad
 from tests.conftest import mock_component_internals
 
 
@@ -2392,3 +2395,507 @@ class TestCallingAComponentAction:
         comp.update_parameter.return_value = (False, "unknown parameter")
         result = comp._execute_system_tool("update_parameter", args)
         assert result.startswith("Error:") and "unknown parameter" in result
+
+
+class TestScratchFunctions:
+    """The planner writes its own actions and conditions, when the config
+    allows it, and they become tools and add_event conditions at once"""
+
+    NOTE = (
+        "def note(text: str) -> tuple[bool, str]:\n"
+        '    """Append a line to the notes file"""\n'
+        '    return True, f"noted {text}"\n'
+    )
+    HOT = 'def hot() -> bool:\n    """The CPU is hot"""\n    return True\n'
+
+    def _cortex(self, mock_model_client, name, **config):
+        comp = _make_cortex(
+            [],
+            mock_model_client,
+            name,
+            config=CortexConfig(
+                enable_scratch_functions=True, enable_events=True, **config
+            ),
+        )
+        mock_component_internals(comp)
+        comp._init_internal_monitor(components_names=[])
+        comp._action_registry.add(*_method("tts", "say"))
+        comp._action_registry.add(*_server("vla", "vla/run"))
+        comp.create_publisher = MagicMock()
+        comp._context = MagicMock()
+        comp._register_system_tools()
+        return comp
+
+    def _tool(self, comp, name):
+        return next(
+            (
+                t["function"]
+                for t in comp._planning_tool_descriptions
+                + comp._execution_tool_descriptions
+                if t["function"]["name"] == name
+            ),
+            None,
+        )
+
+    def test_the_tools_are_offered_only_when_allowed(
+        self, rclpy_init, mock_model_client
+    ):
+        comp = _make_cortex(
+            [],
+            mock_model_client,
+            "test_cortex_scratch_off",
+            config=CortexConfig(enable_events=True),
+        )
+        mock_component_internals(comp)
+        comp._init_internal_monitor(components_names=[])
+        comp._context = MagicMock()
+        comp._register_system_tools()
+        assert not set(comp._SCRATCH_TOOLS) & comp._planning_tools
+        # Nothing the planner reads mentions the ability
+        shown = comp._effective_planning_prompt + repr(
+            comp._planning_tool_descriptions + comp._execution_tool_descriptions
+        )
+        assert "write_function" not in shown and "scratch" not in shown
+        assert comp._execute_planning_tool(
+            "write_function", {"name": "f", "kind": "action", "source": ""}
+        ).startswith("Error: Unknown planning tool")
+
+        comp = self._cortex(
+            mock_model_client,
+            "test_cortex_scratch_on",
+            scratch_notes="SMTP_HOST is set",
+        )
+        assert set(comp._SCRATCH_TOOLS) <= comp._planning_tools
+        description = self._tool(comp, "write_function")["description"]
+        assert "run_action(" in description and "os.environ" in description
+        assert "About the environment: SMTP_HOST is set" in description
+
+    def test_a_written_action_is_a_tool_at_once(self, rclpy_init, mock_model_client):
+        comp = self._cortex(mock_model_client, "test_cortex_scratch_action")
+
+        result = comp._execute_planning_tool(
+            "write_function", {"name": "note", "kind": "action", "source": self.NOTE}
+        )
+
+        assert result.startswith("Written action 'note'") and "scratch-note" in result
+        entry = comp._action_registry.get("scratch/note")
+        assert entry.kind == PLUGIN_ACTION and entry.owner == "scratch"
+        assert "scratch-note" in comp._execution_tools
+        assert self._tool(comp, "scratch-note")["parameters"]["required"] == ["text"]
+        # it runs through the Monitor like a plugin action
+        assert comp._executable_for(entry)(text="hi") == (True, "noted hi")
+
+    def test_a_written_condition_is_offered_to_add_event(
+        self, rclpy_init, mock_model_client
+    ):
+        comp = self._cortex(mock_model_client, "test_cortex_scratch_condition")
+
+        result = comp._execute_planning_tool(
+            "write_function", {"name": "hot", "kind": "condition", "source": self.HOT}
+        )
+
+        assert result.startswith("Written condition 'hot'") and "scratch-hot" in result
+        names = self._tool(comp, "add_event")["parameters"]["properties"][
+            "plugin_condition"
+        ]["properties"]["name"]["enum"]
+        assert "scratch-hot" in names
+        event, _ = comp._event_spec({
+            "event_id": "cpu",
+            "plugin_condition": {"name": "scratch-hot", "arguments": {"check_rate": 2}},
+            "actions": [{"tool": "tts-say", "arguments": {"topic": "x"}}],
+            "once": False,
+        })
+        # the flags reach the factory, which is what a polled event keeps
+        assert event["ref"] == "scratch/hot"
+        assert event["kwargs"] == {
+            "check_rate": 2.0,
+            "handle_once": False,
+            "on_change": True,
+        }
+        built = comp._action_registry.event_factory_for("scratch/hot")(
+            **event["kwargs"]
+        )
+        assert built._is_action_based and built.check_rate == 2.0 and built._on_change
+
+    def test_a_bad_source_is_refused_and_registers_nothing(
+        self, rclpy_init, mock_model_client
+    ):
+        comp = self._cortex(mock_model_client, "test_cortex_scratch_bad")
+        result = comp._execute_planning_tool(
+            "write_function",
+            {
+                "name": "hot",
+                "kind": "condition",
+                "source": "def hot(a) -> bool:\n    return True",
+            },
+        )
+        assert result.startswith("Error:")
+        assert "scratch/hot" not in comp._action_registry
+        assert (
+            comp._execute_planning_tool("list_functions", {})
+            == "No functions have been written."
+        )
+
+    def test_rewriting_replaces_and_removing_forgets(
+        self, rclpy_init, mock_model_client
+    ):
+        comp = self._cortex(mock_model_client, "test_cortex_scratch_rewrite")
+        comp._execute_planning_tool(
+            "write_function", {"name": "note", "kind": "action", "source": self.NOTE}
+        )
+
+        again = self.NOTE.replace("noted", "wrote").replace(
+            "text: str", "text: str, loud: bool = False"
+        )
+        result = comp._execute_planning_tool(
+            "write_function", {"name": "note", "kind": "action", "source": again}
+        )
+
+        assert "Events installed with the earlier version keep it" in result
+        assert comp._executable_for(comp._action_registry.get("scratch/note"))(
+            text="x"
+        ) == (True, "wrote x")
+        assert "loud" in self._tool(comp, "scratch-note")["parameters"]["properties"]
+        assert "- note (action)" in comp._execute_planning_tool("list_functions", {})
+        assert comp._execute_planning_tool("read_function", {"name": "note"}) == again
+
+        result = comp._execute_planning_tool("remove_function", {"name": "note"})
+        assert result == "Removed action 'note'."
+        assert "scratch/note" not in comp._action_registry
+        assert (
+            self._tool(comp, "scratch-note") is None
+            and "scratch-note" not in comp._execution_tools
+        )
+        assert comp._execute_planning_tool(
+            "remove_function", {"name": "note"}
+        ).startswith("Error:")
+
+    def test_a_written_condition_given_as_a_topic_is_pointed_to_plugin_condition(
+        self, rclpy_init, mock_model_client
+    ):
+        comp = self._cortex(mock_model_client, "test_cortex_scratch_as_topic")
+        comp._execute_planning_tool(
+            "write_function", {"name": "hot", "kind": "condition", "source": self.HOT}
+        )
+
+        result = comp._run_event_tool(
+            "add_event",
+            {
+                "event_id": "cpu",
+                "conditions": [
+                    {
+                        "topic": "scratch-hot",
+                        "field": "data",
+                        "operator": "equals",
+                        "value": True,
+                    }
+                ],
+                "actions": [{"tool": "tts-say", "arguments": {"topic": "x"}}],
+            },
+        )
+
+        assert result.startswith("Error:")
+        assert "plugin_condition {'name': 'scratch-hot'}" in result
+
+    def test_run_action_reaches_the_stack_by_tool_name_or_reference(
+        self, rclpy_init, mock_model_client
+    ):
+        comp = self._cortex(mock_model_client, "test_cortex_scratch_run_action")
+        comp._execute_component_method_srv_client = {"tts": MagicMock()}
+        comp.execute_component_method = MagicMock(return_value=(True, "said"))
+
+        assert comp._run_action_for_written_functions("tts-say", topic="x") == (
+            True,
+            "said",
+        )
+        assert comp._run_action_for_written_functions("tts/say", topic="x") == (
+            True,
+            "said",
+        )
+        ok, why = comp._run_action_for_written_functions(
+            "send_goal_to_vla_run", task="go"
+        )
+        assert not ok and "send_goal" in why
+        ok, why = comp._run_action_for_written_functions("nobody/does_this")
+        assert not ok and "Unknown action" in why
+        ok, why = comp._run_action_for_written_functions("not a reference")
+        assert not ok and "not a valid action reference" in why
+
+
+# The scratchpad behind the planner's written functions
+NOTE = '''
+def note(text: str, path: str = "/tmp/notes.txt") -> tuple[bool, str]:
+    """Append a line of text to a file.
+
+    text: what to write
+    path: the file to append to
+    """
+    with open(path, "a") as f:
+        f.write(text + "\\n")
+    return True, f"noted {text}"
+'''
+
+FLAG = '''
+import os
+
+def flag() -> bool:
+    """A stop flag file exists"""
+    return os.path.exists("/tmp/scratch_test_flag")
+'''
+
+
+@pytest.fixture
+def pad():
+    """A scratchpad with a mock logger, and a log_once that works like the
+    component's"""
+    logger = MagicMock()
+    logged = set()
+
+    def log_once(key, message, level="warning"):
+        if key not in logged:
+            logged.add(key)
+            getattr(logger, level)(message)
+
+    return Scratchpad(
+        run_action=MagicMock(return_value=(True, "ran")),
+        logger=logger,
+        log_once=log_once,
+    )
+
+
+class TestScratchpadWriting:
+    def test_an_action_is_described_from_its_signature_and_docstring(self, pad):
+        written = pad.write("note", "action", NOTE)
+
+        assert (
+            written.kind == "action"
+            and written.description == "Append a line of text to a file."
+        )
+        function = written.schema["function"]
+        assert function["name"] == "note"
+        assert function["parameters"] == {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "what to write"},
+                "path": {"type": "string", "description": "the file to append to"},
+            },
+            "required": ["text"],
+        }
+        assert written.schema["phase"] == "execution"
+        assert "note" in pad and pad.get("note") is written
+        assert pad.logger.info.call_args.args[0].startswith("Written action 'note'")
+
+    def test_a_condition_has_no_schema(self, pad):
+        written = pad.write("flag", "condition", FLAG)
+        assert written.kind == "condition" and written.schema is None
+        assert written.description == "A stop flag file exists"
+
+    def test_json_types_of_the_parameters(self, pad):
+        source = '''
+from typing import Optional
+def act(n: int, x: float, ok: bool, names: list[str], opts: dict, note: Optional[str] = None, odd: object = None) -> tuple[bool, str]:
+    """An action with parameters of every kind"""
+    return True, ""
+'''
+        properties = pad.write("act", "action", source).schema["function"][
+            "parameters"
+        ]["properties"]
+        assert {name: p.get("type") for name, p in properties.items()} == {
+            "n": "integer",
+            "x": "number",
+            "ok": "boolean",
+            "names": "array",
+            "opts": "object",
+            "note": "string",
+            "odd": None,
+        }
+
+    def test_quotes_escaped_on_the_way_are_repaired(self, pad):
+        escaped = NOTE.replace('"', '\\"')
+        written = pad.write("note", "action", escaped)
+        assert written.source == NOTE
+        assert pad.get("note").function("hello", "/tmp/scratch_test_notes.txt")[0]
+
+    @pytest.mark.parametrize(
+        "name, kind, source, error",
+        [
+            ("x", "action", "def x(:\n    pass", "does not parse"),
+            (
+                "x",
+                "action",
+                'def y() -> tuple[bool, str]:\n    """d"""\n    return True, ""',
+                "does not define a function named 'x'",
+            ),
+            (
+                "x",
+                "condition",
+                'def x(a: int) -> bool:\n    """d"""\n    return True',
+                "takes no parameters",
+            ),
+            (
+                "x",
+                "condition",
+                'def x() -> int:\n    """d"""\n    return 1',
+                "declare that it returns bool",
+            ),
+            (
+                "x",
+                "action",
+                'def x(a: int) -> bool:\n    """d"""\n    return True',
+                "declare that it returns tuple",
+            ),
+            (
+                "x",
+                "action",
+                'def x(a) -> tuple[bool, str]:\n    """d"""\n    return True, ""',
+                "needs a type annotation",
+            ),
+            (
+                "x",
+                "action",
+                'def x(timeout: float) -> tuple[bool, str]:\n    """d"""\n    return True, ""',
+                "named like a setting of the action",
+            ),
+            (
+                "x",
+                "action",
+                'def x(*a: int) -> tuple[bool, str]:\n    """d"""\n    return True, ""',
+                "named parameters only",
+            ),
+            (
+                "x",
+                "action",
+                'def x(a: int) -> tuple[bool, str]:\n    return True, ""',
+                "needs a docstring",
+            ),
+            (
+                "x",
+                "action",
+                'raise RuntimeError("boom")\ndef x() -> tuple[bool, str]:\n    """d"""\n    return True, ""',
+                "Running the source failed",
+            ),
+            (
+                "x",
+                "action",
+                'def x() -> tuple[bool, str]:\n    """d"""\n    tts_say("hi")\n    return True, ""',
+                "uses 'tts_say', which is not defined",
+            ),
+            (
+                "x",
+                "condition",
+                'def x() -> bool:\n    """d"""\n    def inner():\n        return psutil.cpu_percent()\n    return inner() > 1',
+                "uses 'psutil', which is not defined",
+            ),
+            ("not a name", "action", "", "not a valid function name"),
+            ("x", "thing", "", "kind must be one of"),
+        ],
+    )
+    def test_what_breaks_the_contract_is_refused(self, pad, name, kind, source, error):
+        with pytest.raises(ValueError, match=error):
+            pad.write(name, kind, source)
+        assert name not in pad
+
+    def test_run_action_and_os_are_in_the_namespace(self, pad):
+        source = '''
+def dock_and_tell() -> tuple[bool, str]:
+    """Dock, then say so"""
+    ok, why = run_action("robot-dock")
+    if not ok:
+        return False, why
+    return True, os.environ.get("ROBOT_NAME", "robot") + " docked"
+'''
+        os.environ["ROBOT_NAME"] = "emos"
+        written = pad.write("dock_and_tell", "action", source)
+        assert written.function() == (True, "emos docked")
+        pad._run_action.assert_called_once_with("robot-dock")
+
+    def test_writing_a_name_again_replaces_it_and_removing_forgets_it(self, pad):
+        pad.write("flag", "condition", FLAG)
+        pad.write("flag", "condition", FLAG.replace("scratch_test_flag", "other_flag"))
+        assert "other_flag" in pad.get("flag").source
+        assert [f.name for f in pad.list()] == ["flag"]
+
+        removed = pad.remove("flag")
+        assert removed.name == "flag" and "flag" not in pad
+        with pytest.raises(KeyError, match="No function named 'flag'"):
+            pad.get("flag")
+
+
+class TestScratchpadFactories:
+    def test_an_action_factory_builds_an_action_with_the_policy(self, pad):
+        pad.write("note", "action", NOTE)
+        path = "/tmp/scratch_test_notes.txt"
+        if os.path.exists(path):
+            os.remove(path)
+
+        action = pad.action_factory("note")(
+            text="hi", path=path, on_fail="skip", name="step_1"
+        )
+
+        assert action.action_name == "step_1"
+        assert action() == (True, "noted hi")
+        assert open(path).read() == "hi\n"
+        os.remove(path)
+
+    def test_an_action_that_breaks_the_contract_fails(self, pad):
+        pad.write(
+            "bad",
+            "action",
+            'def bad() -> tuple[bool, str]:\n    """Returns the wrong thing"""\n    return "yes"',
+        )
+        ok, message = pad.action_factory("bad")()()
+        assert not ok and "contract" in message
+
+    def test_a_condition_factory_builds_a_polled_event(self, pad):
+        pad.write("flag", "condition", FLAG)
+
+        event = pad.condition_factory("flag")(
+            check_rate=2.0, on_change=True, handle_once=True
+        )
+
+        assert event._is_action_based and event.check_rate == 2.0
+        assert event._on_change and event._handle_once
+
+    def _polled(self, pad, name, source, **flags):
+        pad.write(name, "condition", source)
+        event = pad.condition_factory(name)(**flags)
+        return event._action_condition.executable
+
+    def test_a_condition_is_met_only_when_it_returns_true(self, pad):
+        if os.path.exists("/tmp/scratch_test_flag"):
+            os.remove("/tmp/scratch_test_flag")
+        condition = self._polled(pad, "flag", FLAG)
+        assert condition() is False
+        open("/tmp/scratch_test_flag", "w").close()
+        try:
+            assert condition() is True
+        finally:
+            os.remove("/tmp/scratch_test_flag")
+
+    def test_a_condition_that_returns_no_bool_counts_as_not_met(self, pad):
+        condition = self._polled(
+            pad, "truthy", 'def truthy() -> bool:\n    """A string"""\n    return "yes"'
+        )
+        assert condition() is False
+        assert "not a bool" in pad.logger.error.call_args.args[0]
+
+    def test_a_condition_that_raises_counts_as_not_met_and_is_logged_once(self, pad):
+        condition = self._polled(
+            pad,
+            "boom",
+            'def boom() -> bool:\n    """Raises"""\n    raise RuntimeError("no sensor")',
+        )
+        assert condition() is False and condition() is False
+        pad.logger.error.assert_called_once()
+        assert "no sensor" in pad.logger.error.call_args.args[0]
+
+    def test_a_slow_condition_is_warned_about_once(self, pad):
+        condition = self._polled(
+            pad,
+            "slow",
+            'import time\ndef slow() -> bool:\n    """Sleeps"""\n    time.sleep(0.03)\n    return True',
+            check_rate=100.0,
+        )
+        assert condition() is True and condition() is True
+        pad.logger.warning.assert_called_once()
+        assert "longer than its polling period" in pad.logger.warning.call_args.args[0]

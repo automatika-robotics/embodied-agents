@@ -18,12 +18,14 @@ from ..ros import (
     PLUGIN_ACTION,
     Action,
     ActionClientHandler,
+    ActionReturnType,
     BaseComponent,
     BaseComponentConfig,
     ComponentRunType,
     Event,
     Monitor,
     RegisteredAction,
+    RegisteredEvent,
     Routine,
     RoutineStatus,
     ServiceClientHandler,
@@ -44,6 +46,7 @@ from ..utils import (
     validate_func_args,
 )
 from ..utils.actions import goal_type_to_json_properties
+from ..utils.scratch import CONDITION_FACTORY_SIGNATURE, KINDS, Scratchpad
 from .model_component import ModelComponent
 
 
@@ -298,6 +301,9 @@ class Cortex(ModelComponent, Monitor):
         # set the cortex action name
         self.main_action_name = "cortex_input_command"
 
+        # scratch for functions the planner writes, when the config allows it
+        self._scratchpad: Optional[Scratchpad] = None
+
     # =========================================================================
     # Monitor setup (called by the Launcher)
     # =========================================================================
@@ -407,6 +413,17 @@ class Cortex(ModelComponent, Monitor):
     # Tools that install, remove and list runtime events. Each is the Monitor
     # method of the same name
     _EVENT_TOOLS = ("add_event", "remove_event", "list_events")
+
+    # Tools that write, list, read and remove the planner's own functions,
+    # offered when the config allows it
+    _SCRATCH_TOOLS = (
+        "write_function",
+        "list_functions",
+        "read_function",
+        "remove_function",
+    )
+    # The owner the custom written functions are registered under
+    _SCRATCH_OWNER = "scratch"
 
     # The comparisons a planner may write in an event condition
     _CONDITION_OPERATORS = (
@@ -546,6 +563,8 @@ class Cortex(ModelComponent, Monitor):
 
         if self.config.enable_events:
             self._register_event_tools()
+        if self.config.enable_scratch_functions:
+            self._register_scratch_tools()
 
         # Register all the tools the monitor has gathered from components
         self._register_component_tools()
@@ -632,12 +651,17 @@ class Cortex(ModelComponent, Monitor):
         # Conditions the attached plugins offer, named as their tools are
         plugin_events = self._action_registry.events()
         if plugin_events:
+            written = (
+                f", or one written with write_function, named {self._SCRATCH_OWNER}-<name>"
+                if self.config.enable_scratch_functions
+                else ""
+            )
             event_tools["add_event"]["properties"]["plugin_condition"] = {
                 "type": "object",
                 "description": (
-                    "A ready-made condition the robot provides, such as a low "
-                    "battery, by name with its arguments. Give either this or "
-                    "the 'conditions' list, not both"
+                    "A ready-made condition, by name with its arguments: one the "
+                    f"robot provides, such as a low battery{written}. Give either "
+                    "this or the 'conditions' list, not both"
                 ),
                 "properties": {
                     "name": {
@@ -1142,6 +1166,20 @@ class Cortex(ModelComponent, Monitor):
                 *(getattr(comp, "out_topics", None) or []),
             ]
         }
+        if "plugin_condition" in condition:
+            raise ValueError(
+                "A plugin_condition goes at the top level of add_event, in place "
+                "of the 'conditions' list, not inside it"
+            )
+        named = str(condition.get("topic", ""))
+        if named.replace("-", "/", 1) in {
+            e.ref for e in self._action_registry.events()
+        }:
+            raise ValueError(
+                f"'{named}' is a condition, not a topic. Give it at the top level "
+                f"of add_event as plugin_condition {{'name': '{named}'}}, in place "
+                "of the 'conditions' list"
+            )
         topic = topics.get(condition.get("topic", ""))
         if topic is None:
             raise ValueError(
@@ -1224,6 +1262,10 @@ class Cortex(ModelComponent, Monitor):
         if not actions:
             raise ValueError("An event needs at least one action")
         once = bool(args.get("once", True))
+        if str(watched.get("ref", "")).startswith(f"{self._SCRATCH_OWNER}/"):
+            # NOTE: Scratch written condition is polled, and the Monitor keeps a polled
+            # event as its factory built it, so the flags go to the factory
+            watched["kwargs"].update(handle_once=once, on_change=not once)
         event = {
             "name": args["event_id"],
             **watched,
@@ -1287,6 +1329,247 @@ class Cortex(ModelComponent, Monitor):
             event=event, actions=event_actions, event_id=args["event_id"]
         )
         return message if success else f"Error: {message}"
+
+    # =========================================================================
+    # Tools: the planner's own functions
+    # =========================================================================
+
+    def _register_scratch_tools(self) -> None:
+        """Offer writing, listing, reading and removing functions as planning
+        tools. A written action is offered as a tool, and a written condition
+        to add_event, as soon as it is written."""
+        if self._scratchpad is None:
+            self._scratchpad = Scratchpad(
+                run_action=self._run_action_for_written_functions,
+                logger=self.get_logger(),
+                log_once=self.log_once,
+            )
+        contract = (
+            "Write a new action or event condition for the robot as Python, when "
+            "none of the available tools does what the task needs.\n"
+            "kind 'action': the source defines `def <name>(<typed parameters>) -> "
+            "tuple[bool, str]` with a docstring saying what it does. It returns "
+            "(True, message) on success or (False, why) on failure, and never "
+            "raises. It may import standard library modules. It runs the robot's "
+            "existing actions only through run_action('<tool name>', **arguments), "
+            "with the tool names you see, which returns (success, message); there "
+            "are no other objects or modules for them. The process environment is "
+            "read with os.environ['NAME'].\n"
+            "kind 'condition': the source defines `def <name>() -> bool` with no "
+            "parameters and a docstring. It is polled to feed an event, so it must "
+            "be quick, never block or wait, and return False rather than raise "
+            "when it cannot tell. It cannot read topics: a condition on what a "
+            "topic publishes is given to add_event as a condition on that topic.\n"
+            f"A written action becomes the tool {self._SCRATCH_OWNER}-<name>. A "
+            "written condition becomes a plugin_condition of add_event named "
+            f"{self._SCRATCH_OWNER}-<name>. Writing a name again replaces the "
+            "function."
+        )
+        if self.config.scratch_notes:
+            contract += f"\nAbout the environment: {self.config.scratch_notes}"
+        tools = {
+            "write_function": {
+                "description": contract,
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "The function's name, a valid Python identifier",
+                    },
+                    "kind": {"type": "string", "enum": list(KINDS)},
+                    "source": {
+                        "type": "string",
+                        "description": "The Python source defining the function",
+                    },
+                },
+                "required": ["name", "kind", "source"],
+            },
+            "list_functions": {
+                "description": "The functions written so far, with their kind and signature.",
+                "properties": {},
+                "required": [],
+            },
+            "read_function": {
+                "description": "The source of a written function.",
+                "properties": {"name": {"type": "string"}},
+                "required": ["name"],
+            },
+            "remove_function": {
+                "description": "Remove a written function. Events installed with it keep it.",
+                "properties": {"name": {"type": "string"}},
+                "required": ["name"],
+            },
+        }
+        for tool_name, schema in tools.items():
+            self._planning_tools.add(tool_name)
+            self._planning_tool_descriptions.append({
+                "type": "function",
+                "function": {
+                    "name": tool_name,
+                    "description": schema["description"],
+                    "parameters": {
+                        "type": "object",
+                        "properties": schema["properties"],
+                        "required": schema["required"],
+                    },
+                },
+            })
+
+    def _run_scratch_tool(self, tool_name: str, args: Dict) -> str:
+        """Write, list, read or remove one of the planner's functions"""
+        assert self._scratchpad is not None, "offered only when the config allows it"
+        if tool_name == "list_functions":
+            written = self._scratchpad.list()
+            if not written:
+                return "No functions have been written."
+            return "\n".join(
+                f"- {f.name} ({f.kind}){f.signature if f.kind == 'action' else ''}: "
+                f"{f.description}"
+                for f in written
+            )
+        name = str(args.get("name", ""))
+        if tool_name == "read_function":
+            try:
+                return self._scratchpad.get(name).source
+            except KeyError as e:
+                return f"Error: {str(e).strip(chr(34))}"
+        if tool_name == "remove_function":
+            try:
+                removed = self._scratchpad.remove(name)
+            except KeyError as e:
+                return f"Error: {str(e).strip(chr(34))}"
+            self._unregister_scratch_function(removed.name, removed.kind)
+            self._refresh_tools()
+            return f"Removed {removed.kind} '{name}'."
+        return self._write_function(
+            name, str(args.get("kind", "")), str(args.get("source", ""))
+        )
+
+    def _write_function(self, name: str, kind: str, source: str) -> str:
+        """Define a function from the planner's source and register it, in
+        place of one of the same name"""
+        if self._SCRATCH_OWNER in self._managed_components:
+            return (
+                f"Error: a component is named '{self._SCRATCH_OWNER}', which is the "
+                "name written functions are registered under"
+            )
+        earlier = self._scratchpad.get(name) if name in self._scratchpad else None
+        try:
+            written = self._scratchpad.write(name, kind, source)
+        except ValueError as e:
+            return f"Error: {e}"
+        if earlier is not None:
+            self._unregister_scratch_function(earlier.name, earlier.kind)
+        try:
+            self._register_scratch_function(written)
+        except ValueError as e:
+            self._scratchpad.remove(name)
+            return f"Error: {e}"
+        self._refresh_tools()
+        if kind == "action":
+            message = (
+                f"Written action '{name}'. It is the tool {self._SCRATCH_OWNER}-{name}."
+            )
+        else:
+            message = (
+                f"Written condition '{name}'. Use it in add_event as plugin_condition "
+                f"{{'name': '{self._SCRATCH_OWNER}-{name}', 'arguments': "
+                "{'check_rate': <polls per second>}}."
+            )
+        if earlier is not None:
+            message += (
+                " Events installed with the earlier version keep it; remove and "
+                "add them again to use this one."
+            )
+        return message
+
+    def _register_scratch_function(self, written) -> None:
+        """Put a written function in the action registry: an action as a
+        plugin action built by its factory, a condition as an event factory
+
+        :raises ValueError: If the registry refuses the reference
+        """
+        ref = f"{self._SCRATCH_OWNER}/{written.name}"
+        if written.kind == "action":
+            self._action_registry.add(
+                RegisteredAction(
+                    ref=ref,
+                    owner=self._SCRATCH_OWNER,
+                    name=written.name,
+                    kind=PLUGIN_ACTION,
+                    description=written.description,
+                    schema=written.schema,
+                    signature=written.signature,
+                    in_process=True,
+                ),
+                interface=self._scratchpad.action_factory(written.name),
+            )
+        else:
+            self._action_registry.add_event_factory(
+                RegisteredEvent(
+                    ref=ref,
+                    owner=self._SCRATCH_OWNER,
+                    name=written.name,
+                    description=written.description,
+                    signature=CONDITION_FACTORY_SIGNATURE,
+                ),
+                factory=self._scratchpad.condition_factory(written.name),
+            )
+
+    def _unregister_scratch_function(self, name: str, kind: str) -> None:
+        """Take a written function out of the action registry"""
+        ref = f"{self._SCRATCH_OWNER}/{name}"
+        try:
+            if kind == "action":
+                self._action_registry.remove(ref)
+            else:
+                self._action_registry.remove_event(ref)
+        except KeyError:
+            pass
+
+    def _refresh_tools(self) -> None:
+        """Bring the tools up to date with the written functions"""
+        stale = {
+            name
+            for name in self._tool_refs
+            if name.startswith(f"{self._SCRATCH_OWNER}-")
+        } | set(self._EVENT_TOOLS)
+        for name in stale:
+            self._tool_refs.pop(name, None)
+            self._planning_tools.discard(name)
+            self._execution_tools.discard(name)
+        self._planning_tool_descriptions = [
+            d
+            for d in self._planning_tool_descriptions
+            if d["function"]["name"] not in stale
+        ]
+        self._execution_tool_descriptions = [
+            d
+            for d in self._execution_tool_descriptions
+            if d["function"]["name"] not in stale
+        ]
+        self._register_component_tools()
+        if self.config.enable_events:
+            self._register_event_tools()
+        self._compose_planning_prompt()
+
+    def _run_action_for_written_functions(self, ref: str, **kwargs) -> ActionReturnType:
+        """The ``run_action`` a written function calls: runs an action of the
+        stack by its tool name or registry reference, through the Monitor, and
+        keeps the action contract whatever goes wrong"""
+        ref = self._tool_refs.get(ref, ref)
+        try:
+            entry = self._action_registry.get(ref)
+        except (KeyError, ValueError) as e:
+            return False, str(e).strip(chr(34))
+        if entry.kind == COMPONENT_ACTION_SERVER:
+            return False, (
+                f"'{ref}' is an action server goal, which a written function cannot "
+                "run. Plan it as a step with its send_goal tool"
+            )
+        try:
+            return self._executable_for(entry)(**kwargs)
+        except Exception as e:
+            return False, f"{type(e).__name__}: {e}"
 
     # =========================================================================
     # Planning prompt
@@ -1876,6 +2159,8 @@ class Cortex(ModelComponent, Monitor):
             return self._inspect_component(args.get("component", ""))
         if tool_name == "list_events":
             return self._run_event_tool(tool_name, args)
+        if self._scratchpad is not None and tool_name in self._SCRATCH_TOOLS:
+            return self._run_scratch_tool(tool_name, args)
         if tool_name in self._planning_tools and tool_name in self._tool_refs:
             return self._call_component_action(tool_name, args)
         return f"Error: Unknown planning tool '{tool_name}'."

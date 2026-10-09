@@ -237,11 +237,25 @@ class CortexConfig(LLMConfig):
         Off by default: the tools are the most complex Cortex has, and a small
         planning model does better without them. Default is False.
     :type enable_events: bool
+    :param enable_scratch_functions: Let the planner write its own actions and
+        event conditions as Python code, when nothing available does what a task
+        needs. A written function runs in the launcher process with its privileges and
+        can do anything Python can, so turn this on only for a planning model
+        and a deployment you trust to that degree (YOU HAVE BEEN WARNED).
+        Set ``max_new_tokens`` high depending on the length of functions you
+        expect to generate.
+        Default is False.
+    :type enable_scratch_functions: bool
+    :param scratch_notes: What the planner is told about the environment its
+        written functions run in, in plain words: the environment variables
+        holding credentials, what the machine can reach, what is installed etc.
+        Only used when ``enable_scratch_functions`` is on.
+    :type scratch_notes: str
     :param temperature: Temperature used for the planning LLM call.
         Default is 0.8 and must be greater than 0.0.
     :type temperature: float
     :param max_new_tokens: The maximum number of new tokens to generate during planning.
-        Default is 1000 (inherited from LLMConfig) and must be greater than 0.
+        Default is 1000 and must be greater than 0.
     :type max_new_tokens: int
     :param enable_rag: Enable Retrieval Augmented Generation to provide context
         during planning. Requires a ``db_client`` to be passed to the Cortex component.
@@ -279,6 +293,10 @@ class CortexConfig(LLMConfig):
     compile_routines: bool = field(default=True)
     step_timeout: float = field(default=60.0, validator=base_validators.gt(0.0))
     enable_events: bool = field(default=False)
+    # higher max tokens for the planner
+    max_new_tokens: int = field(default=1000, validator=base_validators.gt(0))
+    enable_scratch_functions: bool = field(default=False)
+    scratch_notes: str = field(default="")
 
     def _get_inference_params(self) -> Dict:
         """get_inference_params.
