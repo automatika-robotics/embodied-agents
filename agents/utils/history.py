@@ -305,7 +305,8 @@ class ChatHistory:
 
     def clear_tool_results(self, keep: int) -> int:
         """Replace the content of every tool result but the last ``keep`` with
-        a placeholder that names the tool and quotes how the result began.
+        a placeholder that names the tool and quotes how the result began. A
+        result no longer than its placeholder would be is left as it is.
 
         :param keep: Most recent tool results left as they are
         :type keep: int
@@ -333,10 +334,13 @@ class ChatHistory:
             content = str(reply["content"])
             name = names.get(call_id, "a tool")
             excerpt = content[: self.EXCERPT_LENGTH]
-            reply["content"] = (
+            placeholder = (
                 f"[result of {name} cleared: {len(content)} characters, "
                 f'began "{excerpt}"]'
             )
+            if len(placeholder) >= len(content):
+                continue
+            reply["content"] = placeholder
             self._cleared_results.add(call_id)
             cleared += 1
         return cleared

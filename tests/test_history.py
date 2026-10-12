@@ -327,11 +327,23 @@ class TestClearedToolResults:
         )
         assert tool_messages[1]["content"] == "moved"
 
+    def test_a_result_shorter_than_its_placeholder_is_left_alone(self):
+        history = ChatHistory()
+        history.add_turn("battery?")
+        history.add_reply(
+            "", tool_calls=[{"id": "c1", "function": {"name": "get_battery_level"}}]
+        )
+        history.add_tool_result("c1", "87")
+        history.add_reply("87 percent")
+
+        assert history.clear_tool_results(keep=0) == 0
+        assert history.messages[2]["content"] == "87"
+
     def test_clearing_twice_leaves_the_placeholder_alone(self):
         history = ChatHistory()
         history.add_turn("go")
         history.add_reply("", tool_calls=[{"id": "c1", "function": {"name": "move"}}])
-        history.add_tool_result("c1", "moved")
+        history.add_tool_result("c1", "moved " * 100)
         history.add_reply("ok")
 
         assert history.clear_tool_results(keep=0) == 1

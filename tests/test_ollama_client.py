@@ -4,6 +4,7 @@ The messages a component sends are its chat history, so what the client adds
 for one request (the images of the current turn) must not end up in them.
 """
 
+import json
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -122,3 +123,25 @@ class TestContextLength:
         ollama._warn_on_a_small_context()
 
         ollama.logger.warning.assert_not_called()
+
+
+def test_tool_calls_reach_the_component_as_dicts(ollama):
+    """The package returns the calls as its own model objects"""
+    from ollama._types import Message
+
+    call = Message.ToolCall(
+        function=Message.ToolCall.Function(name="set_led", arguments={"color": "red"})
+    )
+    ollama.client.chat.return_value = {"message": {"content": "", "tool_calls": [call]}}
+
+    result = ollama.inference({
+        "query": [{"role": "user", "content": "red light"}],
+        "temperature": 0.1,
+        "max_new_tokens": 10,
+        "stream": False,
+    })
+
+    assert result["tool_calls"] == [
+        {"function": {"name": "set_led", "arguments": {"color": "red"}}}
+    ]
+    json.dumps(result["tool_calls"])
