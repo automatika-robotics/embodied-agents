@@ -75,12 +75,12 @@ class TestRequest:
     def test_reset_keeps_the_system_prompt(self):
         history = conversation(2, system="sys")
         history.reset()
-        assert history.messages == [{"role": "system", "content": "sys"}]
+        assert history.request() == [{"role": "system", "content": "sys"}]
 
     def test_a_reply_with_no_turn_is_let_go(self):
         history = ChatHistory()
         history.add_reply("a stream that ended after a reset")
-        assert history.messages == []
+        assert history.request() == []
 
 
 class TestTrimming:
@@ -239,7 +239,7 @@ class TestSummaries:
 
         assert history.tokens() > before - 3 * estimate_tokens("question 0answer 0")
         history.reset()
-        assert history.summary is None and history.messages == []
+        assert history.summary is None and history.request() == []
 
 
 class TestImages:
@@ -290,14 +290,6 @@ class TestImages:
             "first\n[1 image from 'cam' omitted]"
         )
 
-    def test_the_view_has_no_arrays(self):
-        history = ChatHistory()
-        history.add_turn("first", images=[image()])
-        history.add_reply("ok")
-        history.add_turn("second", images=[image()])
-
-        assert all("images" not in m for m in history.messages)
-
     def test_images_count_against_the_budget(self):
         history = ChatHistory()
         history.add_turn("first", images=[image()])
@@ -308,6 +300,17 @@ class TestImages:
         assert history.tokens(image_turns=2, image_tokens=100) == text_only + 200
         # an omitted image costs its note, not its tokens
         assert history.tokens(image_turns=1, image_tokens=100) < text_only + 200
+
+
+class TestAsText:
+    def test_the_whole_conversation_after_the_summary(self):
+        history = conversation(2)
+        history.summary = "earlier"
+        assert history.as_text() == (
+            "Summary so far:\nearlier\n\nConversation:\n"
+            "user: question 0\nassistant: answer 0\n"
+            "user: question 1\nassistant: answer 1"
+        )
 
 
 class TestClearedToolResults:
@@ -325,7 +328,7 @@ class TestClearedToolResults:
 
         assert history.clear_tool_results(keep=1) == 1
 
-        tool_messages = [m for m in history.messages if m["role"] == "tool"]
+        tool_messages = [m for m in history.request() if m["role"] == "tool"]
         assert tool_messages[0]["content"].startswith(
             "[result of inspect_component cleared: 330 characters, "
             "began \"Component 'camera' has inputs "
@@ -342,7 +345,7 @@ class TestClearedToolResults:
         history.add_reply("87 percent")
 
         assert history.clear_tool_results(keep=0) == 0
-        assert history.messages[2]["content"] == "87"
+        assert history.request()[2]["content"] == "87"
 
     def test_clearing_twice_leaves_the_placeholder_alone(self):
         history = ChatHistory()
@@ -352,9 +355,9 @@ class TestClearedToolResults:
         history.add_reply("ok")
 
         assert history.clear_tool_results(keep=0) == 1
-        placeholder = history.messages[2]["content"]
+        placeholder = history.request()[2]["content"]
         assert history.clear_tool_results(keep=0) == 0
-        assert history.messages[2]["content"] == placeholder
+        assert history.request()[2]["content"] == placeholder
 
 
 class TestEstimate:

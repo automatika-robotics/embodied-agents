@@ -311,7 +311,7 @@ class MLLM(DepthLiftMixin, LLM):
 
         messages = self._start_turn(utterance, query, images, image_sources)
 
-        self.get_logger().debug(f"Input from component: {self.messages}")
+        self.get_logger().debug(f"Input from component:\n{self.history.as_text()}")
 
         input = {
             "query": messages,

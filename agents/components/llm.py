@@ -9,6 +9,9 @@ from ..clients.model_base import ModelClient
 from ..clients import OllamaClient, GenericHTTPClient, RoboMLWSClient
 from ..config import LLMConfig
 from ..ros import (
+    ActionPhase,
+    ActionReturnType,
+    component_action,
     FixedInput,
     Event,
     String,
@@ -206,11 +209,6 @@ class LLM(ModelComponent):
 
         # deactivate the rest
         super().custom_on_deactivate()
-
-    @property
-    def messages(self) -> List[Dict]:
-        """The conversation as kept, text only, for logs and tests"""
-        return self.history.messages
 
     @property
     def _component_methods(self) -> List[str]:
@@ -492,7 +490,7 @@ class LLM(ModelComponent):
 
         # make call to model again if any tool requires response to be sent back
         if any(response_flags):
-            self.get_logger().debug(f"Input from component: {self.messages}")
+            self.get_logger().debug(f"Input from component:\n{self.history.as_text()}")
 
             input = {
                 "query": self._request(),
@@ -566,7 +564,7 @@ class LLM(ModelComponent):
 
         messages = self._start_turn(utterance, query)
 
-        self.get_logger().debug(f"Input from component: {self.messages}")
+        self.get_logger().debug(f"Input from component:\n{self.history.as_text()}")
 
         input = {
             "query": messages,
@@ -730,6 +728,53 @@ class LLM(ModelComponent):
 
             # publish inference result
             self._publish(result)
+
+    @component_action(
+        description={
+            "type": "function",
+            "function": {
+                "name": "reset_history",
+                "description": (
+                    "Make the component forget its conversation so far, keeping "
+                    "its system prompt. Use it to start a conversation over."
+                ),
+                "parameters": {"type": "object", "properties": {}, "required": []},
+            },
+        }
+    )
+    def reset_history(self) -> ActionReturnType:
+        """Forget the conversation, keeping the system prompt. The same as the
+        reset phrase, for events, recipes and the planner.
+
+        :return: Whether the history was reset, and a message
+        :rtype: ActionReturnType
+        """
+        self.history.reset()
+        return True, "Chat history reset"
+
+    @component_action(
+        description={
+            "type": "function",
+            "function": {
+                "name": "get_history",
+                "description": (
+                    "Read the component's conversation so far, a line per "
+                    "message, to learn what it has been asked and has answered."
+                ),
+                "parameters": {"type": "object", "properties": {}, "required": []},
+            },
+        },
+        phase=ActionPhase.PLANNING,
+    )
+    def get_history(self) -> ActionReturnType:
+        """The conversation as kept, as text.
+
+        :return: Whether there is a conversation, and its text
+        :rtype: ActionReturnType
+        """
+        if not self.history.turns and not self.history.summary:
+            return True, "The chat history is empty"
+        return True, self.history.as_text()
 
     @validate_func_args
     def set_topic_prompt(self, input_topic: Topic, template: Union[str, Path]) -> None:

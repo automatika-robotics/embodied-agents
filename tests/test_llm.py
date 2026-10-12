@@ -1,5 +1,7 @@
 """Tests for LLM component — requires rclpy."""
 
+import json
+
 import pytest
 from unittest.mock import MagicMock, PropertyMock
 
@@ -61,11 +63,16 @@ class TestLLMConstruction:
             config=LLMConfig(_system_prompt="You are a robot"),
             component_name="test_llm_sp",
         )
-        assert comp.messages[0] == {"role": "system", "content": "You are a robot"}
+        assert comp.history.request()[0] == {
+            "role": "system",
+            "content": "You are a robot",
+        }
 
     def test_a_system_prompt_set_after_init_is_in_the_messages(self, llm):
         llm.set_system_prompt("You are a robot")
-        assert llm.messages == [{"role": "system", "content": "You are a robot"}]
+        assert llm.history.request() == [
+            {"role": "system", "content": "You are a robot"}
+        ]
 
     def test_no_system_prompt_empty_messages(self, rclpy_init, mock_model_client):
         comp = LLM(
@@ -75,7 +82,7 @@ class TestLLMConstruction:
             config=LLMConfig(),
             component_name="test_llm_nosp",
         )
-        assert comp.messages == []
+        assert comp.history.request() == []
 
 
 class TestLLMCreateInput:
@@ -111,7 +118,7 @@ class TestLLMCreateInput:
         llm.callbacks = {}
 
         llm._execution_step(topic=trigger)
-        assert llm.messages == []
+        assert llm.history.request() == []
 
     def test_chat_reset_keeps_the_system_prompt(self, llm):
         llm.config.chat_history = True
@@ -126,7 +133,7 @@ class TestLLMCreateInput:
         llm.callbacks = {}
 
         llm._execution_step(topic=trigger)
-        assert llm.messages == [system]
+        assert llm.history.request() == [system]
 
     @pytest.mark.parametrize("phrase", ["Chat reset.", "CHAT RESET!", " chat reset "])
     def test_chat_reset_phrase_ignores_case_and_punctuation(self, llm, phrase):
@@ -140,7 +147,7 @@ class TestLLMCreateInput:
         llm.callbacks = {}
 
         llm._execution_step(topic=trigger)
-        assert llm.messages == []
+        assert llm.history.request() == []
 
     def test_a_reset_is_not_a_missing_input(self, llm, mock_model_client):
         llm.config.chat_history = True
@@ -254,7 +261,7 @@ class TestLLMHistory:
         for text in ["one", "two", "three", "four"]:
             llm._execution_step(topic=_ask(llm, text))
         # four turns is within a third over the cap of three
-        assert [m["content"] for m in llm.messages if m["role"] == "user"] == [
+        assert [m["content"] for m in llm.history.request() if m["role"] == "user"] == [
             "one",
             "two",
             "three",
@@ -263,7 +270,7 @@ class TestLLMHistory:
 
         llm._execution_step(topic=_ask(llm, "five"))
         # five is past it: trimmed back to three, the newest
-        assert llm.messages == [
+        assert llm.history.request() == [
             {"role": "user", "content": "three"},
             {"role": "assistant", "content": "test"},
             {"role": "user", "content": "four"},
@@ -338,14 +345,14 @@ class TestLLMHistory:
 
         llm._execution_step(topic=_ask(llm, "how many?"))
 
-        assert [m["role"] for m in llm.messages] == [
+        assert [m["role"] for m in llm.history.request()] == [
             "user",
             "assistant",
             "tool",
             "assistant",
         ]
-        assert llm.messages[1]["tool_calls"][0]["id"] == "c1"
-        assert llm.messages[2] == {
+        assert llm.history.request()[1]["tool_calls"][0]["id"] == "c1"
+        assert llm.history.request()[2] == {
             "role": "tool",
             "tool_call_id": "c1",
             "content": "42",
@@ -353,6 +360,41 @@ class TestLLMHistory:
         # the reply to the results was asked with the whole turn so far
         second_request = mock_model_client.inference.call_args.args[0]["query"]
         assert [m["role"] for m in second_request] == ["user", "assistant", "tool"]
+
+
+class TestLLMHistoryActions:
+    def test_reset_history_keeps_the_system_prompt(self, llm):
+        llm.history.system_prompt = "sys"
+        llm.history.add_turn("hello")
+        llm.history.add_reply("hi")
+
+        ok, message = llm.reset_history.__wrapped__(llm)
+
+        assert ok and message == "Chat history reset"
+        assert llm.history.request() == [{"role": "system", "content": "sys"}]
+
+    def test_get_history_is_the_conversation_as_text(self, llm):
+        llm.history.add_turn("hello", "doc\nhello")
+        llm.history.add_reply(
+            "", tool_calls=[{"id": "c1", "function": {"name": "move"}}]
+        )
+        llm.history.add_tool_result("c1", "moved")
+        llm.history.add_reply("hi")
+
+        ok, text = llm.get_history.__wrapped__(llm)
+
+        assert ok
+        assert text == (
+            "Conversation:\nuser: hello\nassistant: [called move]\n"
+            "tool: moved\nassistant: hi"
+        )
+
+    def test_get_history_says_when_there_is_none(self, llm):
+        assert llm.get_history.__wrapped__(llm) == (True, "The chat history is empty")
+
+    def test_reading_is_a_planning_tool_and_resetting_an_execution_one(self, llm):
+        assert json.loads(llm.get_history._action_description)["phase"] == "planning"
+        assert json.loads(llm.reset_history._action_description)["phase"] == "execution"
 
 
 class TestLLMHistoryBudget:
@@ -452,8 +494,8 @@ class TestLLMExecutionStep:
         llm._execution_step(topic=Topic(name="in", msg_type="String"))
 
         assert calls == [(2, 3)]
-        assert llm.messages[-1]["role"] == "tool"
-        assert llm.messages[-1]["content"] == "sum is 5"
+        assert llm.history.request()[-1]["role"] == "tool"
+        assert llm.history.request()[-1]["content"] == "sum is 5"
 
 
 class TestLLMToolCallHistory:
@@ -487,7 +529,7 @@ class TestLLMToolCallHistory:
 
         self._call_tools(llm, mock_model_client, calls, lambda unit: f"87 {unit}")
 
-        assistant, tool = llm.messages[-2:]
+        assistant, tool = llm.history.request()[-2:]
         assert assistant["role"] == "assistant"
         assert assistant["tool_calls"] == [
             {
@@ -524,7 +566,7 @@ class TestLLMToolCallHistory:
 
         self._call_tools(llm, mock_model_client, calls, lambda unit: "87")
 
-        assistant, tool = llm.messages[-2:]
+        assistant, tool = llm.history.request()[-2:]
         assert assistant["tool_calls"][0]["id"] == tool["tool_call_id"] == "call_0"
 
     def test_a_failed_call_leaves_no_unanswered_calls(self, llm, mock_model_client):
@@ -535,8 +577,8 @@ class TestLLMToolCallHistory:
 
         self._call_tools(llm, mock_model_client, calls, failing)
 
-        assert llm.messages[-1]["role"] == "assistant"
-        assert "tool_calls" not in llm.messages[-1]
+        assert llm.history.request()[-1]["role"] == "assistant"
+        assert "tool_calls" not in llm.history.request()[-1]
 
     def test_the_reply_to_the_results_is_recorded_without_think_tokens(
         self, llm, mock_model_client
@@ -556,7 +598,7 @@ class TestLLMToolCallHistory:
             follow_up="<think>\nthe tool said 87\n</think>\n\nBattery is at 87%.",
         )
 
-        call, result, reply = llm.messages[-3:]
+        call, result, reply = llm.history.request()[-3:]
         assert call["tool_calls"][0]["id"] == "call_abc"
         assert result["tool_call_id"] == "call_abc"
         assert reply == {"role": "assistant", "content": "Battery is at 87%."}

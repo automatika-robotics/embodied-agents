@@ -1948,11 +1948,6 @@ class Cortex(ModelComponent, Monitor):
     # Phase 1: Planning (multi-step loop)
     # =========================================================================
 
-    @property
-    def messages(self) -> List[Dict]:
-        """The planning conversation as kept, for logs and tests"""
-        return self._session.messages
-
     def _build_planning_messages(self, task: str) -> ChatHistory:
         """Start the planning of a task as a turn of the planning
         conversation, after the records of the earlier tasks.

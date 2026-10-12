@@ -235,7 +235,7 @@ class ChatHistory:
             ):
                 dropped.append(self.turns.pop(0))
         if dropped and summarizer is not None:
-            if summary := summarizer(self._summarized_conversation_text(dropped)):
+            if summary := summarizer(self.as_text(dropped)):
                 self.summary = summary.strip()
         # drop image arrays of turns older than image turns
         for turn in self.turns[: max(0, len(self.turns) - image_turns)]:
@@ -253,18 +253,19 @@ class ChatHistory:
             total += len(self.turns[-1].images) * image_tokens
         return total
 
-    @property
-    def messages(self) -> List[Dict[str, Any]]:
-        """The conversation as kept, text only, for logs and tests"""
-        return self._messages(image_turns=1, with_images=False)
+    def as_text(self, turns: Optional[List[Turn]] = None) -> str:
+        """The turns, all of them by default, as plain text after the summary
+        so far. For the summarizer and for reading the conversation
 
-    def _summarized_conversation_text(self, turns: List[Turn]) -> str:
-        """The turns as plain text for the summarizer, after the summary so far"""
+        :param turns: The turns to render, the whole conversation when None
+        :type turns: Optional[List[Turn]]
+        :rtype: str
+        """
         lines = []
         if self.summary:
             lines += ["Summary so far:", self.summary, ""]
         lines.append("Conversation:")
-        for turn in turns:
+        for turn in self.turns if turns is None else turns:
             lines.append(f"user: {turn.utterance}")
             for reply in turn.replies:
                 text = str(reply.get("content") or "")

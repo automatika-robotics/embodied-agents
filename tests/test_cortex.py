@@ -341,7 +341,7 @@ class TestCortexPlanning:
         plan, planning = comp._plan_task("fetch a cup", planning)
 
         assert plan is not None
-        assert planning.messages[3]["content"].startswith(
+        assert planning.request()[3]["content"].startswith(
             "[result of inspect_component cleared: 527 characters"
         )
 
@@ -377,7 +377,7 @@ class TestCortexPlanning:
 
         comp._remember_task(results, "completed")
 
-        assert comp.messages[1:] == [
+        assert comp._session.request()[1:] == [
             {"role": "user", "content": "light up"},
             {
                 "role": "assistant",
@@ -441,7 +441,7 @@ class TestCortexPlanning:
         assert result.success is True
         handle.succeed.assert_called_once()
         mock_model_client.inference.assert_called_once()  # the first task only
-        assert [m["role"] for m in comp.messages] == ["system"]
+        assert [m["role"] for m in comp._session.request()] == ["system"]
 
     def test_plan_task_no_tool_calls_returns_none(self, rclpy_init, mock_model_client):
         mock_model_client.inference.return_value = {
@@ -748,7 +748,7 @@ class TestGatedSteps:
         planning = ChatHistory("plan")
         planning.add_turn("task")
         comp._append_execution_results_to_planning(planning, plan, results)
-        calls = [c["function"] for c in planning.messages[2]["tool_calls"]]
+        calls = [c["function"] for c in planning.request()[2]["tool_calls"]]
         assert calls[1] == filled["function"] and calls[2] == replaced["function"]
 
     def test_the_planner_is_told_what_is_still_running(
@@ -773,8 +773,8 @@ class TestGatedSteps:
 
         comp._append_execution_results_to_planning(planning, plan, results)
 
-        assert planning.messages[-1]["content"].startswith("Error: no grasp")
-        assert "send_goal_to_nav: running" in planning.messages[-1]["content"]
+        assert planning.request()[-1]["content"].startswith("Error: no grasp")
+        assert "send_goal_to_nav: running" in planning.request()[-1]["content"]
 
     def test_the_final_message_says_what_was_skipped(
         self, rclpy_init, mock_model_client
@@ -1005,7 +1005,7 @@ class TestCortexSensorDescriptions:
         assert "A pan-tilt camera." in prompt
         assert "front_cam-look_at" in prompt
         assert comp._PLANNING_PROMPT in prompt
-        assert comp.messages[0]["content"] == prompt
+        assert comp._session.request()[0]["content"] == prompt
 
     def test_composes_with_robot_identity(self, rclpy_init, mock_model_client):
         comp = Cortex(
@@ -1095,7 +1095,7 @@ class TestCortexRobotDescription:
         assert comp._PLANNING_PROMPT in prompt
         # config + messages buffer kept in sync
         assert comp.config._system_prompt == prompt
-        assert comp.messages[0]["content"] == prompt
+        assert comp._session.request()[0]["content"] == prompt
 
     def test_none_plugin_is_noop(self, rclpy_init, mock_model_client):
         comp = Cortex(

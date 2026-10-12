@@ -347,6 +347,19 @@ class TestMLLMHistory:
         assert second["query"] == [{"role": "user", "content": "what is this?"}]
 
 
+class TestMLLMHistoryActions:
+    def test_the_actions_are_inherited(self, mllm):
+        mllm.history.add_turn("what is this?", images=[np.zeros((4, 4, 3))])
+        mllm.history.add_reply("a cup")
+
+        assert mllm.get_history.__wrapped__(mllm) == (
+            True,
+            "Conversation:\nuser: what is this?\nassistant: a cup",
+        )
+        assert mllm.reset_history.__wrapped__(mllm) == (True, "Chat history reset")
+        assert mllm.history.turns == []
+
+
 class TestMLLMChatReset:
     def test_chat_reset_keeps_the_system_prompt(self, mllm):
         mllm.config.chat_history = True
@@ -362,7 +375,7 @@ class TestMLLMChatReset:
 
         mllm._task = None  # set at configure
         mllm._execution_step(topic=trigger)
-        assert mllm.messages == [system]
+        assert mllm.history.request() == [system]
 
 
 class TestMLLMSetTask:
