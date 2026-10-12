@@ -43,6 +43,7 @@ from ..utils import (
     ChatHistory,
     decode_json_values,
     estimate_tokens,
+    matches_phrase,
     parse_tool_arguments,
     resolve_history_budget,
     strip_think_tokens,
@@ -236,10 +237,8 @@ class Cortex(ModelComponent, Monitor):
         self._memory_addendum = ""  # set by _augment_planning_prompt_for_memory()
         self._events_addendum = ""  # set by _register_event_tools()
 
-        # Initialize messages buffer
-        self.messages: List[Dict] = [
-            {"role": "system", "content": self._effective_planning_prompt}
-        ]
+        # The planning conversation as ChatHistory. Current task is its last turn
+        self._session = ChatHistory(self._effective_planning_prompt)
 
         # Tool registries separated into planning and execution phases.
         # Planning tools (e.g. inspect_component) gather information.
@@ -1827,7 +1826,7 @@ class Cortex(ModelComponent, Monitor):
             + self._events_addendum
         )
         self.config._system_prompt = self._effective_planning_prompt
-        self.messages = [{"role": "system", "content": self._effective_planning_prompt}]
+        self._session.system_prompt = self._effective_planning_prompt
 
     # =========================================================================
     # Lifecycle
@@ -1949,9 +1948,14 @@ class Cortex(ModelComponent, Monitor):
     # Phase 1: Planning (multi-step loop)
     # =========================================================================
 
+    @property
+    def messages(self) -> List[Dict]:
+        """The planning conversation as kept, for logs and tests"""
+        return self._session.messages
+
     def _build_planning_messages(self, task: str) -> ChatHistory:
-        """Start the planning conversation of a task: the planning prompt and
-        the task, with optional RAG context from the vector DB.
+        """Start the planning of a task as a turn of the planning
+        conversation, after the records of the earlier tasks.
         """
         user_content = task
         if self.config.enable_rag and self.db_client:
@@ -1959,9 +1963,28 @@ class Cortex(ModelComponent, Monitor):
             if rag_context:
                 user_content = f"Context:\n{rag_context}\n\nTask: {task}"
 
-        planning = ChatHistory(self._effective_planning_prompt)
-        planning.add_turn(task, user_content)
-        return planning
+        self._session.add_turn(task, user_content)
+        return self._session
+
+    def _remember_task(self, executed_results: List[Dict], outcome: str) -> None:
+        """Keep the task just finished for the tasks to come, as its record.
+        Without session history the task is forgotten"""
+        if not self._session.turns:
+            return
+        if not self.config.session_history:
+            self._session.turns.pop()
+            return
+        lines = []
+        for number, result in enumerate(executed_results, start=1):
+            function = result.get("function") or {}
+            name = function.get("name") or result.get("action")
+            arguments = self._parse_tool_args(function.get("arguments", {}))
+            args = ", ".join(f"{k}={v!r}" for k, v in arguments.items())
+            lines.append(f"{number}. {name}({args}): {result['result']}")
+        record = "\n".join(lines) if lines else "No actions were run."
+        self._session.current.replies = [
+            {"role": "assistant", "content": f"{record}\nOutcome: {outcome}"}
+        ]
 
     def _process_planning_calls(
         self,
@@ -2051,7 +2074,11 @@ class Cortex(ModelComponent, Monitor):
 
         for step in range(self.config.max_planning_steps):
             inference_input = {
-                "query": planning.request(budget=budget, extra_tokens=extra_tokens),
+                "query": planning.request(
+                    budget=budget,
+                    max_turns=self.config.session_history + 1,
+                    extra_tokens=extra_tokens,
+                ),
                 **self.config._get_inference_params(),
             }
             # a task is one turn, nothing in it can be dropped to fit
@@ -2944,9 +2971,11 @@ class Cortex(ModelComponent, Monitor):
         # don't attempt another state transition.
         if not goal_handle.is_active:
             self._cancel_all_active_clients()
+            self._remember_task(executed_results, "cancelled")
             return
 
         if aborted:
+            feedback = "aborted"
             with self._main_goal_lock:
                 self._cancel_all_active_clients()
                 goal_handle.abort()
@@ -2975,13 +3004,12 @@ class Cortex(ModelComponent, Monitor):
                 goal_handle.succeed()
         else:
             # Loop exhausted without the LLM voluntarily stopping
-            self._send_feedback(
-                goal_handle,
-                feedback_msg,
-                plan_len,
+            feedback = (
                 f"Plan did not finish: reached max_execution_steps "
-                f"({self.config.max_execution_steps}).",
-                completed=True,
+                f"({self.config.max_execution_steps})."
+            )
+            self._send_feedback(
+                goal_handle, feedback_msg, plan_len, feedback, completed=True
             )
             self.get_logger().warning(
                 "Task exhausted max_execution_steps without voluntary completion."
@@ -2989,6 +3017,7 @@ class Cortex(ModelComponent, Monitor):
             with self._main_goal_lock:
                 self._cancel_all_active_clients()
                 goal_handle.abort()
+        self._remember_task(executed_results, feedback)
 
     def main_action_callback(self, goal_handle):
         """Action server callback. Iterative plan-execute loop.
@@ -3007,6 +3036,17 @@ class Cortex(ModelComponent, Monitor):
         feedback_msg = VisionLanguageAction.Feedback()
         result_msg = VisionLanguageAction.Result()
         result_msg.success = False
+
+        # Reset planning history if requested
+        if matches_phrase(task, self.config.history_reset_phrase):
+            self._session.reset()
+            result_msg.success = True
+            self._send_feedback(
+                goal_handle, feedback_msg, 0, "Chat history reset.", completed=True
+            )
+            with self._main_goal_lock:
+                goal_handle.succeed()
+            return result_msg
 
         self._send_feedback(
             goal_handle, feedback_msg, 0, f"Received task. Creating a plan for: {task}"
@@ -3041,6 +3081,7 @@ class Cortex(ModelComponent, Monitor):
                     self._publish(result={"output": text_output})
                     with self._main_goal_lock:
                         goal_handle.succeed()
+                    self._remember_task([], f"answered: {text_output}")
                 else:
                     self._send_feedback(
                         goal_handle,
@@ -3051,6 +3092,9 @@ class Cortex(ModelComponent, Monitor):
                     )
                     with self._main_goal_lock:
                         goal_handle.abort()
+                    self._remember_task(
+                        [], "planning failed, no response from the model"
+                    )
                 return result_msg
 
             plan_description = ", ".join(s["function"]["name"] for s in plan)

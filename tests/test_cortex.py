@@ -345,6 +345,104 @@ class TestCortexPlanning:
             "[result of inspect_component cleared: 527 characters"
         )
 
+    def _planner(self, mock_model_client, name, session_history):
+        mock_model_client.inference.return_value = {
+            "output": "",
+            "tool_calls": [
+                {"function": {"name": "set_led", "arguments": {"color": "green"}}}
+            ],
+        }
+        comp = Cortex(
+            outputs=[Topic(name="out", msg_type="String")],
+            actions=[_make_mock_action(name="set_led", description="Light")],
+            model_client=mock_model_client,
+            config=CortexConfig(session_history=session_history),
+            component_name=name,
+        )
+        mock_component_internals(comp)
+        return comp
+
+    def test_a_finished_task_is_kept_as_its_record(self, rclpy_init, mock_model_client):
+        comp = self._planner(mock_model_client, "test_cortex_session_record", 3)
+        comp._plan_task("light up")
+        results = [
+            {
+                "step": 0,
+                "action": "set_led",
+                "result": "LED set to green",
+                "function": {"name": "set_led", "arguments": {"color": "green"}},
+            },
+            {"step": 1, "action": "say", "result": "SKIPPED"},
+        ]
+
+        comp._remember_task(results, "completed")
+
+        assert comp.messages[1:] == [
+            {"role": "user", "content": "light up"},
+            {
+                "role": "assistant",
+                "content": "1. set_led(color='green'): LED set to green\n"
+                "2. say(): SKIPPED\nOutcome: completed",
+            },
+        ]
+
+    def test_the_next_task_is_planned_after_the_records(
+        self, rclpy_init, mock_model_client
+    ):
+        comp = self._planner(mock_model_client, "test_cortex_session_next", 3)
+        comp._plan_task("light up")
+        comp._remember_task([], "answered: it is on")
+
+        comp._plan_task("now the opposite")
+
+        sent = mock_model_client.inference.call_args.args[0]["query"]
+        assert [m["role"] for m in sent] == ["system", "user", "assistant", "user"]
+        assert sent[1]["content"] == "light up"
+        assert sent[2]["content"] == "No actions were run.\nOutcome: answered: it is on"
+        assert sent[3]["content"] == "now the opposite"
+
+    def test_without_session_history_every_task_starts_fresh(
+        self, rclpy_init, mock_model_client
+    ):
+        comp = self._planner(mock_model_client, "test_cortex_session_off", 0)
+        comp._plan_task("light up")
+        comp._remember_task([], "completed")
+
+        comp._plan_task("again")
+
+        sent = mock_model_client.inference.call_args.args[0]["query"]
+        assert [m["role"] for m in sent] == ["system", "user"]
+        assert sent[1]["content"] == "again"
+
+    def test_the_records_are_trimmed_to_the_session_history(
+        self, rclpy_init, mock_model_client
+    ):
+        comp = self._planner(mock_model_client, "test_cortex_session_trim", 1)
+        for task in ["one", "two", "three"]:
+            comp._plan_task(task)
+            comp._remember_task([], "completed")
+
+        comp._plan_task("four")
+
+        sent = mock_model_client.inference.call_args.args[0]["query"]
+        assert [m["content"] for m in sent if m["role"] == "user"] == ["three", "four"]
+
+    def test_the_reset_phrase_as_a_task_clears_the_session(
+        self, rclpy_init, mock_model_client
+    ):
+        comp = self._planner(mock_model_client, "test_cortex_session_reset", 3)
+        comp._plan_task("light up")
+        comp._remember_task([], "completed")
+        handle = MagicMock(is_active=True)
+        handle.request.task = "Chat reset."
+
+        result = comp.main_action_callback(handle)
+
+        assert result.success is True
+        handle.succeed.assert_called_once()
+        mock_model_client.inference.assert_called_once()  # the first task only
+        assert [m["role"] for m in comp.messages] == ["system"]
+
     def test_plan_task_no_tool_calls_returns_none(self, rclpy_init, mock_model_client):
         mock_model_client.inference.return_value = {
             "output": "I don't need to do anything.",

@@ -25,6 +25,7 @@ from ..utils import (
     ChatHistory,
     decode_json_values,
     estimate_tokens,
+    matches_phrase,
     resolve_history_budget,
     get_prompt_template,
     validate_func_args,
@@ -518,10 +519,9 @@ class LLM(ModelComponent):
 
     def _should_reset_chat(self, query: Optional[str]) -> bool:
         """Check if the chat should be reset based on the query."""
-        if not (self.config.chat_history and query):
-            return False
-        normalize = lambda text: text.strip().lower().rstrip(".!?,;:")  # noqa: E731
-        return normalize(query) == normalize(self.config.history_reset_phrase)
+        return self.config.chat_history and matches_phrase(
+            query, self.config.history_reset_phrase
+        )
 
     def _create_input(self, *_, **kwargs) -> Optional[Dict[str, Any]]:
         """Create inference input for LLM models

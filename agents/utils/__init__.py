@@ -1,4 +1,9 @@
-from .history import ChatHistory, estimate_tokens, resolve_history_budget
+from .history import (
+    ChatHistory,
+    estimate_tokens,
+    matches_phrase,
+    resolve_history_budget,
+)
 from .utils import (
     draw_detection_bounding_boxes,
     with_image_parts,
@@ -30,6 +35,7 @@ __all__ = [
     "_LANGUAGE_CODES",
     "ChatHistory",
     "estimate_tokens",
+    "matches_phrase",
     "resolve_history_budget",
     "with_image_parts",
     "build_lerobot_features_from_dataset_info",

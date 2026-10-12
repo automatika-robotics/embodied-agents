@@ -33,6 +33,14 @@ class TestLLMConfig:
         c = LLMConfig(history_size=1)
         assert c.history_size == 1
 
+    def test_session_history_is_not_negative(self):
+        from agents.config import CortexConfig
+
+        with pytest.raises(ValueError):
+            CortexConfig(session_history=-1)
+        assert CortexConfig().session_history == 0
+        assert CortexConfig(session_history=3).session_history == 3
+
     def test_history_compaction_is_drop_or_summarize(self):
         with pytest.raises(ValueError):
             LLMConfig(history_compaction="forget")

@@ -13,7 +13,12 @@ import pytest
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from agents.utils import ChatHistory, estimate_tokens, resolve_history_budget
+from agents.utils import (
+    ChatHistory,
+    estimate_tokens,
+    matches_phrase,
+    resolve_history_budget,
+)
 
 
 def image():
@@ -434,3 +439,13 @@ class TestResolveHistoryBudget:
             is None
         )
         logger.warning.assert_not_called()
+
+
+class TestMatchesPhrase:
+    @pytest.mark.parametrize("text", ["chat reset", "Chat reset.", " CHAT RESET! "])
+    def test_case_and_trailing_punctuation_do_not_matter(self, text):
+        assert matches_phrase(text, "chat reset")
+
+    @pytest.mark.parametrize("text", [None, "", "chat reset please", "reset"])
+    def test_anything_else_is_not_the_phrase(self, text):
+        assert not matches_phrase(text, "chat reset")

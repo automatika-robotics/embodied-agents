@@ -225,6 +225,8 @@ class CortexConfig(LLMConfig):
         actions executed for one task is therefore ``max_execution_steps²``.
         Default is 10.
     :type max_execution_steps: int
+    :param session_history: Earlier tasks the planner remembers, each as the task and a record of the calls run, their results and the outcome, so a follow-up task can refer to them. Trimmed like ``history_size``, and by ``history_budget``. Default is 0: every task starts fresh.
+    :type session_history: int
     :param confirmation_temperature: Temperature for the per-step confirmation LLM
         calls. Used for both the decision and resolving tool call arguments
         from prior step results. Default is 0.3.
@@ -299,6 +301,7 @@ class CortexConfig(LLMConfig):
 
     max_planning_steps: int = field(default=10, validator=base_validators.gt(0))
     max_execution_steps: int = field(default=10, validator=base_validators.gt(0))
+    session_history: int = field(default=0, validator=base_validators.gt(-1))
     confirmation_temperature: float = field(
         default=0.3, validator=base_validators.gt(0.0)
     )

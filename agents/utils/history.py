@@ -346,6 +346,22 @@ class ChatHistory:
         return cleared
 
 
+def matches_phrase(text: Optional[str], phrase: str) -> bool:
+    """Whether a text is the phrase, case and trailing punctuation aside,
+    which a transcription adds
+
+    :param text: What was said
+    :type text: Optional[str]
+    :param phrase: The phrase, e.g. the one that resets the chat history
+    :type phrase: str
+    :rtype: bool
+    """
+    if not text:
+        return False
+    normalize = lambda t: t.strip().lower().rstrip(".!?,;:")  # noqa: E731
+    return normalize(text) == normalize(phrase)
+
+
 def resolve_history_budget(
     config, model, system_prompt: Optional[str], tools: Sequence[Dict], logger
 ) -> Optional[int]:
