@@ -190,6 +190,8 @@ A written function runs in the launcher process. It has `run_action('<tool name>
 | **Vision** | `record_video(topic_name, duration, save_path, fps)` | Record video for a duration |
 | **Vision** | `track(label)` | Start ByteTrack tracking for a label (requires RoboML client + Tracking output) |
 | **VLM** | `describe(topic_name, query)` | Capture a frame and describe it using the VLM |
+| **LLM**, **VLM** | `reset_history()` | Forget the conversation so far, keeping the system prompt (an execution tool) |
+| **LLM**, **VLM** | `get_history()` | The conversation so far as text, a line per message (a planning tool) |
 | **TextToSpeech** | `say(text)` | Convert text to speech and play on device |
 | **TextToSpeech** | `stop_playback()` | Stop current audio playback |
 | **MapEncoding** | `add_point(layer, point)` | Add a labeled point to a map layer |

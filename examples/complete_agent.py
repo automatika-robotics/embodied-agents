@@ -22,6 +22,7 @@ from agents.components import (
 )
 from agents.config import (
     LLMConfig,
+    MLLMConfig,
     MemoryConfig,
     SemanticRouterConfig,
     TextToSpeechConfig,
@@ -93,6 +94,7 @@ mllm = MLLM(
     outputs=[query_answer],
     model_client=qwen_vl_client,
     trigger=mllm_query,
+    config=MLLMConfig(chat_history=True),
     component_name="visual_q_and_a",
 )
 mllm.set_component_prompt(

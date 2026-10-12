@@ -26,6 +26,7 @@ llm = LLM(
     outputs=[llm_out],
     model_client=qwen_client,
     trigger=llm_in,
+    config=LLMConfig(chat_history=True),
     component_name="generic_llm",
 )
 

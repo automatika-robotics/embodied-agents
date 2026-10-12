@@ -100,7 +100,9 @@ cortex = Cortex(
     ],
     output=cortex_output,
     model_client=planner_client,
-    config=CortexConfig(max_planning_steps=5, max_execution_steps=10),
+    config=CortexConfig(
+        max_planning_steps=5, max_execution_steps=10, session_history=3
+    ),
     component_name="cortex",
 )
 
