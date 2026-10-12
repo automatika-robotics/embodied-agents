@@ -135,6 +135,26 @@ def test_tool_call_arguments_are_sent_as_a_json_string(server):
 
 # --- Decisions ---------------------------------------------------------------
 
+
+def test_images_go_to_the_server_and_not_into_the_history(server):
+    """The messages are the component's chat history: the image is sent with
+    the last message but the history keeps the text alone"""
+    client, requests, _ = server
+    history = [{"role": "user", "content": "what is this?"}]
+
+    client._inference_chat({
+        "query": history,
+        "images": [np.zeros((4, 4, 3), dtype=np.uint8)],
+        "max_new_tokens": 100,
+    })
+
+    (request,) = requests
+    text, image = request["messages"][-1]["content"]
+    assert text == {"type": "text", "text": "what is this?"}
+    assert image["image_url"]["url"].startswith("data:image/png;base64,")
+    assert history == [{"role": "user", "content": "what is this?"}]
+
+
 QUESTIONS = {
     "stop": {
         "type": "noul",

@@ -148,9 +148,11 @@ class OllamaClient(ModelClient):
         }
 
         # make images part of the latest message in message list
-        if images := inference_input.get("images"):
-            input["messages"][-1]["images"] = [encode_img_base64(img) for img in images]
-            inference_input.pop("images")
+        if images := inference_input.pop("images", None):
+            messages = input["messages"]
+            input["messages"] = messages[:-1] + [
+                {**messages[-1], "images": [encode_img_base64(img) for img in images]}
+            ]
 
         # Add tools as part of input, if available
         if tools := inference_input.get("tools"):

@@ -467,8 +467,9 @@ class GenericHTTPClient(ModelClient):
             b64_images = [encode_img_base64(img) for img in images]
             inference_input.pop("images")  # Remove images from inference_input
             # Add images to last message in query
-            if inference_input["query"][-1].get("role") == "user":
-                last_message = inference_input["query"][-1]
+            messages = inference_input["query"]
+            if messages[-1].get("role") == "user":
+                last_message = messages[-1]
                 content_parts = []
 
                 # Add the original text prompt as the first part
@@ -481,8 +482,9 @@ class GenericHTTPClient(ModelClient):
                         "image_url": {"url": f"data:image/png;base64,{img_b64}"},
                     })
 
-                # Replace the original content with the new list of parts
-                inference_input["query"][-1]["content"] = content_parts
+                inference_input["query"] = messages[:-1] + [
+                    {**last_message, "content": content_parts}
+                ]
                 return inference_input
             else:
                 self.logger.warning(
