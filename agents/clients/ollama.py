@@ -246,9 +246,12 @@ class OllamaClient(ModelClient):
             )
             return
 
-        # if tool calls exist
+        # if tool calls exist, convert client return pydantic models to plain dicts
         if tool_calls := ollama_result["message"].get("tool_calls"):  # type: ignore
-            input["tool_calls"] = tool_calls
+            input["tool_calls"] = [
+                call.model_dump() if hasattr(call, "model_dump") else call
+                for call in tool_calls
+            ]
 
         input["output"] = ollama_result["message"].get("content", "")
         return input
