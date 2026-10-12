@@ -264,7 +264,7 @@ class MLLM(DepthLiftMixin, LLM):
         # set mllm query as trigger
         query = self._extract_query_and_context(kwargs, context)
         if self._should_reset_chat(query):
-            self.messages = []
+            self._reset_chat_history()
             return None
 
         # aggregate all inputs that are available. Depth and camera_info

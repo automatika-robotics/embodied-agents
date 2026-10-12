@@ -82,8 +82,7 @@ class TestMLLM3DConstruction:
             ],
             outputs=[Topic(name="d3", msg_type="Detections3D")],
             model_client=mock_model_client,
-            config=config
-            or MLLMConfig(task="grounding", detections_frame="base_link"),
+            config=config or MLLMConfig(task="grounding", detections_frame="base_link"),
             component_name="test_mllm_3d",
             **kwargs,
         )
@@ -126,9 +125,7 @@ class TestMLLM3DConstruction:
 
     def test_depth_requires_camera_info(self, rclpy_init, mock_model_client):
         with pytest.raises(TypeError, match="camera_info"):
-            self._make(
-                mock_model_client, depth=Topic(name="depth", msg_type="Image")
-            )
+            self._make(mock_model_client, depth=Topic(name="depth", msg_type="Image"))
 
     def test_stray_camera_info_input_rejected(self, rclpy_init, mock_model_client):
         with pytest.raises(TypeError, match="camera_info=Topic"):
@@ -292,6 +289,22 @@ class TestMLLMCreateInput:
         assert "images" in result
 
 
+class TestMLLMChatReset:
+    def test_chat_reset_keeps_the_system_prompt(self, mllm):
+        mllm.config.chat_history = True
+        mllm.config._system_prompt = "You are a robot"
+        system = {"role": "system", "content": "You are a robot"}
+        mllm.messages = [system, {"role": "user", "content": "old"}]
+        trigger = Topic(name="text_in", msg_type="String")
+        mock_trig_cb = MagicMock()
+        mock_trig_cb.get_output.return_value = "chat reset"
+        mllm.trig_callbacks = {"text_in": mock_trig_cb}
+        mllm.callbacks = {}
+
+        assert mllm._create_input(topic=trigger) is None
+        assert mllm.messages == [system]
+
+
 class TestMLLMSetTask:
     def test_valid_task(self, mllm):
         # validate_func_args decorator doesn't support Literal isinstance check,
@@ -383,16 +396,14 @@ class TestGroundedLift(_GrounderSetup):
         assert published["labels"] == ["the orange"]
         assert published["frame_id"] == "cam"
         assert published["boxes_2d"] == [list(self.PATCH)]
-        (center, _), = boxes
+        ((center, _),) = boxes
         assert center[2] == pytest.approx(self.PATCH_DEPTH_M, abs=0.02)
         # the 2D output still goes out alongside, labeled the same way
         pixels, _ = self._published(grounder, "d2")
         assert pixels["bboxes"] == [list(self.PATCH)]
         assert pixels["labels"] == ["the orange"]
 
-    def test_nothing_grounded_is_an_empty_message(
-        self, grounder, mock_model_client
-    ):
+    def test_nothing_grounded_is_an_empty_message(self, grounder, mock_model_client):
         """The model looked and found nothing: an observation, published so
         consumers let go of objects that are no longer there."""
         mock_model_client.inference.return_value = {"output": []}

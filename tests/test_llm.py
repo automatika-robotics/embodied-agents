@@ -108,6 +108,44 @@ class TestLLMCreateInput:
         assert result is None
         assert llm.messages == []
 
+    def test_chat_reset_keeps_the_system_prompt(self, llm):
+        llm.config.chat_history = True
+        llm.config._system_prompt = "You are a robot"
+        system = {"role": "system", "content": "You are a robot"}
+        llm.messages = [system, {"role": "user", "content": "old"}]
+        trigger = Topic(name="in", msg_type="String")
+        mock_cb = MagicMock()
+        mock_cb.get_output.return_value = "chat reset"
+        llm.trig_callbacks = {"in": mock_cb}
+        llm.callbacks = {}
+
+        assert llm._create_input(topic=trigger) is None
+        assert llm.messages == [system]
+
+    @pytest.mark.parametrize("phrase", ["Chat reset.", "CHAT RESET!", " chat reset "])
+    def test_chat_reset_phrase_ignores_case_and_punctuation(self, llm, phrase):
+        llm.config.chat_history = True
+        llm.messages = [{"role": "user", "content": "old"}]
+        trigger = Topic(name="in", msg_type="String")
+        mock_cb = MagicMock()
+        mock_cb.get_output.return_value = phrase
+        llm.trig_callbacks = {"in": mock_cb}
+        llm.callbacks = {}
+
+        assert llm._create_input(topic=trigger) is None
+        assert llm.messages == []
+
+    def test_chat_reset_needs_history_on(self, llm):
+        llm.config.chat_history = False
+        trigger = Topic(name="in", msg_type="String")
+        mock_cb = MagicMock()
+        mock_cb.get_output.return_value = "chat reset"
+        llm.trig_callbacks = {"in": mock_cb}
+        llm.callbacks = {}
+
+        result = llm._create_input(topic=trigger)
+        assert result["query"][-1]["content"] == "chat reset"
+
     def test_includes_tools(self, llm):
         llm.config._tool_descriptions = [{"function": {"name": "test_tool"}}]
         trigger = Topic(name="in", msg_type="String")

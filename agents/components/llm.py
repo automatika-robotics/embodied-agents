@@ -437,10 +437,17 @@ class LLM(ModelComponent):
 
     def _should_reset_chat(self, query: Optional[str]) -> bool:
         """Check if the chat should be reset based on the query."""
-        return bool(
-            self.config.chat_history
-            and query
-            and query.strip().lower() == self.config.history_reset_phrase
+        if not (self.config.chat_history and query):
+            return False
+        normalize = lambda text: text.strip().lower().rstrip(".!?,;:")  # noqa: E731
+        return normalize(query) == normalize(self.config.history_reset_phrase)
+
+    def _reset_chat_history(self) -> None:
+        """Forget the conversation, keeping the system prompt if there is one"""
+        self.messages = (
+            [{"role": "system", "content": self.config._system_prompt}]
+            if self.config._system_prompt
+            else []
         )
 
     def _create_input(self, *_, **kwargs) -> Optional[Dict[str, Any]]:
@@ -455,7 +462,7 @@ class LLM(ModelComponent):
         # set llm query as trigger
         query = self._extract_query_and_context(kwargs, context)
         if self._should_reset_chat(query):
-            self.messages = []
+            self._reset_chat_history()
             return None
 
         # aggregate all inputs that are available
