@@ -28,6 +28,11 @@ def local_llm(mock_llama_cpp):
     return llm
 
 
+def test_the_context_length_is_the_loaded_one(local_llm):
+    local_llm.llm.n_ctx.return_value = 8192
+    assert local_llm.context_length == 8192
+
+
 def _mock_response(content="Hello there!", tool_calls=None):
     """Build a mock non-streaming chat completion response."""
     message = {"role": "assistant", "content": content}

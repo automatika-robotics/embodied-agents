@@ -163,6 +163,11 @@ class TestLocalVLMCall:
         assert url.startswith("data:image/png;base64,")
 
 
+def test_the_context_length_is_the_loaded_one(local_vlm):
+    local_vlm.llm.n_ctx.return_value = 4096
+    assert local_vlm.context_length == 4096
+
+
 class TestVLMFamilyDetection:
     def test_families_detected_from_name(self):
         from agents.utils.local_vlm import detect_vlm_family

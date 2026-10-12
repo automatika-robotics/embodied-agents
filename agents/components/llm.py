@@ -126,8 +126,10 @@ class LLM(ModelComponent):
             else None
         )
 
-        # The conversation, and the requests built from it
+        # The conversation, and the requests built from it.
         self.history = ChatHistory(self.config._system_prompt)
+        # The budget is resolved from the model at configure
+        self._history_budget = self.config.history_budget
 
         super().__init__(
             inputs,
@@ -150,6 +152,9 @@ class LLM(ModelComponent):
 
         # configure the rest
         super().custom_on_configure()
+
+        # resolve token budget
+        self._resolve_history_budget()
 
         # add component prompt if set after init
         self.component_prompt = (
@@ -339,22 +344,58 @@ class LLM(ModelComponent):
         self.history.add_turn(utterance, content, images, image_sources)
         return self._request()
 
+    def _resolve_history_budget(self) -> Optional[int]:
+        """Set the token budget of a request for the model in use: the
+        config's when set, else the model's context length minus the tokens it
+        may generate, else none, the turn count alone then limiting the history"""
+        model = self.model_client or self.local_model
+        self._history_budget = budget = self.config.history_budget
+        if not self.config.chat_history or budget:
+            return budget
+        context = getattr(model, "context_length", None) if model else None
+        if context is None:
+            self.get_logger().warning(
+                "The model does not report a context length and history_budget is "
+                f"not set: the chat history is limited by history_size "
+                f"({self.config.history_size} turns) alone. Set history_budget to "
+                "protect the model's context window."
+            )
+            return None
+        self._history_budget = budget = context - self.config.max_new_tokens
+        fixed = estimate_tokens(self.config._system_prompt or "") + (
+            estimate_tokens(json.dumps(self.config._tool_descriptions))
+            if self.config._tool_descriptions
+            else 0
+        )
+        if budget <= fixed:
+            self.get_logger().warning(
+                f"The model's context of {context} tokens leaves {budget} for the "
+                f"request after max_new_tokens, and the system prompt and tool "
+                f"descriptions take about {fixed}. The chat history will not fit."
+            )
+        else:
+            self.get_logger().info(
+                f"Chat history budget: {budget} tokens, the model's context of "
+                f"{context} minus max_new_tokens."
+            )
+        return budget
+
     def _request(self) -> List[Dict]:
         """The messages of a call on the conversation, trimmed to the history
-        size and the budget of the config"""
+        size and the budget"""
         extra = (
             estimate_tokens(json.dumps(self.config._tool_descriptions))
             if self.config._tool_descriptions
             else 0
         )
         messages = self.history.request(
-            budget=self.config.history_budget,
+            budget=self._history_budget,
             max_turns=self.config.history_size,
             image_turns=self.config.history_images,
             image_tokens=self.config.image_tokens,
             extra_tokens=extra,
         )
-        budget = self.config.history_budget
+        budget = self._history_budget
         if budget and len(self.history.turns) == 1:
             size = self.history.tokens(
                 self.config.history_images, self.config.image_tokens, extra
@@ -474,9 +515,6 @@ class LLM(ModelComponent):
 
         # set llm query as trigger
         query = self._extract_query_and_context(kwargs, context)
-        if self._should_reset_chat(query):
-            self.history.reset()
-            return None
 
         # aggregate all inputs that are available
         for i in self.callbacks.values():
@@ -635,6 +673,10 @@ class LLM(ModelComponent):
                 self.get_logger().debug(f"Received trigger on topic {trigger.name}")
             else:
                 self.get_logger().debug("Got triggered by an event")
+            if self._should_reset_chat(self.trig_callbacks[trigger.name].get_output()):
+                self.history.reset()
+                self.get_logger().debug("Chat history reset by the reset phrase")
+                return
 
         else:
             time_stamp = self.get_ros_time().sec

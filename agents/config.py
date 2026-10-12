@@ -72,7 +72,7 @@ class LLMConfig(ModelComponentConfig):
     :type history_reset_phrase: str
     :param history_size: Turns kept in the chat history. Trimmed back to this once a third over it. Defaults to 10
     :type history_size: int
-    :param history_budget: Token budget for the whole request (system prompt, tools, history, images). When exceeded, the oldest turns are dropped until the request is at 3/4 of the budget. Estimated at 4 characters per token and ``image_tokens`` per image. Applies together with ``history_size``; the smaller limit wins. Default is None (no budget).
+    :param history_budget: Token budget for the whole request (system prompt, tools, history, images). When exceeded, the oldest turns are dropped until the request is at 3/4 of the budget. Estimated at 4 characters per token and ``image_tokens`` per image. Applies together with ``history_size``; the smaller limit wins. Defaults to None, in which case it is set from the model's context length minus ``max_new_tokens`` if the client can report it (Ollama, local models). Otherwise no budget is applied.
     :type history_budget: Optional[int]
     :param history_images: Most recent turns whose images are sent. Older turns note their omitted images. Default is 1.
     :type history_images: int
@@ -342,7 +342,7 @@ class MLLMConfig(LLMConfig):
     :type history_reset_phrase: str
     :param history_size: Turns kept in the chat history. Trimmed back to this once a third over it. Defaults to 10
     :type history_size: int
-    :param history_budget: Token budget for the whole request (system prompt, tools, history, images). When exceeded, the oldest turns are dropped until the request is at 3/4 of the budget. Estimated at 4 characters per token and ``image_tokens`` per image. Applies together with ``history_size``; the smaller limit wins. Default is None (no budget).
+    :param history_budget: Token budget for the whole request (system prompt, tools, history, images). When exceeded, the oldest turns are dropped until the request is at 3/4 of the budget. Estimated at 4 characters per token and ``image_tokens`` per image. Applies together with ``history_size``; the smaller limit wins. Defaults to None, in which case it is set from the model's context length minus ``max_new_tokens`` if the client can report it (Ollama, local models). Otherwise no budget is applied.
     :type history_budget: Optional[int]
     :param history_images: Most recent turns whose images are sent. Older turns note their omitted images. Default is 1.
     :type history_images: int

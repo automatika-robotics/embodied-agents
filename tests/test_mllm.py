@@ -360,7 +360,8 @@ class TestMLLMChatReset:
         mllm.trig_callbacks = {"text_in": mock_trig_cb}
         mllm.callbacks = {}
 
-        assert mllm._create_input(topic=trigger) is None
+        mllm._task = None  # set at configure
+        mllm._execution_step(topic=trigger)
         assert mllm.messages == [system]
 
 

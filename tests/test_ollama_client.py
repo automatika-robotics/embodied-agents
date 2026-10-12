@@ -71,3 +71,54 @@ def test_images_kept_on_an_earlier_message_are_encoded(ollama):
     assert isinstance(sent[0]["images"][0], str)
     assert len(sent[-1]["images"]) == 1
     assert history[0]["images"][0] is earlier
+
+
+def running(name, context_length):
+    model = MagicMock()
+    model.model = model.name = name
+    model.context_length = context_length
+    return model
+
+
+class TestContextLength:
+    def test_the_served_length_of_the_loaded_model(self, ollama):
+        ollama.client.ps.return_value.models = [
+            running("other", 1),
+            running("m:latest", 4096),
+        ]
+        assert ollama.context_length == 4096
+
+    def test_num_ctx_in_the_options_wins(self, ollama):
+        ollama.model_init_params["options"] = {"num_ctx": 32768}
+        ollama.client.ps.return_value.models = [running("m", 4096)]
+        assert ollama.context_length == 32768
+
+    def test_the_trained_length_when_the_model_is_not_loaded(self, ollama):
+        ollama.client.ps.return_value.models = []
+        ollama.client.show.return_value.modelinfo = {
+            "general.architecture": "qwen2",
+            "qwen2.context_length": 40960,
+        }
+        assert ollama.context_length == 40960
+
+    def test_none_when_nothing_can_be_read(self, ollama):
+        ollama.client.ps.side_effect = RuntimeError("down")
+        ollama.client.show.side_effect = RuntimeError("down")
+        assert ollama.context_length is None
+
+    def test_a_model_served_below_what_it_supports_is_warned_about(self, ollama):
+        ollama.client.ps.return_value.models = [running("m", 4096)]
+        ollama.client.show.return_value.modelinfo = {"qwen2.context_length": 40960}
+
+        ollama._warn_on_a_small_context()
+
+        warning = ollama.logger.warning.call_args.args[0]
+        assert "4096" in warning and "40960" in warning and "num_ctx" in warning
+
+    def test_no_warning_at_full_context(self, ollama):
+        ollama.client.ps.return_value.models = [running("m", 40960)]
+        ollama.client.show.return_value.modelinfo = {"qwen2.context_length": 40960}
+
+        ollama._warn_on_a_small_context()
+
+        ollama.logger.warning.assert_not_called()

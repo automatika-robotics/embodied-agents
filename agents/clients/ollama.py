@@ -1,4 +1,4 @@
-from typing import Any, Optional, Dict, Union, List, Generator
+from typing import Any, Optional, Dict, Union, List, Generator, Tuple
 
 import httpx
 
@@ -75,6 +75,48 @@ class OllamaClient(ModelClient):
             )
             raise
 
+    @property
+    def context_length(self) -> Optional[int]:
+        """The context length the model is served with: ``num_ctx`` from the
+        model options when set, since requests carry it, else what Ollama
+        reports for the loaded model, else the length the model was trained
+        with. None when nothing can be read"""
+        if num_ctx := (self.model_init_params.get("options") or {}).get("num_ctx"):
+            return num_ctx
+        served, trained = self._context_lengths()
+        return served or trained
+
+    def _context_lengths(self) -> Tuple[Optional[int], Optional[int]]:
+        """The context length the model is served with, from Ollama's process
+        list, and the one it was trained with, from its model info."""
+        checkpoint = self.model_init_params["checkpoint"]
+        served = trained = None
+        try:
+            wanted = checkpoint.removesuffix(":latest")
+            for running in self.client.ps().models:
+                names = {running.model, running.name}
+                if wanted in {name.removesuffix(":latest") for name in names}:
+                    served = running.context_length
+            info = self.client.show(checkpoint).modelinfo or {}
+            trained = next(
+                (v for k, v in info.items() if k.endswith(".context_length")), None
+            )
+        except Exception as e:
+            self.logger.debug(f"Could not read the context length of {checkpoint}: {e}")
+        return served, trained
+
+    def _warn_on_a_small_context(self) -> None:
+        """Ollama serves a model with a few thousand tokens of context unless
+        told otherwise, whatever the model supports, and truncates the prompt
+        silently past it"""
+        served, trained = self._context_lengths()
+        if served and trained and served < trained:
+            self.logger.warning(
+                f"{self.model_init_params['checkpoint']} is served with a context "
+                f"of {served} tokens of the {trained} it supports. Set num_ctx in "
+                "the OllamaModel options to use more."
+            )
+
     def _is_embedding_model(self) -> bool:
         """Detect whether the served model is an embedding model.
 
@@ -135,6 +177,8 @@ class OllamaClient(ModelClient):
         self.logger.info(
             f"{self.model_name} with {self.model_init_params['checkpoint']} model initialized"
         )
+        if not self._is_embedding:
+            self._warn_on_a_small_context()
 
     def _inference(
         self, inference_input: Dict[str, Any]

@@ -1,7 +1,7 @@
 """Tests for LLM component — requires rclpy."""
 
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, PropertyMock
 
 from agents.config import LLMConfig
 from agents.ros import Topic
@@ -110,8 +110,7 @@ class TestLLMCreateInput:
         llm.trig_callbacks = {"in": mock_cb}
         llm.callbacks = {}
 
-        result = llm._create_input(topic=trigger)
-        assert result is None
+        llm._execution_step(topic=trigger)
         assert llm.messages == []
 
     def test_chat_reset_keeps_the_system_prompt(self, llm):
@@ -126,7 +125,7 @@ class TestLLMCreateInput:
         llm.trig_callbacks = {"in": mock_cb}
         llm.callbacks = {}
 
-        assert llm._create_input(topic=trigger) is None
+        llm._execution_step(topic=trigger)
         assert llm.messages == [system]
 
     @pytest.mark.parametrize("phrase", ["Chat reset.", "CHAT RESET!", " chat reset "])
@@ -140,8 +139,17 @@ class TestLLMCreateInput:
         llm.trig_callbacks = {"in": mock_cb}
         llm.callbacks = {}
 
-        assert llm._create_input(topic=trigger) is None
+        llm._execution_step(topic=trigger)
         assert llm.messages == []
+
+    def test_a_reset_is_not_a_missing_input(self, llm, mock_model_client):
+        llm.config.chat_history = True
+
+        llm._execution_step(topic=_ask(llm, "chat reset"))
+
+        mock_model_client.inference.assert_not_called()
+        llm.get_logger().warning.assert_not_called()
+        assert "reset" in llm.get_logger().debug.call_args.args[0]
 
     def test_chat_reset_needs_history_on(self, llm):
         llm.config.chat_history = False
@@ -298,6 +306,77 @@ class TestLLMHistory:
         # the reply to the results was asked with the whole turn so far
         second_request = mock_model_client.inference.call_args.args[0]["query"]
         assert [m["role"] for m in second_request] == ["user", "assistant", "tool"]
+
+
+class TestLLMHistoryBudget:
+    def test_the_config_budget_wins(self, llm, mock_model_client):
+        llm.config.chat_history = True
+        llm.config.history_budget = 3000
+        type(mock_model_client).context_length = PropertyMock(return_value=8192)
+
+        assert llm._resolve_history_budget() == 3000
+
+    def test_derived_from_the_model_context_minus_the_generation(
+        self, llm, mock_model_client
+    ):
+        llm.config.chat_history = True
+        llm.config.max_new_tokens = 512
+        type(mock_model_client).context_length = PropertyMock(return_value=8192)
+
+        assert llm._resolve_history_budget() == 8192 - 512
+        assert "8192" in llm.get_logger().info.call_args.args[0]
+
+    def test_no_budget_and_a_warning_when_the_model_does_not_report_one(
+        self, llm, mock_model_client
+    ):
+        llm.config.chat_history = True
+
+        assert llm._resolve_history_budget() is None
+        warning = llm.get_logger().warning.call_args.args[0]
+        assert "history_size (10 turns)" in warning and "history_budget" in warning
+
+    def test_a_context_too_small_for_the_prompt_and_tools_is_warned_about(
+        self, llm, mock_model_client
+    ):
+        llm.config.chat_history = True
+        llm.config.max_new_tokens = 512
+        llm.config._system_prompt = "x" * 8000
+        type(mock_model_client).context_length = PropertyMock(return_value=2048)
+
+        assert llm._resolve_history_budget() == 2048 - 512
+        assert "will not fit" in llm.get_logger().warning.call_args.args[0]
+
+    def test_without_history_nothing_is_resolved_or_said(self, llm, mock_model_client):
+        llm.config.chat_history = False
+
+        assert llm._resolve_history_budget() is None
+        llm.get_logger().warning.assert_not_called()
+
+    def test_the_local_model_reports_its_context(self, rclpy_init):
+        comp = LLM(
+            inputs=[Topic(name="in", msg_type="String")],
+            outputs=[Topic(name="out", msg_type="String")],
+            config=LLMConfig(enable_local_model=True, chat_history=True),
+            component_name="test_llm_local_ctx",
+        )
+        mock_component_internals(comp)
+        comp.local_model = MagicMock()
+        comp.local_model.context_length = 4096
+
+        assert comp._resolve_history_budget() == 4096 - comp.config.max_new_tokens
+
+    def test_the_resolved_budget_trims_the_requests(self, llm, mock_model_client):
+        llm.config.chat_history = True
+        type(mock_model_client).context_length = PropertyMock(return_value=200)
+        mock_model_client.inference.side_effect = lambda _: {"output": "test"}
+        llm.config.max_new_tokens = 10
+        llm._history_budget = llm._resolve_history_budget()
+
+        for text in ["one " * 40, "two " * 40, "three " * 40, "four " * 40]:
+            llm._execution_step(topic=_ask(llm, text))
+
+        assert len(llm.history.turns) < 4
+        assert llm.history.turns[-1].utterance.startswith("four")
 
 
 class TestLLMExecutionStep:

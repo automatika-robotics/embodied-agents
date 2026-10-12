@@ -178,6 +178,12 @@ def test_images_kept_on_an_earlier_message_become_content_parts(server):
     assert history[0]["images"][0] is earlier
 
 
+def test_the_context_length_is_not_known(server):
+    """OpenAI-compatible servers do not report it"""
+    client, _, _ = server
+    assert client.context_length is None
+
+
 QUESTIONS = {
     "stop": {
         "type": "noul",

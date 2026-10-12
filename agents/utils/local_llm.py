@@ -85,6 +85,11 @@ class LocalLLM:
         # use thread locks for each call.
         self._lock = threading.Lock()
 
+    @property
+    def context_length(self) -> int:
+        """The context length the model is loaded with, in tokens"""
+        return self.llm.n_ctx()
+
     def __call__(
         self, inference_input: Dict, stream=False
     ) -> Union[Dict, Generator[str, None, None]]:

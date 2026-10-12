@@ -264,9 +264,6 @@ class MLLM(DepthLiftMixin, LLM):
         context = {}
         # set mllm query as trigger
         query = self._extract_query_and_context(kwargs, context)
-        if self._should_reset_chat(query):
-            self.history.reset()
-            return None
 
         # aggregate all inputs that are available. Depth and camera_info
         # only feed the 3D lift, not the model
@@ -738,6 +735,10 @@ class MLLM(DepthLiftMixin, LLM):
             if not trigger:
                 return
             self.get_logger().debug(f"Received trigger on topic {trigger.name}")
+            if self._should_reset_chat(self.trig_callbacks[trigger.name].get_output()):
+                self.history.reset()
+                self.get_logger().debug("Chat history reset by the reset phrase")
+                return
         else:
             time_stamp = self.get_ros_time().sec
             self.get_logger().debug(f"Sending at {time_stamp}")

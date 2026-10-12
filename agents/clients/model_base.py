@@ -106,6 +106,16 @@ class ModelClient(ABC):
         return False
 
     @property
+    def context_length(self) -> Optional[int]:
+        """
+        The context length, in tokens, the model is served with.
+        Defaults to None. Override in subclasses that can report it.
+
+        :rtype: Optional[int]
+        """
+        return None
+
+    @property
     def supports_decisions(self) -> bool:
         """
         Check if the client serves a decision model, which answers typed questions
