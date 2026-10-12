@@ -1962,24 +1962,31 @@ class Cortex(ModelComponent, Monitor):
         return self._session
 
     def _remember_task(self, executed_results: List[Dict], outcome: str) -> None:
-        """Keep the task just finished for the tasks to come, as its record.
-        Without session history the task is forgotten"""
+        """Keep the task just finished for the tasks to come, as its record:
+        the calls that ran, their results and the outcome, in place of its
+        planning conversation. Without session history the task is forgotten"""
         if not self._session.turns:
             return
         if not self.config.session_history:
             self._session.turns.pop()
             return
-        lines = []
-        for number, result in enumerate(executed_results, start=1):
-            function = result.get("function") or {}
-            name = function.get("name") or result.get("action")
-            arguments = self._parse_tool_args(function.get("arguments", {}))
-            args = ", ".join(f"{k}={v!r}" for k, v in arguments.items())
-            lines.append(f"{number}. {name}({args}): {result['result']}")
-        record = "\n".join(lines) if lines else "No actions were run."
-        self._session.current.replies = [
-            {"role": "assistant", "content": f"{record}\nOutcome: {outcome}"}
-        ]
+        self._session.current.replies = []
+        if executed_results:
+            self._session.add_reply(
+                "",
+                tool_calls=[
+                    {
+                        "id": f"done_{i}",
+                        "type": "function",
+                        "function": result.get("function")
+                        or {"name": result["action"], "arguments": {}},
+                    }
+                    for i, result in enumerate(executed_results)
+                ],
+            )
+            for i, result in enumerate(executed_results):
+                self._session.add_tool_result(f"done_{i}", result["result"])
+        self._session.add_reply(outcome)
 
     def _process_planning_calls(
         self,
@@ -2042,9 +2049,7 @@ class Cortex(ModelComponent, Monitor):
         :returns: Tuple of (plan, planning). plan is a list of tool_call
             dicts or None if no actions needed. planning is the conversation,
             preserved so execution results can be fed back for continued
-            planning. Once a plan is committed, the results of the planning
-            tools in it are cleared down to a placeholder: the plan is what
-            they were for.
+            planning.
         """
         # The planner gets both tool sets with duplicates removed
         all_tools = list(
@@ -2138,7 +2143,6 @@ class Cortex(ModelComponent, Monitor):
                     f"[Planning] producing plan with {len(execution_calls)} "
                     f"step(s) after {step + 1} planning iteration(s)"
                 )
-                planning.clear_tool_results(keep=0)
                 return self._finalize_plan(execution_calls), planning
 
         self.get_logger().warning(

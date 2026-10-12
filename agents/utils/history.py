@@ -110,8 +110,6 @@ class ChatHistory:
     # The share of the budget the history is trimmed back to, and the share
     # of the turn cap the history may grow past it by before it is trimmed
     TRIM_TO = 0.75
-    # Characters of a cleared tool result kept in its placeholder
-    EXCERPT_LENGTH = 120
     # How the summary of dropped turns is given to the model, as a user and
     # assistant pair after the system prompt
     SUMMARY_LEAD = "Summary of the conversation so far:\n"
@@ -121,13 +119,11 @@ class ChatHistory:
         self.system_prompt = system_prompt
         self.turns: List[Turn] = []
         self.summary: Optional[str] = None
-        self._cleared_results: set = set()
 
     def reset(self) -> None:
         """Forget the conversation, keeping the system prompt"""
         self.turns = []
         self.summary = None
-        self._cleared_results = set()
 
     @property
     def current(self) -> Turn:
@@ -303,48 +299,6 @@ class ChatHistory:
             messages.append(user)
             messages.extend(turn.replies)
         return messages
-
-    def clear_tool_results(self, keep: int) -> int:
-        """Replace the content of every tool result but the last ``keep`` with
-        a placeholder that names the tool and quotes how the result began. A
-        result no longer than its placeholder would be is left as it is.
-
-        :param keep: Most recent tool results left as they are
-        :type keep: int
-        :rtype: int
-        """
-        names = {
-            call["id"]: call["function"]["name"]
-            for turn in self.turns
-            for reply in turn.replies
-            for call in reply.get("tool_calls", ())
-            if "id" in call
-        }
-        results = [
-            reply
-            for turn in self.turns
-            for reply in turn.replies
-            if reply["role"] == "tool"
-        ]
-        to_clear = results[: len(results) - keep] if keep > 0 else results
-        cleared = 0
-        for reply in to_clear:
-            call_id = reply["tool_call_id"]
-            if call_id in self._cleared_results:
-                continue
-            content = str(reply["content"])
-            name = names.get(call_id, "a tool")
-            excerpt = content[: self.EXCERPT_LENGTH]
-            placeholder = (
-                f"[result of {name} cleared: {len(content)} characters, "
-                f'began "{excerpt}"]'
-            )
-            if len(placeholder) >= len(content):
-                continue
-            reply["content"] = placeholder
-            self._cleared_results.add(call_id)
-            cleared += 1
-        return cleared
 
 
 def matches_phrase(text: Optional[str], phrase: str) -> bool:

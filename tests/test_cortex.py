@@ -316,35 +316,6 @@ class TestCortexPlanning:
         assert "memory-body_status" in comp._planning_tools
         assert "memory-body_status" in comp._execution_tools
 
-    def test_the_planning_tool_results_are_cleared_once_a_plan_is_committed(
-        self, rclpy_init, mock_model_client
-    ):
-        mock_model_client.inference.return_value = {
-            "output": "",
-            "tool_calls": [{"function": {"name": "navigate", "arguments": {}}}],
-        }
-        comp = Cortex(
-            outputs=[Topic(name="out", msg_type="String")],
-            actions=[_make_mock_action(name="navigate", description="Go")],
-            model_client=mock_model_client,
-            config=CortexConfig(),
-            component_name="test_cortex_plan_cleared",
-        )
-        mock_component_internals(comp)
-        planning = comp._build_planning_messages("fetch a cup")
-        planning.add_reply(
-            "",
-            tool_calls=[{"id": "plan_0_0", "function": {"name": "inspect_component"}}],
-        )
-        planning.add_tool_result("plan_0_0", "Component 'nav' has inputs " + "x" * 500)
-
-        plan, planning = comp._plan_task("fetch a cup", planning)
-
-        assert plan is not None
-        assert planning.request()[3]["content"].startswith(
-            "[result of inspect_component cleared: 527 characters"
-        )
-
     def _planner(self, mock_model_client, name, session_history):
         mock_model_client.inference.return_value = {
             "output": "",
@@ -381,9 +352,26 @@ class TestCortexPlanning:
             {"role": "user", "content": "light up"},
             {
                 "role": "assistant",
-                "content": "1. set_led(color='green'): LED set to green\n"
-                "2. say(): SKIPPED\nOutcome: completed",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "done_0",
+                        "type": "function",
+                        "function": {
+                            "name": "set_led",
+                            "arguments": {"color": "green"},
+                        },
+                    },
+                    {
+                        "id": "done_1",
+                        "type": "function",
+                        "function": {"name": "say", "arguments": {}},
+                    },
+                ],
             },
+            {"role": "tool", "tool_call_id": "done_0", "content": "LED set to green"},
+            {"role": "tool", "tool_call_id": "done_1", "content": "SKIPPED"},
+            {"role": "assistant", "content": "completed"},
         ]
 
     def test_the_next_task_is_planned_after_the_records(
@@ -398,7 +386,7 @@ class TestCortexPlanning:
         sent = mock_model_client.inference.call_args.args[0]["query"]
         assert [m["role"] for m in sent] == ["system", "user", "assistant", "user"]
         assert sent[1]["content"] == "light up"
-        assert sent[2]["content"] == "No actions were run.\nOutcome: answered: it is on"
+        assert sent[2]["content"] == "answered: it is on"
         assert sent[3]["content"] == "now the opposite"
 
     def test_without_session_history_every_task_starts_fresh(

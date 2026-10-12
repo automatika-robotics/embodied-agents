@@ -313,53 +313,6 @@ class TestAsText:
         )
 
 
-class TestClearedToolResults:
-    def test_old_results_become_a_placeholder_naming_the_tool(self):
-        history = ChatHistory()
-        history.add_turn("inspect")
-        history.add_reply(
-            "", tool_calls=[{"id": "c1", "function": {"name": "inspect_component"}}]
-        )
-        history.add_tool_result("c1", "Component 'camera' has inputs " + "x" * 300)
-        history.add_reply("done")
-        history.add_turn("go")
-        history.add_reply("", tool_calls=[{"id": "c2", "function": {"name": "move"}}])
-        history.add_tool_result("c2", "moved")
-
-        assert history.clear_tool_results(keep=1) == 1
-
-        tool_messages = [m for m in history.request() if m["role"] == "tool"]
-        assert tool_messages[0]["content"].startswith(
-            "[result of inspect_component cleared: 330 characters, "
-            "began \"Component 'camera' has inputs "
-        )
-        assert tool_messages[1]["content"] == "moved"
-
-    def test_a_result_shorter_than_its_placeholder_is_left_alone(self):
-        history = ChatHistory()
-        history.add_turn("battery?")
-        history.add_reply(
-            "", tool_calls=[{"id": "c1", "function": {"name": "get_battery_level"}}]
-        )
-        history.add_tool_result("c1", "87")
-        history.add_reply("87 percent")
-
-        assert history.clear_tool_results(keep=0) == 0
-        assert history.request()[2]["content"] == "87"
-
-    def test_clearing_twice_leaves_the_placeholder_alone(self):
-        history = ChatHistory()
-        history.add_turn("go")
-        history.add_reply("", tool_calls=[{"id": "c1", "function": {"name": "move"}}])
-        history.add_tool_result("c1", "moved " * 100)
-        history.add_reply("ok")
-
-        assert history.clear_tool_results(keep=0) == 1
-        placeholder = history.request()[2]["content"]
-        assert history.clear_tool_results(keep=0) == 0
-        assert history.request()[2]["content"] == placeholder
-
-
 class TestEstimate:
     @pytest.mark.parametrize(
         "text, tokens",
