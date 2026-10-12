@@ -18,6 +18,7 @@ from ros_sugar.robot import (
 from std_srvs.srv import SetBool
 
 from agents.config import CortexConfig
+from agents.utils import ChatHistory
 from agents.ros import (
     Event,
     COMPONENT_ACTION_SERVER,
@@ -314,6 +315,35 @@ class TestCortexPlanning:
         # Still in both sets, so it is routed as either
         assert "memory-body_status" in comp._planning_tools
         assert "memory-body_status" in comp._execution_tools
+
+    def test_the_planning_tool_results_are_cleared_once_a_plan_is_committed(
+        self, rclpy_init, mock_model_client
+    ):
+        mock_model_client.inference.return_value = {
+            "output": "",
+            "tool_calls": [{"function": {"name": "navigate", "arguments": {}}}],
+        }
+        comp = Cortex(
+            outputs=[Topic(name="out", msg_type="String")],
+            actions=[_make_mock_action(name="navigate", description="Go")],
+            model_client=mock_model_client,
+            config=CortexConfig(),
+            component_name="test_cortex_plan_cleared",
+        )
+        mock_component_internals(comp)
+        planning = comp._build_planning_messages("fetch a cup")
+        planning.add_reply(
+            "",
+            tool_calls=[{"id": "plan_0_0", "function": {"name": "inspect_component"}}],
+        )
+        planning.add_tool_result("plan_0_0", "Component 'nav' has inputs " + "x" * 500)
+
+        plan, planning = comp._plan_task("fetch a cup", planning)
+
+        assert plan is not None
+        assert planning.messages[3]["content"].startswith(
+            "[result of inspect_component cleared: 527 characters"
+        )
 
     def test_plan_task_no_tool_calls_returns_none(self, rclpy_init, mock_model_client):
         mock_model_client.inference.return_value = {
@@ -617,9 +647,10 @@ class TestGatedSteps:
         assert results[1]["function"] == filled["function"]
 
         # the planner sees the calls that ran, not the planned ones
-        messages = []
-        comp._append_execution_results_to_planning(messages, plan, results)
-        calls = [c["function"] for c in messages[0]["tool_calls"]]
+        planning = ChatHistory("plan")
+        planning.add_turn("task")
+        comp._append_execution_results_to_planning(planning, plan, results)
+        calls = [c["function"] for c in planning.messages[2]["tool_calls"]]
         assert calls[1] == filled["function"] and calls[2] == replaced["function"]
 
     def test_the_planner_is_told_what_is_still_running(
@@ -639,12 +670,13 @@ class TestGatedSteps:
                 "failed": True,
             },
         ]
-        messages = []
+        planning = ChatHistory("plan")
+        planning.add_turn("task")
 
-        comp._append_execution_results_to_planning(messages, plan, results)
+        comp._append_execution_results_to_planning(planning, plan, results)
 
-        assert messages[-1]["content"].startswith("Error: no grasp")
-        assert "send_goal_to_nav: running" in messages[-1]["content"]
+        assert planning.messages[-1]["content"].startswith("Error: no grasp")
+        assert "send_goal_to_nav: running" in planning.messages[-1]["content"]
 
     def test_the_final_message_says_what_was_skipped(
         self, rclpy_init, mock_model_client

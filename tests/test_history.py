@@ -10,7 +10,10 @@ turn that got no reply is not a turn.
 import numpy as np
 import pytest
 
-from agents.utils import ChatHistory, estimate_tokens
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+from agents.utils import ChatHistory, estimate_tokens, resolve_history_budget
 
 
 def image():
@@ -150,6 +153,90 @@ class TestTrimming:
         assert len(history.turns) < 4
 
 
+class TestSummaries:
+    def test_dropped_turns_become_a_summary_after_the_system_prompt(self):
+        history = conversation(4, system="sys")
+        history.add_turn("question 4")
+        seen = []
+
+        def summarizer(text):
+            seen.append(text)
+            return "  They talked about questions 0 and 1.  "
+
+        messages = history.request(max_turns=2, summarizer=summarizer)
+
+        assert messages[:3] == [
+            {"role": "system", "content": "sys"},
+            {
+                "role": "user",
+                "content": "Summary of the conversation so far:\nThey talked about "
+                "questions 0 and 1.",
+            },
+            {"role": "assistant", "content": "Understood."},
+        ]
+        assert [m["content"] for m in messages[3:] if m["role"] == "user"] == [
+            "question 3",
+            "question 4",
+        ]
+        assert seen == [
+            "Conversation:\nuser: question 0\nassistant: answer 0\n"
+            "user: question 1\nassistant: answer 1\n"
+            "user: question 2\nassistant: answer 2"
+        ]
+
+    def test_the_summary_so_far_is_folded_into_the_next(self):
+        history = conversation(3)
+        history.add_turn("question 3")
+        history.request(max_turns=1, summarizer=lambda text: "first summary")
+        for index in range(3, 6):
+            history.add_reply(f"answer {index}")
+            history.add_turn(f"question {index + 1}")
+        seen = []
+
+        history.request(max_turns=1, summarizer=lambda t: seen.append(t) or "second")
+
+        assert seen[0].startswith("Summary so far:\nfirst summary\n\nConversation:")
+        assert history.summary == "second"
+
+    def test_tool_calls_are_named_in_the_text_to_summarize(self):
+        history = ChatHistory()
+        history.add_turn("go")
+        history.add_reply("", tool_calls=[{"id": "c1", "function": {"name": "move"}}])
+        history.add_tool_result("c1", "moved")
+        history.add_reply("done")
+        history.add_turn("next")
+        seen = []
+
+        history.request(max_turns=1, summarizer=lambda t: seen.append(t) or "s")
+
+        assert "assistant: [called move]\ntool: moved\nassistant: done" in seen[0]
+
+    def test_a_summarizer_that_gives_nothing_lets_the_turns_go(self):
+        history = conversation(4)
+        history.add_turn("question 4")
+
+        messages = history.request(max_turns=2, summarizer=lambda text: None)
+
+        assert history.summary is None
+        assert messages[0] == {"role": "user", "content": "question 3"}
+
+    def test_without_a_summarizer_nothing_is_summarized(self):
+        history = conversation(4)
+        history.add_turn("question 4")
+        history.request(max_turns=2)
+        assert history.summary is None
+
+    def test_the_summary_counts_against_the_budget_and_reset_clears_it(self):
+        history = conversation(4)
+        history.add_turn("question 4")
+        before = history.tokens()
+        history.request(max_turns=2, summarizer=lambda text: "x" * 400)
+
+        assert history.tokens() > before - 3 * estimate_tokens("question 0answer 0")
+        history.reset()
+        assert history.summary is None and history.messages == []
+
+
 class TestImages:
     def test_only_the_recent_turns_keep_their_images(self):
         history = ChatHistory()
@@ -278,3 +365,60 @@ class TestEstimate:
             {"type": "image_url", "image_url": {"url": "data:..."}},
         ]
         assert estimate_tokens([{"role": "user", "content": parts}], 50) == 4 + 11 + 50
+
+
+def config(**fields):
+    defaults = {
+        "chat_history": True,
+        "history_budget": None,
+        "history_size": 10,
+        "max_new_tokens": 512,
+    }
+    return SimpleNamespace(**{**defaults, **fields})
+
+
+def model(context_length):
+    return SimpleNamespace(context_length=context_length)
+
+
+class TestResolveHistoryBudget:
+    def test_the_config_budget_wins(self):
+        assert (
+            resolve_history_budget(
+                config(history_budget=3000), model(8192), None, [], MagicMock()
+            )
+            == 3000
+        )
+
+    def test_derived_from_the_model_context_minus_the_generation(self):
+        logger = MagicMock()
+        assert (
+            resolve_history_budget(config(), model(8192), None, [], logger)
+            == 8192 - 512
+        )
+        assert "8192" in logger.info.call_args.args[0]
+
+    def test_no_budget_and_a_warning_when_the_model_does_not_report_one(self):
+        logger = MagicMock()
+        assert resolve_history_budget(config(), model(None), None, [], logger) is None
+        warning = logger.warning.call_args.args[0]
+        assert "history_size (10 turns)" in warning and "history_budget" in warning
+
+    def test_no_model_is_no_budget(self):
+        assert resolve_history_budget(config(), None, None, [], MagicMock()) is None
+
+    def test_a_context_too_small_for_the_prompt_and_tools_is_warned_about(self):
+        logger = MagicMock()
+        budget = resolve_history_budget(config(), model(2048), "x" * 8000, [], logger)
+        assert budget == 2048 - 512
+        assert "will not fit" in logger.warning.call_args.args[0]
+
+    def test_without_history_nothing_is_resolved_or_said(self):
+        logger = MagicMock()
+        assert (
+            resolve_history_budget(
+                config(chat_history=False), model(None), None, [], logger
+            )
+            is None
+        )
+        logger.warning.assert_not_called()

@@ -77,6 +77,8 @@ class LLMConfig(ModelComponentConfig):
     :param history_images: Most recent turns whose images are sent. Older turns note their omitted images. Default is 1.
     :type history_images: int
     :param image_tokens: Tokens counted per image against ``history_budget``. Default is 1000.
+    :param history_compaction: What becomes of the turns dropped from the chat history. "drop" forgets them. "summarize" folds them into a summary kept at the start of the conversation, with one call on the model each time. Default is "drop".
+    :type history_compaction: Literal["drop", "summarize"]
     :type image_tokens: int
     :param temperature: Temperature used for sampling tokens during generation.
         Default is 0.8 and must be greater than 0.0.
@@ -132,6 +134,9 @@ class LLMConfig(ModelComponentConfig):
     )
     history_images: int = field(default=1, validator=base_validators.gt(0))
     image_tokens: int = field(default=1000, validator=base_validators.gt(0))
+    history_compaction: Literal["drop", "summarize"] = field(
+        default="drop", validator=base_validators.in_(["drop", "summarize"])
+    )
     temperature: float = field(default=0.8, validator=base_validators.gt(0.0))
     max_new_tokens: int = field(default=512, validator=base_validators.gt(0))
     stream: bool = field(default=False)
@@ -347,6 +352,8 @@ class MLLMConfig(LLMConfig):
     :param history_images: Most recent turns whose images are sent. Older turns note their omitted images. Default is 1.
     :type history_images: int
     :param image_tokens: Tokens counted per image against ``history_budget``. Default is 1000.
+    :param history_compaction: What becomes of the turns dropped from the chat history. "drop" forgets them. "summarize" folds them into a summary kept at the start of the conversation, with one call on the model each time. Default is "drop".
+    :type history_compaction: Literal["drop", "summarize"]
     :type image_tokens: int
     :param temperature: Temperature used for sampling tokens during generation.
         Default is 0.8 and must be greater than 0.0.

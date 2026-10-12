@@ -40,8 +40,11 @@ from ..ros import (
     ros_msg_to_str,
 )
 from ..utils import (
+    ChatHistory,
     decode_json_values,
+    estimate_tokens,
     parse_tool_arguments,
+    resolve_history_budget,
     strip_think_tokens,
     validate_func_args,
 )
@@ -258,6 +261,9 @@ class Cortex(ModelComponent, Monitor):
 
         # Planning output buffer for failed plans
         self._planning_output: Optional[str] = None
+        # The token budget of a planning request, resolved from the model at
+        # activation once the prompt and the tools are complete
+        self._history_budget = self.config.history_budget
         # Started routines which are followed till the end
         self._active_routines: Set[str] = set()
 
@@ -1856,6 +1862,15 @@ class Cortex(ModelComponent, Monitor):
         self.get_logger().debug(f"Cortex planning tools: {planning_names}")
         self.get_logger().debug(f"Cortex execution tools: {execution_names}")
 
+        # resolve history budget
+        self._history_budget = resolve_history_budget(
+            self.config,
+            self.model_client or self.local_model,
+            self._effective_planning_prompt,
+            self._planning_tool_descriptions + self._execution_tool_descriptions,
+            self.get_logger(),
+        )
+
     def custom_on_deactivate(self):
         if self.db_client:
             self.db_client.check_connection()
@@ -1934,10 +1949,9 @@ class Cortex(ModelComponent, Monitor):
     # Phase 1: Planning (multi-step loop)
     # =========================================================================
 
-    def _build_planning_messages(self, task: str) -> List[Dict]:
-        """Build the initial message list for the planning loop.
-
-        Injects optional RAG context from the vector DB.
+    def _build_planning_messages(self, task: str) -> ChatHistory:
+        """Start the planning conversation of a task: the planning prompt and
+        the task, with optional RAG context from the vector DB.
         """
         user_content = task
         if self.config.enable_rag and self.db_client:
@@ -1945,23 +1959,22 @@ class Cortex(ModelComponent, Monitor):
             if rag_context:
                 user_content = f"Context:\n{rag_context}\n\nTask: {task}"
 
-        return [
-            {"role": "system", "content": self._effective_planning_prompt},
-            {"role": "user", "content": user_content},
-        ]
+        planning = ChatHistory(self._effective_planning_prompt)
+        planning.add_turn(task, user_content)
+        return planning
 
     def _process_planning_calls(
         self,
         planning_calls: List[Dict],
-        messages: List[Dict],
+        planning: ChatHistory,
         output: str,
         step: int,
     ) -> None:
-        """Execute planning tool calls and append results to the message history."""
-        assistant_msg = {
-            "role": "assistant",
-            "content": output,
-            "tool_calls": [
+        """Execute planning tool calls and add their results to the planning
+        conversation."""
+        planning.add_reply(
+            output,
+            tool_calls=[
                 {
                     "id": f"plan_{step}_{i}",
                     "type": "function",
@@ -1969,8 +1982,7 @@ class Cortex(ModelComponent, Monitor):
                 }
                 for i, tc in enumerate(planning_calls)
             ],
-        }
-        messages.append(assistant_msg)
+        )
 
         for i, tc in enumerate(planning_calls):
             fn_name = tc["function"]["name"]
@@ -1979,11 +1991,7 @@ class Cortex(ModelComponent, Monitor):
                 f"[Planning step {step + 1}] calling {fn_name}({fn_args})"
             )
             tool_result = self._execute_planning_tool(fn_name, fn_args)
-            messages.append({
-                "role": "tool",
-                "tool_call_id": f"plan_{step}_{i}",
-                "content": tool_result,
-            })
+            planning.add_tool_result(f"plan_{step}_{i}", tool_result)
 
     def _finalize_plan(self, execution_calls: List[Dict]) -> List[Dict]:
         """Truncate the execution plan to max_execution_steps if needed."""
@@ -1998,8 +2006,8 @@ class Cortex(ModelComponent, Monitor):
         return plan
 
     def _plan_task(
-        self, task: str, messages: Optional[List[Dict]] = None
-    ) -> Tuple[Optional[List[Dict]], List[Dict]]:
+        self, task: str, planning: Optional[ChatHistory] = None
+    ) -> Tuple[Optional[List[Dict]], ChatHistory]:
         """Multi-step planning loop that researches components before producing a plan.
 
         The LLM is given both planning tools and execution tools.
@@ -2010,13 +2018,15 @@ class Cortex(ModelComponent, Monitor):
         - Respond with text only — no actions needed, loop ends.
 
         :param task: The high-level task description
-        :param messages: Optional pre-existing planning messages to continue
-            from (e.g. after feeding back execution results). If None, a
-            fresh conversation is started.
-        :returns: Tuple of (plan, planning_messages). plan is a list of
-            tool_call dicts or None if no actions needed. planning_messages
-            is the conversation history, preserved so execution results can
-            be fed back for continued planning.
+        :param planning: Optional planning conversation to continue from
+            (e.g. after feeding back execution results). If None, a fresh
+            conversation is started.
+        :returns: Tuple of (plan, planning). plan is a list of tool_call
+            dicts or None if no actions needed. planning is the conversation,
+            preserved so execution results can be fed back for continued
+            planning. Once a plan is committed, the results of the planning
+            tools in it are cleared down to a placeholder: the plan is what
+            they were for.
         """
         # The planner gets both tool sets with duplicates removed
         all_tools = list(
@@ -2026,9 +2036,11 @@ class Cortex(ModelComponent, Monitor):
                 + self._execution_tool_descriptions
             }.values()
         )
-        if messages is None:
-            messages = self._build_planning_messages(task)
+        if planning is None:
+            planning = self._build_planning_messages(task)
         output = ""
+        extra_tokens = estimate_tokens(json.dumps(all_tools)) if all_tools else 0
+        budget = self._history_budget
 
         self.get_logger().debug(
             f"[Planning] starting task={task!r} with "
@@ -2039,9 +2051,16 @@ class Cortex(ModelComponent, Monitor):
 
         for step in range(self.config.max_planning_steps):
             inference_input = {
-                "query": messages,
+                "query": planning.request(budget=budget, extra_tokens=extra_tokens),
                 **self.config._get_inference_params(),
             }
+            # a task is one turn, nothing in it can be dropped to fit
+            if budget and planning.tokens(extra_tokens=extra_tokens) > budget:
+                self.get_logger().warning(
+                    f"The planning conversation takes about "
+                    f"{planning.tokens(extra_tokens=extra_tokens)} tokens, over "
+                    f"the budget of {budget}. The model may not see all of it."
+                )
             if all_tools:
                 inference_input["tools"] = all_tools
 
@@ -2054,7 +2073,7 @@ class Cortex(ModelComponent, Monitor):
                 self.get_logger().error(
                     f"Inference failed during planning step {step + 1}."
                 )
-                return None, messages
+                return None, planning
 
             output = result.get("output") or ""
             if self.config.strip_think_tokens:
@@ -2067,7 +2086,7 @@ class Cortex(ModelComponent, Monitor):
                     "ending loop"
                 )
                 self._planning_output = output
-                return None, messages
+                return None, planning
 
             # Separate planning tool calls from execution tool calls
             planning_calls = [
@@ -2090,33 +2109,34 @@ class Cortex(ModelComponent, Monitor):
             )
 
             if planning_calls:
-                self._process_planning_calls(planning_calls, messages, output, step)
+                self._process_planning_calls(planning_calls, planning, output, step)
 
             if execution_calls:
                 self.get_logger().debug(
                     f"[Planning] producing plan with {len(execution_calls)} "
                     f"step(s) after {step + 1} planning iteration(s)"
                 )
-                return self._finalize_plan(execution_calls), messages
+                planning.clear_tool_results(keep=0)
+                return self._finalize_plan(execution_calls), planning
 
         self.get_logger().warning(
             f"Planning reached max steps ({self.config.max_planning_steps}) "
             "without producing an execution plan."
         )
         self._planning_output = output
-        return None, messages
+        return None, planning
 
     def _append_execution_results_to_planning(
         self,
-        messages: List[Dict],
+        planning: ChatHistory,
         plan: List[Dict],
         executed_results: List[Dict],
     ) -> None:
-        """Append executed plan steps and their results to the planning
+        """Add the executed plan steps and their results to the planning
         conversation so the LLM can continue planning with context.
 
-        Each executed step is added as an assistant tool_call followed by
-        a tool response message with the result.
+        The steps are the tool calls of one assistant message, each followed
+        by a tool result message.
         """
         tool_calls_msg = []
         for i, step in enumerate(plan):
@@ -2130,23 +2150,16 @@ class Cortex(ModelComponent, Monitor):
                 "function": ran.get("function", step["function"]),
             })
 
-        messages.append({
-            "role": "assistant",
-            "content": "",
-            "tool_calls": tool_calls_msg,
-        })
+        planning.add_reply("", tool_calls=tool_calls_msg)
 
-        for i, result in enumerate(executed_results):
-            messages.append({
-                "role": "tool",
-                "tool_call_id": f"exec_{i}",
-                "content": result["result"],
-            })
-
-        # Actions servers/Routines the plan started and is still running
+        # Actions servers/Routines the plan started and is still running, told
+        # with the last result
         active_status = self._monitor_active_clients()
-        if active_status and executed_results:
-            messages[-1]["content"] += f"\n\n{active_status}"
+        for i, result in enumerate(executed_results):
+            content = result["result"]
+            if active_status and i == len(executed_results) - 1:
+                content += f"\n\n{active_status}"
+            planning.add_tool_result(f"exec_{i}", content)
 
     def _execute_planning_tool(self, tool_name: str, args: Dict) -> str:
         """Execute a planning-phase tool.
@@ -3001,12 +3014,12 @@ class Cortex(ModelComponent, Monitor):
 
         all_executed_results: List[Dict] = []
         total_steps = 0
-        planning_messages = None
+        planning = None
         voluntarily_stopped = False
 
         for _ in range(self.config.max_execution_steps):
             # Plan (or continue planning with prior results)
-            plan, planning_messages = self._plan_task(task, planning_messages)
+            plan, planning = self._plan_task(task, planning)
 
             if plan is None:
                 # No more actions needed
@@ -3069,9 +3082,7 @@ class Cortex(ModelComponent, Monitor):
 
             # Feed execution results back into the planning conversation
             # so the model can continue with the next steps
-            self._append_execution_results_to_planning(
-                planning_messages, plan, executed_results
-            )
+            self._append_execution_results_to_planning(planning, plan, executed_results)
 
         # Loop exited voluntarily (model stopped) or exhausted
         self._finalize_goal(

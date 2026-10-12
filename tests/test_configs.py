@@ -33,6 +33,14 @@ class TestLLMConfig:
         c = LLMConfig(history_size=1)
         assert c.history_size == 1
 
+    def test_history_compaction_is_drop_or_summarize(self):
+        with pytest.raises(ValueError):
+            LLMConfig(history_compaction="forget")
+        assert (
+            LLMConfig(history_compaction="summarize").history_compaction == "summarize"
+        )
+        assert LLMConfig().history_compaction == "drop"
+
     def test_history_budget_and_images_are_positive(self):
         with pytest.raises(ValueError):
             LLMConfig(history_budget=0)

@@ -6,7 +6,7 @@ replies, and their images only for the most recent few.
 """
 
 import json
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Union
 
 import numpy as np
 from attrs import define, field
@@ -112,15 +112,21 @@ class ChatHistory:
     TRIM_TO = 0.75
     # Characters of a cleared tool result kept in its placeholder
     EXCERPT_LENGTH = 120
+    # How the summary of dropped turns is given to the model, as a user and
+    # assistant pair after the system prompt
+    SUMMARY_LEAD = "Summary of the conversation so far:\n"
+    SUMMARY_ACK = "Understood."
 
     def __init__(self, system_prompt: Optional[str] = None):
         self.system_prompt = system_prompt
         self.turns: List[Turn] = []
+        self.summary: Optional[str] = None
         self._cleared_results: set = set()
 
     def reset(self) -> None:
         """Forget the conversation, keeping the system prompt"""
         self.turns = []
+        self.summary = None
         self._cleared_results = set()
 
     @property
@@ -194,9 +200,11 @@ class ChatHistory:
         image_turns: int = 1,
         image_tokens: int = 0,
         extra_tokens: int = 0,
+        summarizer: Optional[Callable[[str], Optional[str]]] = None,
     ) -> List[Dict[str, Any]]:
         """The messages of the next call, after trimming the history to the
-        cap and the budget.
+        cap and the budget. With a summarizer, the dropped turns are folded
+        into a summary instead of being forgotten.
 
         The current turn's images are not put on its message as the component
         sends them with the request. Images of the older turns within ``image_turns``
@@ -210,10 +218,13 @@ class ChatHistory:
         :param image_tokens: Tokens counted for each image
         :param extra_tokens: Tokens of the request outside the messages, such
             as the tool descriptions
+        :param summarizer: Given the dropped turns as text, with the summary so
+            far, returns the new summary, or None to let the turns go
         :return: The messages
         """
+        dropped: List[Turn] = []
         if max_turns is not None and len(self.turns) > max_turns / self.TRIM_TO:
-            self.turns = self.turns[-max_turns:]
+            dropped, self.turns = self.turns[:-max_turns], self.turns[-max_turns:]
         if (
             budget is not None
             and self.tokens(image_turns, image_tokens, extra_tokens) > budget
@@ -222,7 +233,10 @@ class ChatHistory:
             while len(self.turns) > 1 and (
                 self.tokens(image_turns, image_tokens, extra_tokens) > target
             ):
-                self.turns.pop(0)
+                dropped.append(self.turns.pop(0))
+        if dropped and summarizer is not None:
+            if summary := summarizer(self._summarized_conversation_text(dropped)):
+                self.summary = summary.strip()
         # drop image arrays of turns older than image turns
         for turn in self.turns[: max(0, len(self.turns) - image_turns)]:
             turn.release_images()
@@ -244,11 +258,33 @@ class ChatHistory:
         """The conversation as kept, text only, for logs and tests"""
         return self._messages(image_turns=1, with_images=False)
 
+    def _summarized_conversation_text(self, turns: List[Turn]) -> str:
+        """The turns as plain text for the summarizer, after the summary so far"""
+        lines = []
+        if self.summary:
+            lines += ["Summary so far:", self.summary, ""]
+        lines.append("Conversation:")
+        for turn in turns:
+            lines.append(f"user: {turn.utterance}")
+            for reply in turn.replies:
+                text = str(reply.get("content") or "")
+                if calls := reply.get("tool_calls"):
+                    names = ", ".join(c["function"]["name"] for c in calls)
+                    text = f"{text} [called {names}]".strip()
+                lines.append(f"{reply['role']}: {text}")
+        return "\n".join(lines)
+
     def _messages(self, image_turns: int, with_images: bool) -> List[Dict[str, Any]]:
         """Flatten the turns into chat messages"""
         messages: List[Dict[str, Any]] = []
         if self.system_prompt:
             messages.append({"role": "system", "content": self.system_prompt})
+        if self.summary:
+            messages.append({
+                "role": "user",
+                "content": self.SUMMARY_LEAD + self.summary,
+            })
+            messages.append({"role": "assistant", "content": self.SUMMARY_ACK})
         last = len(self.turns) - 1
         for index, turn in enumerate(self.turns):
             if index == last:
@@ -304,3 +340,48 @@ class ChatHistory:
             self._cleared_results.add(call_id)
             cleared += 1
         return cleared
+
+
+def resolve_history_budget(
+    config, model, system_prompt: Optional[str], tools: Sequence[Dict], logger
+) -> Optional[int]:
+    """The token budget of a component's requests: the config's when set, else
+    the model's context length minus the tokens it may generate, else None,
+    the turn count alone then limiting the history. Says what it decided on
+    the logger when chat history is on.
+
+    :param config: The component config, with chat_history, history_budget,
+        history_size and max_new_tokens
+    :param model: The model client or the local model, with a context_length
+    :param system_prompt: The system prompt the requests carry
+    :param tools: The tool descriptions the requests carry
+    :param logger: The component's logger
+    :rtype: Optional[int]
+    """
+    if not config.chat_history or config.history_budget:
+        return config.history_budget
+    context = getattr(model, "context_length", None) if model else None
+    if context is None:
+        logger.warning(
+            "The model does not report a context length and history_budget is "
+            f"not set: the chat history is limited by history_size "
+            f"({config.history_size} turns) alone. Set history_budget to protect "
+            "the model's context window."
+        )
+        return None
+    budget = context - config.max_new_tokens
+    fixed = estimate_tokens(system_prompt or "") + (
+        estimate_tokens(json.dumps(list(tools))) if tools else 0
+    )
+    if budget <= fixed:
+        logger.warning(
+            f"The model's context of {context} tokens leaves {budget} for the "
+            f"request after max_new_tokens, and the system prompt and tool "
+            f"descriptions take about {fixed}. The chat history will not fit."
+        )
+    else:
+        logger.info(
+            f"Chat history budget: {budget} tokens, the model's context of "
+            f"{context} minus max_new_tokens."
+        )
+    return budget

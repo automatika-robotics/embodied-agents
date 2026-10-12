@@ -6,7 +6,7 @@ from functools import partial
 from ..callbacks import TextCallback
 from ..clients.db_base import DBClient
 from ..clients.model_base import ModelClient
-from ..clients import OllamaClient, GenericHTTPClient
+from ..clients import OllamaClient, GenericHTTPClient, RoboMLWSClient
 from ..config import LLMConfig
 from ..ros import (
     FixedInput,
@@ -25,6 +25,7 @@ from ..utils import (
     ChatHistory,
     decode_json_values,
     estimate_tokens,
+    resolve_history_budget,
     get_prompt_template,
     validate_func_args,
     strip_think_tokens,
@@ -154,7 +155,13 @@ class LLM(ModelComponent):
         super().custom_on_configure()
 
         # resolve token budget
-        self._resolve_history_budget()
+        self._history_budget = resolve_history_budget(
+            self.config,
+            self.model_client or self.local_model,
+            self.config._system_prompt,
+            self.config._tool_descriptions,
+            self.get_logger(),
+        )
 
         # add component prompt if set after init
         self.component_prompt = (
@@ -344,41 +351,48 @@ class LLM(ModelComponent):
         self.history.add_turn(utterance, content, images, image_sources)
         return self._request()
 
-    def _resolve_history_budget(self) -> Optional[int]:
-        """Set the token budget of a request for the model in use: the
-        config's when set, else the model's context length minus the tokens it
-        may generate, else none, the turn count alone then limiting the history"""
-        model = self.model_client or self.local_model
-        self._history_budget = budget = self.config.history_budget
-        if not self.config.chat_history or budget:
-            return budget
-        context = getattr(model, "context_length", None) if model else None
-        if context is None:
+    # What the model is asked when turns are summarized out of the history
+    _SUMMARY_PROMPT = (
+        "Summarize the conversation below for your own later reference: what "
+        "the user asked, what was answered and done, and the names, numbers, "
+        "places and decisions worth remembering. Fold in the summary so far if "
+        "there is one. Be brief. Reply with the summary only."
+    )
+
+    def _summarize(self, conversation: str) -> Optional[str]:
+        """One call on the model folding the turns dropped from the history
+        into a summary, or None when it gives nothing, which lets the turns go"""
+        if isinstance(self.model_client, RoboMLWSClient):
             self.get_logger().warning(
-                "The model does not report a context length and history_budget is "
-                f"not set: the chat history is limited by history_size "
-                f"({self.config.history_size} turns) alone. Set history_budget to "
-                "protect the model's context window."
+                "history_compaction='summarize' is not available over a websocket "
+                "client, the dropped turns are forgotten"
             )
             return None
-        self._history_budget = budget = context - self.config.max_new_tokens
-        fixed = estimate_tokens(self.config._system_prompt or "") + (
-            estimate_tokens(json.dumps(self.config._tool_descriptions))
-            if self.config._tool_descriptions
-            else 0
-        )
-        if budget <= fixed:
+        request = {
+            "query": [
+                {"role": "system", "content": self._SUMMARY_PROMPT},
+                {"role": "user", "content": conversation},
+            ],
+            "temperature": self.config.temperature,
+            "max_new_tokens": self.config.max_new_tokens,
+            "stream": False,
+        }
+        try:
+            result = (
+                self.model_client.inference(request)
+                if self.model_client
+                else self.local_model(request)
+            )
+        except Exception as e:
+            self.get_logger().warning(f"Summarizing the chat history failed: {e}")
+            return None
+        if not result or not result.get("output"):
             self.get_logger().warning(
-                f"The model's context of {context} tokens leaves {budget} for the "
-                f"request after max_new_tokens, and the system prompt and tool "
-                f"descriptions take about {fixed}. The chat history will not fit."
+                "Summarizing the chat history gave nothing, the dropped turns are "
+                "forgotten"
             )
-        else:
-            self.get_logger().info(
-                f"Chat history budget: {budget} tokens, the model's context of "
-                f"{context} minus max_new_tokens."
-            )
-        return budget
+            return None
+        return self._strip_think_tokens(result["output"])
 
     def _request(self) -> List[Dict]:
         """The messages of a call on the conversation, trimmed to the history
@@ -394,6 +408,11 @@ class LLM(ModelComponent):
             image_turns=self.config.history_images,
             image_tokens=self.config.image_tokens,
             extra_tokens=extra,
+            summarizer=(
+                self._summarize
+                if self.config.history_compaction == "summarize"
+                else None
+            ),
         )
         budget = self._history_budget
         if budget and len(self.history.turns) == 1:
