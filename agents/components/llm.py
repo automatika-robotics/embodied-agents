@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Any, Optional, Union, Callable, List, Dict, MutableMapping
+from typing import Any, Optional, Union, Callable, List, Dict, MutableMapping, Sequence
 from functools import partial
 
 from ..callbacks import TextCallback
@@ -22,7 +22,9 @@ from ..ros import (
     run_external_processor,
 )
 from ..utils import (
+    ChatHistory,
     decode_json_values,
+    estimate_tokens,
     get_prompt_template,
     validate_func_args,
     strip_think_tokens,
@@ -33,7 +35,7 @@ from .component_base import ComponentRunType
 
 class LLM(ModelComponent):
     """
-    This component utilizes large language models (e.g LLama) that can be used to process text data.
+    This component utilizes large language models (e.g Qwen) that can be used to process text data.
 
     :param inputs: The input topics or fixed inputs for the LLM component.
         This should be a list of Topic objects or FixedInput instances.
@@ -124,12 +126,8 @@ class LLM(ModelComponent):
             else None
         )
 
-        # Initialize a messages buffer
-        self.messages: List[Dict] = (
-            [{"role": "system", "content": self.config._system_prompt}]
-            if self.config._system_prompt
-            else []
-        )
+        # The conversation, and the requests built from it
+        self.history = ChatHistory(self.config._system_prompt)
 
         super().__init__(
             inputs,
@@ -153,12 +151,6 @@ class LLM(ModelComponent):
         # configure the rest
         super().custom_on_configure()
 
-        # add system prompt if set after init
-        self.messages: List[Dict] = (
-            [{"role": "system", "content": self.config._system_prompt}]
-            if self.config._system_prompt
-            else []
-        )
         # add component prompt if set after init
         self.component_prompt = (
             get_prompt_template(self.config._component_prompt)
@@ -201,6 +193,11 @@ class LLM(ModelComponent):
 
         # deactivate the rest
         super().custom_on_deactivate()
+
+    @property
+    def messages(self) -> List[Dict]:
+        """The conversation as kept, text only, for logs and tests"""
+        return self.history.messages
 
     @property
     def _component_methods(self) -> List[str]:
@@ -328,27 +325,48 @@ class LLM(ModelComponent):
             )
             return rag_docs
 
-    def _handle_chat_history(self, message: Dict) -> None:
-        """Internal handler for chat history"""
+    def _start_turn(
+        self,
+        utterance: str,
+        content: str,
+        images: Sequence = (),
+        image_sources: Sequence[str] = (),
+    ) -> List[Dict]:
+        """Add the turn to the history and build the messages of its call, if history
+        is enabled, else history is this turn alone"""
         if not self.config.chat_history:
-            # keep system prompt if set else empty the list
-            self.messages = self.messages[:1] if self.config._system_prompt else []
-        else:
-            # if the size of history exceeds specified size than take out first
-            # two messages (keeping system prompt if it exists)
-            messages_length = (
-                len(self.messages)
-                if not self.config._system_prompt
-                else len(self.messages) - 1
-            )
-            if messages_length / 2 > self.config.history_size + 1:
-                self.messages = (
-                    self.messages[2:]
-                    if not self.config._system_prompt
-                    else self.messages[:1] + self.messages[3:]
-                )
+            self.history.reset()
+        self.history.add_turn(utterance, content, images, image_sources)
+        return self._request()
 
-        self.messages.append(message)
+    def _request(self) -> List[Dict]:
+        """The messages of a call on the conversation, trimmed to the history
+        size and the budget of the config"""
+        extra = (
+            estimate_tokens(json.dumps(self.config._tool_descriptions))
+            if self.config._tool_descriptions
+            else 0
+        )
+        messages = self.history.request(
+            budget=self.config.history_budget,
+            max_turns=self.config.history_size,
+            image_turns=self.config.history_images,
+            image_tokens=self.config.image_tokens,
+            extra_tokens=extra,
+        )
+        budget = self.config.history_budget
+        if budget and len(self.history.turns) == 1:
+            size = self.history.tokens(
+                self.config.history_images, self.config.image_tokens, extra
+            )
+            if size > budget:
+                self.get_logger().warning(
+                    f"The request takes about {size} tokens with no earlier turn "
+                    f"left to drop, over the history_budget of {budget}. The "
+                    "system prompt, the tool descriptions and the images of this "
+                    "turn alone are over the budget."
+                )
+        return messages
 
     def _handle_tool_calls(self, result: MutableMapping) -> Optional[MutableMapping]:
         """Internal handler for tool calling"""
@@ -404,23 +422,26 @@ class LLM(ModelComponent):
             # check for response flags
             response_flags.append(self.config._tool_response_flags[tool_name])
 
-        # Add the calls to the assistant message and their results to the messages
-        self.messages[-1]["tool_calls"] = calls
-        self.messages.extend(tool_messages)
+        # Add the calls to the assistant message and their results to the history
+        self.history.add_tool_calls(calls)
+        for tool_message in tool_messages:
+            self.history.add_tool_result(
+                tool_message["tool_call_id"], tool_message["content"]
+            )
 
         # make call to model again if any tool requires response to be sent back
         if any(response_flags):
             self.get_logger().debug(f"Input from component: {self.messages}")
 
             input = {
-                "query": self.messages,
+                "query": self._request(),
                 **self.config._get_inference_params(),
             }
             result = self._call_inference(input)
             # the model's reply to the results, handled as its first reply
             if result:
                 result["output"] = self._strip_think_tokens(result["output"])
-                self.messages.append({"role": "assistant", "content": result["output"]})
+                self.history.add_reply(result["output"])
             return result
 
         else:
@@ -442,14 +463,6 @@ class LLM(ModelComponent):
         normalize = lambda text: text.strip().lower().rstrip(".!?,;:")  # noqa: E731
         return normalize(query) == normalize(self.config.history_reset_phrase)
 
-    def _reset_chat_history(self) -> None:
-        """Forget the conversation, keeping the system prompt if there is one"""
-        self.messages = (
-            [{"role": "system", "content": self.config._system_prompt}]
-            if self.config._system_prompt
-            else []
-        )
-
     def _create_input(self, *_, **kwargs) -> Optional[Dict[str, Any]]:
         """Create inference input for LLM models
         :param args:
@@ -462,7 +475,7 @@ class LLM(ModelComponent):
         # set llm query as trigger
         query = self._extract_query_and_context(kwargs, context)
         if self._should_reset_chat(query):
-            self._reset_chat_history()
+            self.history.reset()
             return None
 
         # aggregate all inputs that are available
@@ -480,6 +493,9 @@ class LLM(ModelComponent):
         if query is None:
             return None
 
+        # what the user said, as the history keeps it
+        utterance = query
+
         # get RAG results if enabled in config and if docs retrieved
         rag_result = self._handle_rag_query(query) if self.config.enable_rag else None
 
@@ -491,13 +507,12 @@ class LLM(ModelComponent):
         # attach rag results to templated query if available
         query = f"{rag_result}\n{query}" if rag_result else query
 
-        message = {"role": "user", "content": query}
-        self._handle_chat_history(message)
+        messages = self._start_turn(utterance, query)
 
         self.get_logger().debug(f"Input from component: {self.messages}")
 
         input = {
-            "query": self.messages,
+            "query": messages,
             **self.inference_params,
         }
 
@@ -568,10 +583,7 @@ class LLM(ModelComponent):
                 # (useful only with StreamingText)
                 self._publish({"output": ""}, stream=True)
 
-        self.messages.append({
-            "role": "assistant",
-            "content": "".join(self.result_complete),
-        })
+        self.history.add_reply("".join(self.result_complete))
 
     def _handle_websocket_streaming(self) -> Optional[List]:
         """Handle streaming output from a websocket client"""
@@ -644,7 +656,7 @@ class LLM(ModelComponent):
                 return
 
             result["output"] = self._strip_think_tokens(result["output"])
-            self.messages.append({"role": "assistant", "content": result["output"]})
+            self.history.add_reply(result["output"])
 
             # handle tool calls
             if self.config._tool_descriptions:
@@ -726,6 +738,7 @@ class LLM(ModelComponent):
         ```
         """
         self.config._system_prompt = prompt
+        self.history.system_prompt = prompt
 
     @validate_func_args
     def register_tool(

@@ -68,10 +68,16 @@ class LLMConfig(ModelComponentConfig):
     :type n_results: int
     :param chat_history: Whether to include chat history in the LLM's prompt.
     :type chat_history: bool
-    :param history_reset_phrase: Phrase to reset chat history. Defaults to 'chat reset'
+    :param history_reset_phrase: Phrase to reset chat history. Matched without case and trailing punctuation. Defaults to 'chat reset'
     :type history_reset_phrase: str
-    :param history_size: Number of user messages to keep in chat history. Defaults to 10
+    :param history_size: Turns kept in the chat history. Trimmed back to this once a third over it. Defaults to 10
     :type history_size: int
+    :param history_budget: Token budget for the whole request (system prompt, tools, history, images). When exceeded, the oldest turns are dropped until the request is at 3/4 of the budget. Estimated at 4 characters per token and ``image_tokens`` per image. Applies together with ``history_size``; the smaller limit wins. Default is None (no budget).
+    :type history_budget: Optional[int]
+    :param history_images: Most recent turns whose images are sent. Older turns note their omitted images. Default is 1.
+    :type history_images: int
+    :param image_tokens: Tokens counted per image against ``history_budget``. Default is 1000.
+    :type image_tokens: int
     :param temperature: Temperature used for sampling tokens during generation.
         Default is 0.8 and must be greater than 0.0.
     :type temperature: float
@@ -120,9 +126,12 @@ class LLMConfig(ModelComponentConfig):
     add_metadata: bool = field(default=False)
     chat_history: bool = field(default=False)
     history_reset_phrase: str = field(default="chat reset")
-    history_size: int = field(
-        default=10, validator=base_validators.gt(4)
-    )  # number of user messages
+    history_size: int = field(default=10, validator=base_validators.gt(0))  # turns
+    history_budget: Optional[int] = field(
+        default=None, validator=validators.optional(base_validators.gt(0))
+    )
+    history_images: int = field(default=1, validator=base_validators.gt(0))
+    image_tokens: int = field(default=1000, validator=base_validators.gt(0))
     temperature: float = field(default=0.8, validator=base_validators.gt(0.0))
     max_new_tokens: int = field(default=512, validator=base_validators.gt(0))
     stream: bool = field(default=False)
@@ -329,10 +338,16 @@ class MLLMConfig(LLMConfig):
     :type n_results: int
     :param chat_history: Whether to include chat history in the LLM's prompt.
     :type chat_history: bool
-    :param history_reset_phrase: Phrase to reset chat history. Defaults to 'chat reset'
+    :param history_reset_phrase: Phrase to reset chat history. Matched without case and trailing punctuation. Defaults to 'chat reset'
     :type history_reset_phrase: str
-    :param history_size: Number of user messages to keep in chat history. Defaults to 10
+    :param history_size: Turns kept in the chat history. Trimmed back to this once a third over it. Defaults to 10
     :type history_size: int
+    :param history_budget: Token budget for the whole request (system prompt, tools, history, images). When exceeded, the oldest turns are dropped until the request is at 3/4 of the budget. Estimated at 4 characters per token and ``image_tokens`` per image. Applies together with ``history_size``; the smaller limit wins. Default is None (no budget).
+    :type history_budget: Optional[int]
+    :param history_images: Most recent turns whose images are sent. Older turns note their omitted images. Default is 1.
+    :type history_images: int
+    :param image_tokens: Tokens counted per image against ``history_budget``. Default is 1000.
+    :type image_tokens: int
     :param temperature: Temperature used for sampling tokens during generation.
         Default is 0.8 and must be greater than 0.0.
     :type temperature: float

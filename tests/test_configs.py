@@ -27,11 +27,21 @@ class TestLLMConfig:
         with pytest.raises(ValueError):
             LLMConfig(max_new_tokens=0)
 
-    def test_history_size_gt_4(self):
+    def test_history_size_is_at_least_one_turn(self):
         with pytest.raises(ValueError):
-            LLMConfig(history_size=4)
-        c = LLMConfig(history_size=5)
-        assert c.history_size == 5
+            LLMConfig(history_size=0)
+        c = LLMConfig(history_size=1)
+        assert c.history_size == 1
+
+    def test_history_budget_and_images_are_positive(self):
+        with pytest.raises(ValueError):
+            LLMConfig(history_budget=0)
+        with pytest.raises(ValueError):
+            LLMConfig(history_images=0)
+        with pytest.raises(ValueError):
+            LLMConfig(image_tokens=0)
+        c = LLMConfig(history_budget=8000, history_images=2, image_tokens=500)
+        assert (c.history_budget, c.history_images, c.image_tokens) == (8000, 2, 500)
 
     def test_empty_response_terminator(self):
         with pytest.raises(ValueError):

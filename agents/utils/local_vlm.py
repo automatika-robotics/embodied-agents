@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Dict, Generator, List, Optional, Union
 
 import numpy as np
-from .utils import encode_img_base64
+from .utils import encode_img_base64, with_image_parts
 
 # VLM families supported through llama-cpp-python chat handlers.
 _VLM_FAMILIES: Dict[str, Dict] = {
@@ -16,7 +16,14 @@ _VLM_FAMILIES: Dict[str, Dict] = {
     # NOTE: MTMD is llama-cpp's generic multimodal handler for newer model families.
     # TODO: When most new models switch to MTMD, we can simplify things here
     "qwen_vl": {
-        "hints": ("qwen2-vl", "qwen2.5-vl", "qwen2_5-vl", "qwen25-vl", "qwen3-vl", "qwen3vl"),
+        "hints": (
+            "qwen2-vl",
+            "qwen2.5-vl",
+            "qwen2_5-vl",
+            "qwen25-vl",
+            "qwen3-vl",
+            "qwen3vl",
+        ),
         "handlers": ["MTMDChatHandler", "Qwen25VLChatHandler"],
         "filename": "Qwen*.gguf",
     },
@@ -142,9 +149,7 @@ class LocalVLM:
         llama_params = inspect.signature(Llama.__init__).parameters
         for key in options:
             if key not in llama_params:
-                valid = sorted(
-                    p for p in llama_params if p not in ("self", "kwargs")
-                )
+                valid = sorted(p for p in llama_params if p not in ("self", "kwargs"))
                 raise ValueError(
                     f"Unknown local_model_options key '{key}' for llama-cpp. "
                     f"Valid options: {valid}. "
@@ -220,26 +225,22 @@ class LocalVLM:
         if not images:
             return {"output": "No image provided."}
 
-        image_parts = [
-            {
-                "type": "image_url",
-                "image_url": {
-                    "url": f"data:image/png;base64,{encode_img_base64(image)}"
-                },
-            }
-            for image in images
+        # Earlier messages carry the arrays the chat history kept for them, and
+        # the images of this call go on the last message which is by the user
+        messages = [
+            with_image_parts(message, [], text_first=False)
+            if message.get("images")
+            else message
+            for message in inference_input["query"]
         ]
-
-        # Keep the full conversation; attach the images to the last user
-        # message
-        messages = [dict(message) for message in inference_input["query"]]
-        for message in reversed(messages):
-            if message["role"] == "user":
-                text = message["content"]
-                message["content"] = image_parts + [{"type": "text", "text": text}]
-                break
+        if messages and messages[-1]["role"] == "user":
+            messages[-1] = with_image_parts(messages[-1], images, text_first=False)
         else:
-            messages.append({"role": "user", "content": image_parts})
+            messages.append(
+                with_image_parts(
+                    {"role": "user", "content": ""}, images, text_first=False
+                )
+            )
 
         kwargs = {"messages": messages, "stream": stream}
         if temperature := inference_input.get("temperature"):

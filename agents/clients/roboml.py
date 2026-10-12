@@ -37,6 +37,23 @@ class RoboMLError(Exception):
     pass
 
 
+def _text_only_messages(inference_input: Dict[str, Any], logger) -> Dict[str, Any]:
+    """Drop the images the chat history kept on earlier messages"""
+    messages = inference_input.get("query")
+    if isinstance(messages, list) and any(
+        isinstance(m, dict) and m.get("images") for m in messages
+    ):
+        logger.warning(
+            "Images of earlier turns are not sent to RoboML, which takes images "
+            "for the current message only. Set history_images to 1."
+        )
+        inference_input["query"] = [
+            {k: v for k, v in m.items() if k != "images"} if isinstance(m, dict) else m
+            for m in messages
+        ]
+    return inference_input
+
+
 class RoboMLHTTPClient(ModelClient):
     """An HTTP client for interaction with ML models served on RoboML"""
 
@@ -122,6 +139,7 @@ class RoboMLHTTPClient(ModelClient):
         self, inference_input: Dict[str, Any]
     ) -> Optional[Dict[str, Union[str, Generator]]]:
         """Call inference on the model using data and inference parameters from the component"""
+        inference_input = _text_only_messages(inference_input, self.logger)
         # encode any byte or numpy array data
         if "query" in inference_input.keys():
             if isinstance(inference_input["query"], bytes):
@@ -290,6 +308,9 @@ class RoboMLWSClient(RoboMLHTTPClient):
                             self.request_queue.get_nowait()
                         )  # Non-blocking
                         if websocket.close_code is None:
+                            inference_input = _text_only_messages(
+                                inference_input, self.logger
+                            )
                             await websocket.send(msgpack.packb(inference_input))
                             self.logger.debug("Sent input to server")
                             self.request_queue.task_done()
@@ -478,6 +499,7 @@ class RoboMLRESPClient(ModelClient):
                     "RoboML RESPClient currently does not handle streaming. Set stream to False in component config to get rid of this warning."
                 )
                 inference_input.pop("stream")
+            inference_input = _text_only_messages(inference_input, self.logger)
             data_b = msgpack.packb(inference_input)
             # call inference method
             result_b = self.redis.execute_command(

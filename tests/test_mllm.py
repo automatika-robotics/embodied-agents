@@ -289,12 +289,71 @@ class TestMLLMCreateInput:
         assert "images" in result
 
 
+def _see(mllm, text):
+    """A question with one frame from the image topic"""
+    trigger = Topic(name="text_in", msg_type="String")
+    mock_trig_cb = MagicMock()
+    mock_trig_cb.get_output.return_value = text
+    mllm.trig_callbacks = {"text_in": mock_trig_cb}
+    mock_img_cb = MagicMock()
+    mock_img_cb.get_output.return_value = np.zeros((4, 4, 3), dtype=np.uint8)
+    mock_img_cb.msg = MagicMock()
+    mock_img_cb.input_topic = Topic(name="img_in", msg_type="Image")
+    mock_img_cb.input_topic.msg_type = Image
+    mllm.callbacks = {"img_in": mock_img_cb}
+    return trigger
+
+
+class TestMLLMHistory:
+    def test_the_images_of_the_current_turn_go_with_the_request(self, mllm):
+        mllm.config.chat_history = True
+        first = mllm._create_input(topic=_see(mllm, "what is this?"))
+
+        assert len(first["images"]) == 1
+        assert "images" not in first["query"][-1]
+
+    def test_an_earlier_turn_says_its_image_was_omitted(self, mllm):
+        mllm.config.chat_history = True
+        mllm._create_input(topic=_see(mllm, "what is this?"))
+        mllm.history.add_reply("a cup")
+
+        second = mllm._create_input(topic=_see(mllm, "and now?"))
+
+        assert second["query"][0] == {
+            "role": "user",
+            "content": "what is this?\n[1 image from 'img_in' omitted]",
+        }
+        assert len(second["images"]) == 1
+
+    def test_history_images_sends_the_earlier_images_on_their_message(self, mllm):
+        mllm.config.chat_history = True
+        mllm.config.history_images = 2
+        mllm._create_input(topic=_see(mllm, "what is this?"))
+        mllm.history.add_reply("a cup")
+
+        second = mllm._create_input(topic=_see(mllm, "and now?"))
+
+        assert second["query"][0]["content"] == "what is this?"
+        assert len(second["query"][0]["images"]) == 1
+        assert "images" not in second["query"][-1]
+
+    def test_a_turn_without_a_text_reply_is_not_kept(self, mllm):
+        """A grounding or pointing call answers with boxes, not a message"""
+        mllm.config.chat_history = True
+        mllm._create_input(topic=_see(mllm, "point at the cup"))
+
+        second = mllm._create_input(topic=_see(mllm, "what is this?"))
+
+        assert second["query"] == [{"role": "user", "content": "what is this?"}]
+
+
 class TestMLLMChatReset:
     def test_chat_reset_keeps_the_system_prompt(self, mllm):
         mllm.config.chat_history = True
-        mllm.config._system_prompt = "You are a robot"
+        mllm.config._system_prompt = mllm.history.system_prompt = "You are a robot"
         system = {"role": "system", "content": "You are a robot"}
-        mllm.messages = [system, {"role": "user", "content": "old"}]
+        mllm.history.add_turn("old")
+        mllm.history.add_reply("fine")
         trigger = Topic(name="text_in", msg_type="String")
         mock_trig_cb = MagicMock()
         mock_trig_cb.get_output.return_value = "chat reset"

@@ -12,6 +12,7 @@ from io import BytesIO
 from pathlib import Path
 from urllib.parse import urlparse
 from typing import (
+    Sequence,
     Any,
     List,
     Dict,
@@ -324,6 +325,36 @@ def encode_img_base64(img: np.ndarray) -> str:
     bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
     _, buf = cv2.imencode(".png", bgr)
     return base64.b64encode(buf).decode("utf-8")
+
+
+def with_image_parts(
+    message: Dict, images: Sequence[np.ndarray], text_first: bool = True
+) -> Dict:
+    """A copy of a chat message with its text and the images as OpenAI content
+    parts.
+
+    :param message: A chat message whose content is a text
+    :type message: Dict
+    :param images: Images to add after any the message holds
+    :type images: Sequence[np.ndarray]
+    :param text_first: Whether the text part comes before the images, as
+        OpenAI-compatible servers are usually given, or after them, as
+        llama.cpp's chat handlers lay the prompt out
+    :type text_first: bool
+    :rtype: Dict
+    """
+    message = dict(message)
+    own = message.pop("images", [])
+    text = {"type": "text", "text": message["content"]}
+    image_parts = [
+        {
+            "type": "image_url",
+            "image_url": {"url": f"data:image/png;base64,{encode_img_base64(image)}"},
+        }
+        for image in [*own, *images]
+    ]
+    message["content"] = [text, *image_parts] if text_first else [*image_parts, text]
+    return message
 
 
 def strip_think_tokens(text: str) -> str:

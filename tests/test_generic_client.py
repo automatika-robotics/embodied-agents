@@ -155,6 +155,29 @@ def test_images_go_to_the_server_and_not_into_the_history(server):
     assert history == [{"role": "user", "content": "what is this?"}]
 
 
+def test_images_kept_on_an_earlier_message_become_content_parts(server):
+    client, requests, _ = server
+    earlier = np.zeros((4, 4, 3), dtype=np.uint8)
+    history = [
+        {"role": "user", "content": "what was that?", "images": [earlier]},
+        {"role": "assistant", "content": "a cup"},
+        {"role": "user", "content": "and this?"},
+    ]
+
+    client._inference_chat({
+        "query": history,
+        "images": [np.zeros((4, 4, 3), dtype=np.uint8)],
+        "max_new_tokens": 100,
+    })
+
+    (request,) = requests
+    first, _, last = request["messages"]
+    assert [part["type"] for part in first["content"]] == ["text", "image_url"]
+    assert "images" not in first
+    assert [part["type"] for part in last["content"]] == ["text", "image_url"]
+    assert history[0]["images"][0] is earlier
+
+
 QUESTIONS = {
     "stop": {
         "type": "noul",

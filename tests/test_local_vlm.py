@@ -25,7 +25,7 @@ def mock_deps():
 
 @pytest.fixture
 def local_vlm(mock_deps):
-    mock_llama, mock_chat_format = mock_deps
+    # mock_deps is here for its patching
     from agents.utils.local_vlm import LocalVLM
 
     vlm = LocalVLM.__new__(LocalVLM)
@@ -126,10 +126,26 @@ class TestLocalVLMCall:
         assert len(messages) == 3
         assert messages[0] == {"role": "user", "content": "First question"}
         assert messages[1] == {"role": "assistant", "content": "Answer"}
-        text_items = [
-            item for item in messages[2]["content"] if item["type"] == "text"
-        ]
+        text_items = [item for item in messages[2]["content"] if item["type"] == "text"]
         assert text_items[0]["text"] == "Second question"
+
+    def test_images_kept_on_an_earlier_message_are_sent(self, local_vlm):
+        img = np.zeros((10, 10, 3), dtype=np.uint8)
+        local_vlm.llm.create_chat_completion.return_value = _mock_vlm_response("ok")
+
+        local_vlm({
+            "query": [
+                {"role": "user", "content": "First question", "images": [img]},
+                {"role": "assistant", "content": "Answer"},
+                {"role": "user", "content": "Second question"},
+            ],
+            "images": [img],
+        })
+
+        messages = local_vlm.llm.create_chat_completion.call_args[1]["messages"]
+        # the images come before the text, as llama.cpp lays its prompts out
+        assert [p["type"] for p in messages[0]["content"]] == ["image_url", "text"]
+        assert [p["type"] for p in messages[2]["content"]] == ["image_url", "text"]
 
     def test_image_data_uri_format(self, local_vlm):
         img = np.zeros((10, 10, 3), dtype=np.uint8)
@@ -176,15 +192,13 @@ class TestVLMMessageBuilding:
             np.zeros((4, 4, 3), dtype=np.uint8),
             np.ones((4, 4, 3), dtype=np.uint8),
         ]
-        result = local_vlm(
-            {
-                "query": [
-                    {"role": "system", "content": "You are a robot."},
-                    {"role": "user", "content": "What do you see?"},
-                ],
-                "images": images,
-            }
-        )
+        result = local_vlm({
+            "query": [
+                {"role": "system", "content": "You are a robot."},
+                {"role": "user", "content": "What do you see?"},
+            ],
+            "images": images,
+        })
         assert result["output"] == "Two oranges"
         messages = local_vlm.llm.create_chat_completion.call_args[1]["messages"]
         # system prompt preserved

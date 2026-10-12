@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 from agents.config import LLMConfig
 from agents.ros import Topic
 from agents.components.llm import LLM
+from agents.utils import get_prompt_template
 from tests.conftest import mock_component_internals
 
 
@@ -62,6 +63,10 @@ class TestLLMConstruction:
         )
         assert comp.messages[0] == {"role": "system", "content": "You are a robot"}
 
+    def test_a_system_prompt_set_after_init_is_in_the_messages(self, llm):
+        llm.set_system_prompt("You are a robot")
+        assert llm.messages == [{"role": "system", "content": "You are a robot"}]
+
     def test_no_system_prompt_empty_messages(self, rclpy_init, mock_model_client):
         comp = LLM(
             inputs=[Topic(name="in", msg_type="String")],
@@ -97,7 +102,8 @@ class TestLLMCreateInput:
 
     def test_chat_reset(self, llm):
         llm.config.chat_history = True
-        llm.messages = [{"role": "user", "content": "old"}]
+        llm.history.add_turn("old")
+        llm.history.add_reply("fine")
         trigger = Topic(name="in", msg_type="String")
         mock_cb = MagicMock()
         mock_cb.get_output.return_value = "chat reset"
@@ -110,9 +116,10 @@ class TestLLMCreateInput:
 
     def test_chat_reset_keeps_the_system_prompt(self, llm):
         llm.config.chat_history = True
-        llm.config._system_prompt = "You are a robot"
+        llm.config._system_prompt = llm.history.system_prompt = "You are a robot"
         system = {"role": "system", "content": "You are a robot"}
-        llm.messages = [system, {"role": "user", "content": "old"}]
+        llm.history.add_turn("old")
+        llm.history.add_reply("fine")
         trigger = Topic(name="in", msg_type="String")
         mock_cb = MagicMock()
         mock_cb.get_output.return_value = "chat reset"
@@ -125,7 +132,8 @@ class TestLLMCreateInput:
     @pytest.mark.parametrize("phrase", ["Chat reset.", "CHAT RESET!", " chat reset "])
     def test_chat_reset_phrase_ignores_case_and_punctuation(self, llm, phrase):
         llm.config.chat_history = True
-        llm.messages = [{"role": "user", "content": "old"}]
+        llm.history.add_turn("old")
+        llm.history.add_reply("fine")
         trigger = Topic(name="in", msg_type="String")
         mock_cb = MagicMock()
         mock_cb.get_output.return_value = phrase
@@ -156,6 +164,140 @@ class TestLLMCreateInput:
 
         result = llm._create_input(topic=trigger)
         assert "tools" in result
+
+
+def _ask(llm, text):
+    """A trigger message on the input topic"""
+    trigger = Topic(name="in", msg_type="String")
+    mock_cb = MagicMock()
+    mock_cb.get_output.return_value = text
+    llm.trig_callbacks = {"in": mock_cb}
+    llm.callbacks = {}
+    return trigger
+
+
+def _retrieving(llm, document):
+    """RAG that finds one document"""
+    llm.config.enable_rag = True
+    llm.db_client = MagicMock()
+    llm.db_client.query.return_value = {
+        "output": {"metadatas": [{}], "documents": [document]}
+    }
+
+
+class TestLLMHistory:
+    def test_without_history_the_request_is_the_system_prompt_and_the_turn(
+        self, llm, mock_model_client
+    ):
+        llm.config.chat_history = False
+        llm.config._system_prompt = llm.history.system_prompt = "sys"
+        _retrieving(llm, "doc")
+
+        llm._execution_step(topic=_ask(llm, "hello"))
+        second = llm._create_input(topic=_ask(llm, "again"))
+
+        assert mock_model_client.inference.call_args.args[0]["query"] == [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "doc\nhello"},
+        ]
+        assert second["query"] == [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "doc\nagain"},
+        ]
+
+    def test_without_history_a_template_renders_the_turn(self, llm):
+        llm.config.chat_history = False
+        llm.component_prompt = get_prompt_template("Answer briefly: {{ in }}")
+
+        result = llm._create_input(topic=_ask(llm, "hello"))
+
+        assert result["query"] == [{"role": "user", "content": "Answer briefly: hello"}]
+
+    def test_earlier_turns_are_sent_as_said_without_their_documents(
+        self, llm, mock_model_client
+    ):
+        llm.config.chat_history = True
+        _retrieving(llm, "doc")
+
+        llm._execution_step(topic=_ask(llm, "hello"))
+        second = llm._create_input(topic=_ask(llm, "again"))
+
+        assert second["query"] == [
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "test"},
+            {"role": "user", "content": "doc\nagain"},
+        ]
+
+    def test_a_failed_call_leaves_no_turn(self, llm, mock_model_client):
+        llm.config.chat_history = True
+        mock_model_client.inference.return_value = None
+
+        llm._execution_step(topic=_ask(llm, "hello"))
+        second = llm._create_input(topic=_ask(llm, "again"))
+
+        assert second["query"] == [{"role": "user", "content": "again"}]
+
+    def test_the_history_is_capped_in_whole_turns(self, llm, mock_model_client):
+        llm.config.chat_history = True
+        llm.config.history_size = 3
+        # a fresh result each call: publishing consumes the dict
+        mock_model_client.inference.side_effect = lambda _: {"output": "test"}
+
+        for text in ["one", "two", "three", "four"]:
+            llm._execution_step(topic=_ask(llm, text))
+        # four turns is within a third over the cap of three
+        assert [m["content"] for m in llm.messages if m["role"] == "user"] == [
+            "one",
+            "two",
+            "three",
+            "four",
+        ]
+
+        llm._execution_step(topic=_ask(llm, "five"))
+        # five is past it: trimmed back to three, the newest
+        assert llm.messages == [
+            {"role": "user", "content": "three"},
+            {"role": "assistant", "content": "test"},
+            {"role": "user", "content": "four"},
+            {"role": "assistant", "content": "test"},
+            {"role": "user", "content": "five"},
+            {"role": "assistant", "content": "test"},
+        ]
+
+    def test_a_tool_calling_turn_is_kept_whole(self, llm, mock_model_client):
+        llm.config.chat_history = True
+        llm.config._tool_descriptions = [{"function": {"name": "test_tool"}}]
+        llm._external_processors = {
+            "test_tool": ([MagicMock(return_value="42")], "tool")
+        }
+        llm.config._tool_response_flags = {"test_tool": True}
+        mock_model_client.inference.side_effect = [
+            {
+                "output": "",
+                "tool_calls": [
+                    {"id": "c1", "function": {"name": "test_tool", "arguments": {}}}
+                ],
+            },
+            {"output": "it is 42"},
+        ]
+
+        llm._execution_step(topic=_ask(llm, "how many?"))
+
+        assert [m["role"] for m in llm.messages] == [
+            "user",
+            "assistant",
+            "tool",
+            "assistant",
+        ]
+        assert llm.messages[1]["tool_calls"][0]["id"] == "c1"
+        assert llm.messages[2] == {
+            "role": "tool",
+            "tool_call_id": "c1",
+            "content": "42",
+        }
+        # the reply to the results was asked with the whole turn so far
+        second_request = mock_model_client.inference.call_args.args[0]["query"]
+        assert [m["role"] for m in second_request] == ["user", "assistant", "tool"]
 
 
 class TestLLMExecutionStep:

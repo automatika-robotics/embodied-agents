@@ -22,6 +22,7 @@ from ..utils import (
     plain_text_warning,
     tls_verify,
     validate_func_args,
+    with_image_parts,
 )
 
 
@@ -462,34 +463,20 @@ class GenericHTTPClient(ModelClient):
         self.logger.info("Deinitializing GenericHTTPClient...")
 
     def __handle_images(self, inference_input: Dict[str, Any]) -> Dict[str, Any]:
-        """Handles images in multimodal input"""
-        if images := inference_input.get("images"):
-            b64_images = [encode_img_base64(img) for img in images]
-            inference_input.pop("images")  # Remove images from inference_input
-            # Add images to last message in query
-            messages = inference_input["query"]
+        """Handles images in multimodal input. The images the chat history kept
+        and the images of this call."""
+        messages = [
+            with_image_parts(message, []) if message.get("images") else message
+            for message in inference_input["query"]
+        ]
+        if images := inference_input.pop("images", None):
             if messages[-1].get("role") == "user":
-                last_message = messages[-1]
-                content_parts = []
-
-                # Add the original text prompt as the first part
-                content_parts.append({"type": "text", "text": last_message["content"]})
-
-                # Add each image as a subsequent part
-                for img_b64 in b64_images:
-                    content_parts.append({
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/png;base64,{img_b64}"},
-                    })
-
-                inference_input["query"] = messages[:-1] + [
-                    {**last_message, "content": content_parts}
-                ]
-                return inference_input
+                messages[-1] = with_image_parts(messages[-1], images)
             else:
                 self.logger.warning(
                     "Images provided, but no final user message found to attach them to. Ignoring images."
                 )
+        inference_input["query"] = messages
         return inference_input
 
     def __handle_exceptions(self, excep: Exception) -> None:

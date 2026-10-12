@@ -1,5 +1,7 @@
+from .history import ChatHistory, estimate_tokens
 from .utils import (
     draw_detection_bounding_boxes,
+    with_image_parts,
     draw_points_2d,
     validate_kwargs_from_default,
     validate_func_args,
@@ -26,6 +28,9 @@ from .utils import (
 
 __all__ = [
     "_LANGUAGE_CODES",
+    "ChatHistory",
+    "estimate_tokens",
+    "with_image_parts",
     "build_lerobot_features_from_dataset_info",
     "build_url",
     "plain_text_warning",

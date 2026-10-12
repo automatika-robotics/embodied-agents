@@ -255,6 +255,7 @@ class MLLM(DepthLiftMixin, LLM):
         """
         self._images = []  # image msgs for publishing
         images = []  # image msg outputs as np arrays
+        image_sources = []  # the topic of each image, for the history
         # The 3D latched msg and depth
         self._lift_msg = None
         self._lift_depth = None
@@ -264,7 +265,7 @@ class MLLM(DepthLiftMixin, LLM):
         # set mllm query as trigger
         query = self._extract_query_and_context(kwargs, context)
         if self._should_reset_chat(query):
-            self._reset_chat_history()
+            self.history.reset()
             return None
 
         # aggregate all inputs that are available. Depth and camera_info
@@ -286,6 +287,7 @@ class MLLM(DepthLiftMixin, LLM):
             # get images from image topics
             if issubclass(msg_type, (Image, RGBD)):
                 images.append(item)
+                image_sources.append(i.input_topic.name)
                 if msg is not None:
                     self._images.append(msg)  # Collect all images for publishing
                     if i.input_topic.name == self._lift_camera:
@@ -297,6 +299,7 @@ class MLLM(DepthLiftMixin, LLM):
 
         # the query as given, before templates and RAG dress it up
         self._lift_label = query
+        utterance = query
 
         # get RAG results if enabled in config and if docs retrieved
         rag_result = self._handle_rag_query(query) if self.config.enable_rag else None
@@ -309,13 +312,12 @@ class MLLM(DepthLiftMixin, LLM):
         # get RAG results if enabled in config and if docs retreived
         query = f"{rag_result}\n{query}" if rag_result else query
 
-        message = {"role": "user", "content": query}
-        self._handle_chat_history(message)
+        messages = self._start_turn(utterance, query, images, image_sources)
 
         self.get_logger().debug(f"Input from component: {self.messages}")
 
         input = {
-            "query": self.messages,
+            "query": messages,
             "images": images,
             **self.inference_params,
         }
@@ -627,7 +629,7 @@ class MLLM(DepthLiftMixin, LLM):
         fields = None
         if self._task == "general":
             result["output"] = self._strip_think_tokens(result["output"])
-            self.messages.append({"role": "assistant", "content": result["output"]})
+            self.history.add_reply(result["output"])
             for pub_name in self._string_publishers:
                 self.publishers_dict[pub_name].publish(
                     **result, time_stamp=self.get_ros_time()

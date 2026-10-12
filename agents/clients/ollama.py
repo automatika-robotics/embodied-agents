@@ -147,12 +147,21 @@ class OllamaClient(ModelClient):
             "stream": inference_input.pop("stream"),
         }
 
-        # make images part of the latest message in message list
+        # Encode the images the chat history kept on earlier messages, and make
+        # the images of this call part of the latest message
+        messages = [
+            {**message, "images": [encode_img_base64(img) for img in message["images"]]}
+            if message.get("images")
+            else message
+            for message in input["messages"]
+        ]
         if images := inference_input.pop("images", None):
-            messages = input["messages"]
-            input["messages"] = messages[:-1] + [
-                {**messages[-1], "images": [encode_img_base64(img) for img in images]}
-            ]
+            messages[-1] = {
+                **messages[-1],
+                "images": messages[-1].get("images", [])
+                + [encode_img_base64(img) for img in images],
+            }
+        input["messages"] = messages
 
         # Add tools as part of input, if available
         if tools := inference_input.get("tools"):
