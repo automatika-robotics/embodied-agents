@@ -115,5 +115,5 @@ class TestAdditionalTypes:
     def test_an_input_of_an_external_type_is_rebuilt(self, executable, recipe_args):
         types = executable._parse_additional_types(recipe_args["additional_types"])
 
-        topic_dicts = executable._deserialize_topics(recipe_args["inputs"], types)
+        topic_dicts = executable._deserialize_topics(recipe_args["inputs"])
         assert Topic(**topic_dicts[0]).msg_type is types[0]

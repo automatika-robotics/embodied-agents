@@ -66,6 +66,7 @@ from ros_sugar.utils import (
     get_methods_with_decorator,
 )
 from ros_sugar.io.utils import run_external_processor
+from ros_sugar.launch.executable import run_component
 from ros_sugar.core import Event, Action
 from ros_sugar import actions
 from ros_sugar.base_clients import (
@@ -181,6 +182,7 @@ __all__ = [
     "MoveManipulator",
     "GetParameters",
     "run_external_processor",
+    "run_component",
     "read_camera_info",
     "Empty",
     "ROSPose",

@@ -6,8 +6,6 @@ from typing import List, Dict, Union, Tuple, Optional, Any
 
 import rclpy
 import setproctitle
-from rclpy.executors import MultiThreadedExecutor
-from rclpy.utilities import try_shutdown
 
 from agents import config as all_configs
 from agents import components as all_components
@@ -22,6 +20,7 @@ from agents.ros import (
     SupportedType,
     Event,
     add_additional_datatypes,
+    run_component,
 )
 
 # Python3.8 compatible NoneType
@@ -196,17 +195,12 @@ def _parse_trigger(
         return trigger_deserialized
 
 
-def _deserialize_topics(
-    serialized_topics: str, additional_types: Optional[List] = None
-) -> List[Dict]:
+def _deserialize_topics(serialized_topics: str) -> List[Dict]:
     list_of_str = json.loads(serialized_topics)
     topic_dicts = []
     for t in list_of_str:
         topic_dict = json.loads(t)
         topic_dict["qos_profile"] = QoSConfig(**topic_dict.get("qos_profile", {}))
-        topic_dict["additional_types"] = (
-            additional_types if additional_types else []
-        )  # Add any additional types
         topic_dicts.append(topic_dict)
     return topic_dicts
 
@@ -338,22 +332,20 @@ def main():
     # Get Yaml config file if provided
     config_file = args.config_file or None
 
-    additional_types = (
+    if args.additional_types:
         _parse_additional_types(args.additional_types)
-        if args.additional_types
-        else None
-    )
+
     # Get inputs/outputs/layers/routes
     inputs = (
         [
             FixedInput(**i) if i.get("fixed") else Topic(**i)
-            for i in _deserialize_topics(args.inputs, additional_types)
+            for i in _deserialize_topics(args.inputs)
         ]
         if args.inputs
         else None
     )
     outputs = (
-        [Topic(**o) for o in _deserialize_topics(args.outputs, additional_types)]
+        [Topic(**o) for o in _deserialize_topics(args.outputs)]
         if args.outputs
         else None
     )
@@ -442,19 +434,7 @@ def main():
     # Run Post-Init Setup
     _setup_component_post_init(component, args)
 
-    executor = MultiThreadedExecutor()
-
-    executor.add_node(component)
-
-    try:
-        executor.spin()
-
-    except KeyboardInterrupt:
-        pass
-
-    finally:
-        executor.remove_node(component)
-        try_shutdown()
+    run_component(component)
 
 
 if __name__ == "__main__":
