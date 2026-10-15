@@ -17,7 +17,7 @@ Usage:
     python3 examples/cortex_agent.py
 
     # In another terminal, send a goal:
-    ros2 action send_goal /cortex_<process_id>/vision_language_action automatika_embodied_agents/action/VisionLanguageAction "{task: 'track the person'}"
+    ros2 action send_goal /cortex_input_command automatika_embodied_agents/action/VisionLanguageAction "{task: 'track the person'}"
 """
 
 from agents.components import Vision, VLM, TextToSpeech, Cortex
@@ -80,11 +80,13 @@ led_on = False
 
 
 def toggle_led():
-    """Toggle an LED on the robot."""
+    """Toggle an LED on the robot.
+
+    Run as an action, so it returns (success, message)."""
     global led_on
     led_on = not led_on
     state = "ON" if led_on else "OFF"
-    print(f"LED toggled {state}")
+    return True, f"LED toggled {state}"
 
 
 # -- Cortex: the planner / monitor --
@@ -98,7 +100,9 @@ cortex = Cortex(
     ],
     output=cortex_output,
     model_client=planner_client,
-    config=CortexConfig(max_planning_steps=5, max_execution_steps=10),
+    config=CortexConfig(
+        max_planning_steps=5, max_execution_steps=10, session_history=3
+    ),
     component_name="cortex",
 )
 

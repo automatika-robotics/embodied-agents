@@ -25,7 +25,8 @@ Send Cortex a natural-language goal like:
 Usage:
     python3 examples/memory_with_cortex.py
 
-    # Open localhost:5001 in the browser and send a goal through the UI.
+    # Open https://localhost:5001 in the browser, accept the certificate once,
+    # and send a goal through the UI.
 
     # This example includes a ``battery_layer`` subscribed to /battery_level.
     # If no real battery publisher exists, fake one from another terminal:

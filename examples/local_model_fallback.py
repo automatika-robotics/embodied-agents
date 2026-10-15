@@ -1,3 +1,4 @@
+from agents.config import LLMConfig
 from agents.components import LLM
 from agents.models import TransformersLLM
 from agents.clients import RoboMLHTTPClient
@@ -24,6 +25,7 @@ llm_component = LLM(
     outputs=[llm_response],
     model_client=primary_client,
     trigger=user_query,
+    config=LLMConfig(chat_history=True),
     component_name="brain",
 )
 

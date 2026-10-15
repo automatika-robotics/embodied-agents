@@ -1,19 +1,26 @@
+import base64
 import queue
 import socket
 import threading
+import time
 from collections.abc import Iterator
 from io import BytesIO
-from typing import Any, Union, Optional, List, Dict
-import base64
-import time
+from typing import Any, Dict, List, Optional, Union
 
+from ..clients import RoboMLRESPClient, RoboMLWSClient
 from ..clients.model_base import ModelClient
-from ..clients import RoboMLWSClient, RoboMLRESPClient
 from ..config import TextToSpeechConfig
-from ..ros import Audio, String, Topic, StreamingString, component_action
-from ..utils import validate_func_args, load_model_repo
-from .model_component import ModelComponent
+from ..ros import (
+    ActionReturnType,
+    Audio,
+    StreamingString,
+    String,
+    Topic,
+    component_action,
+)
+from ..utils import load_model_repo, validate_func_args
 from .component_base import ComponentRunType
+from .model_component import ModelComponent
 
 
 class TextToSpeech(ModelComponent):
@@ -279,8 +286,8 @@ class TextToSpeech(ModelComponent):
         :param fmt: Tuple of (sample_rate, channels) of the current stream
         :returns: Tuple of (stream, fmt) for reuse by the caller
         """
-        from soundfile import SoundFile
         import pyaudio
+        from soundfile import SoundFile
 
         with SoundFile(BytesIO(audio_bytes)) as f:
             new_fmt = (f.samplerate, f.channels)
@@ -368,7 +375,7 @@ class TextToSpeech(ModelComponent):
             },
         }
     )
-    def stop_playback(self, wait_for_thread: bool = True) -> bool:
+    def stop_playback(self, wait_for_thread: bool = True) -> ActionReturnType:
         """
         Stops the playback thread and clears any pending audio.
         Can be used to interrupt the audio playback through an event.
@@ -388,7 +395,7 @@ class TextToSpeech(ModelComponent):
             self._playback_thread.join()
             self.get_logger().debug("Thread terminated.")
 
-        return True
+        return True, "Playback stopped and pending audio cleared"
 
     @component_action(
         description={
@@ -409,7 +416,7 @@ class TextToSpeech(ModelComponent):
             },
         }
     )
-    def say(self, text: str) -> bool:
+    def say(self, text: str) -> ActionReturnType:
         """
             Say the input text.
 
@@ -429,7 +436,7 @@ class TextToSpeech(ModelComponent):
         ):
             self.stop_playback()
         self._execution_step(text=text)
-        return True
+        return True, "Text sent to speech"
 
     def _handle_websocket_streaming(self) -> Optional[List]:
         """Handle streaming output from a websocket client"""

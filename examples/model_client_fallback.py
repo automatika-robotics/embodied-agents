@@ -30,7 +30,7 @@ llm_component = LLM(
     model_client=primary_client,
     trigger=user_query,
     component_name="brain",
-    config=LLMConfig(stream=True),
+    config=LLMConfig(stream=True, chat_history=True),
 )
 
 # Register the Backup Client

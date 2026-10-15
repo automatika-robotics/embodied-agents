@@ -17,21 +17,24 @@ class RouterMode(Enum):
     Modes:
     - LLM: Agentic mode using LLM for intent analysis and routing
     - VECTOR: Vector mode using embeddings and vector database for routing
+    - DECISION: Decision mode using a decision model to choose the route
     """
 
     LLM = "LLM"
     VECTOR = "VECTOR"
+    DECISION = "DECISION"
 
 
 class SemanticRouter(LLM):
     """
     A unified component that routes semantic information from input topics to output topics.
 
-    This component can operate in two modes:
+    This component can operate in three modes:
     1. **Vector Mode (Standard):** Uses a vector database to route inputs based on embedding similarity to route samples.
     2. **LLM Mode (Agentic):** Uses an LLM to intelligently analyze intent and route inputs via function calling.
+    3. **Decision Mode:** Uses a decision model to choose the route in one forward pass, without generating text. The model reads the intent of the input, as an LLM does, and gives a confidence for its choice, which works as the distance threshold does in vector mode.
 
-    The mode is determined automatically based on the client provided (`db_client` vs `model_client`).
+    The mode is determined automatically based on the client provided (`db_client` vs `model_client`, and for a `model_client`, whether its model is an LLM or a decision model).
 
     :param inputs:
         A list of input text topics that this component will subscribe to.
@@ -43,9 +46,10 @@ class SemanticRouter(LLM):
         An optional route that specifies the default behavior when no specific route matches.
         In Vector Mode, this is used based on distance threshold.
         In LLM Mode, this is used if the model fails to select a route.
+        In Decision Mode, this is used when the confidence of the model's choice is below `minimum_confidence`.
     :type default_route: Optional[Route]
     :param config:
-        The configuration object. accepts `SemanticRouterConfig` (for vector mode parameters)
+        The configuration object. accepts `SemanticRouterConfig` (for vector and decision mode parameters)
         or `LLMConfig` (if specific LLM settings are needed). Defaults to SemanticRouterConfig.
     :type config: Union[SemanticRouterConfig, LLMConfig]
     :param db_client:
@@ -53,6 +57,7 @@ class SemanticRouter(LLM):
     :type db_client: Optional[DBClient]
     :param model_client:
         (LLM Mode) A model client used for intelligent intent analysis and tool calling.
+        (Decision Mode) A model client with a decision model, such as GenericHTTPClient with a GenericDecisionModel.
     :type model_client: Optional[ModelClient]
     :param component_name:
         The name of this Semantic Router component (default: "router_component").
@@ -88,6 +93,21 @@ class SemanticRouter(LLM):
         component_name="smart_router"
     )
     ```
+
+    Example usage (Decision Mode):
+    ```python
+    # ... define topics and routes ...
+    model_client = GenericHTTPClient(GenericDecisionModel(name="lev", checkpoint="lev"), port=8090)
+
+    router = SemanticRouter(
+        inputs=[input_text],
+        routes=[route1, route2],
+        default_route=route1,
+        model_client=model_client,
+        config=SemanticRouterConfig(router_name="my_decision_router", minimum_confidence=0.3),
+        component_name="decision_router"
+    )
+    ```
     """
 
     @validate_func_args
@@ -116,35 +136,42 @@ class SemanticRouter(LLM):
 
         # Determine operation mode
         if model_client:
-            if not model_client.supports_tool_calls:
+            if db_client:
+                get_logger(component_name).warning(
+                    "You have provided a model client to the SemanticRouter, the db client will be ignored and the model would be used for routing decisions."
+                )
+            if model_client.supports_decisions:
+                self.routing_mode = RouterMode.DECISION
+                component_config: Union[SemanticRouterConfig, LLMConfig] = (
+                    config
+                    if isinstance(config, SemanticRouterConfig)
+                    else SemanticRouterConfig(router_name="default_router")
+                )
+            elif not model_client.supports_tool_calls:
                 raise TypeError(
                     f"The provided model client ({model_client.__class__.__name__}) does not support tool calling, "
                     "which is required for Agentic Routing."
                 )
-            if db_client:
-                get_logger(component_name).warning(
-                    "You have provided a model client with an LLM model to the SemanticRouter, the db client will be ignored and the LLM would be used for routing decisions."
-                )
-
-            self.routing_mode = RouterMode.LLM
-            # If config is missing or is the wrong type, create a strict LLMConfig
-            if isinstance(config, LLMConfig):
-                # enforce certain options for routing for routing logic
-                component_config = config
-                component_config.stream = False
-                component_config.enable_rag = False
-                component_config.chat_history = False
-                component_config.strip_think_tokens = True
             else:
-                component_config = LLMConfig(
-                    stream=False,
-                    enable_rag=False,
-                    chat_history=False,
-                    strip_think_tokens=True,
-                )
+                self.routing_mode = RouterMode.LLM
+                # If config is missing or is the wrong type, create a strict LLMConfig
+                if isinstance(config, LLMConfig):
+                    # enforce certain options for routing for routing logic
+                    component_config = config
+                    component_config.stream = False
+                    component_config.enable_rag = False
+                    component_config.chat_history = False
+                    component_config.strip_think_tokens = True
+                else:
+                    component_config = LLMConfig(
+                        stream=False,
+                        enable_rag=False,
+                        chat_history=False,
+                        strip_think_tokens=True,
+                    )
         elif db_client:
             self.routing_mode = RouterMode.VECTOR
-            component_config: Union[SemanticRouterConfig, LLMConfig] = (
+            component_config = (
                 config
                 if isinstance(config, SemanticRouterConfig)
                 else SemanticRouterConfig(router_name="default_router")
@@ -158,7 +185,7 @@ class SemanticRouter(LLM):
             component_config.strip_think_tokens = True
         else:
             raise ValueError(
-                "A semantic router must be initiated with a DB Client (vector mode), a model client with an LLM model or an LLMConfig with enable_local_model=True (agentic mode)."
+                "A semantic router must be initiated with a DB Client (vector mode), a model client with an LLM model or an LLMConfig with enable_local_model=True (agentic mode), or a model client with a decision model (decision mode)."
             )
 
         # Create the parent, db client would be created in the parent
@@ -168,7 +195,9 @@ class SemanticRouter(LLM):
             config=component_config
             if isinstance(component_config, LLMConfig)
             else None,
-            model_client=model_client if self.routing_mode is RouterMode.LLM else None,
+            model_client=model_client
+            if self.routing_mode is not RouterMode.VECTOR
+            else None,
             db_client=db_client if self.routing_mode is RouterMode.VECTOR else None,
             trigger=inputs,
             component_name=component_name,
@@ -298,6 +327,9 @@ class SemanticRouter(LLM):
             # deploy local LLM when routing agentically without a model client
             if not self.model_client and self.config.enable_local_model:
                 self._deploy_local_model()
+        elif self.routing_mode is RouterMode.DECISION:
+            self.get_logger().info("SemanticRouter starting in DECISION Mode.")
+            self._setup_decision_routes(self.routes_dict)
         else:
             self.get_logger().info(
                 "SemanticRouter starting in VECTOR (Embedding) Mode."
@@ -307,6 +339,10 @@ class SemanticRouter(LLM):
         # NOTE: It is important to call super config AFTER setting routes as tools
         # in case of agentic routing so that system prompt is set correctly
         super().custom_on_configure()
+
+        # Warmp up seperately for decision models
+        if self.routing_mode is RouterMode.DECISION and self._internal_config.warmup:
+            self._warmup()
 
     def custom_on_deactivate(self):
         """Deactivate component."""
@@ -433,6 +469,22 @@ class SemanticRouter(LLM):
         self._route_funcs[description["function"]["name"]] = route_action
         self._internal_config._tool_descriptions.append(description)  # type: ignore
 
+    def _setup_decision_routes(self, routes: Dict[str, Route]):
+        """(DECISION MODE) Make the routes the options of one choice question,
+        each described by its samples."""
+        self.get_logger().info("Initializing all routes in DECISION MODE")
+        self._route_question = {
+            "route": {
+                "type": "choice",
+                "instructions": "Which route should handle this input?",
+                "criteria": {
+                    name: "Use this for intents like: "
+                    + ", ".join(f"'{s}'" for s in route.samples)
+                    for name, route in routes.items()
+                },
+            }
+        }
+
     def _vector_mode_execution_step(self):
         """Vector mode execution"""
         self.get_logger().debug("Executing VECTOR mode routing step")
@@ -501,6 +553,41 @@ class SemanticRouter(LLM):
             else:
                 self.health_status.set_fail_algorithm()
 
+    def _decision_mode_execution_step(self):
+        """Decision mode execution"""
+        self.get_logger().debug("Executing DECISION mode routing step")
+        result = self._call_inference({
+            "state": self._current_payload,
+            "questions": self._route_question,
+        })
+        answer = result["output"]["route"] if result else None
+
+        # apply confidence threshold with default route
+        confident = (
+            answer and answer["confidence"] >= self._internal_config.minimum_confidence  # type: ignore
+        )
+        if answer and (confident or not self.default_route):
+            route_name = answer["choice"]
+        elif self.default_route:
+            self.get_logger().info(f"Using default route: {self.default_route}")
+            route_name = self.default_route
+        else:
+            self.health_status.set_fail_algorithm()
+            return
+
+        self.get_logger().debug(f"Routing payload to: {route_name}")
+        self._publish_to_route(route_name, self._current_payload)
+
+    def _warmup(self):
+        """Warm up and stat check"""
+        if self.routing_mode is not RouterMode.DECISION:
+            return super()._warmup()
+        if self.model_client:
+            self.model_client.inference({
+                "state": "Hello robot.",
+                "questions": self._route_question,
+            })
+
     def _execution_step(self, **kwargs):
         """Execution step for Semantic Router component.
         :param kwargs:
@@ -524,6 +611,10 @@ class SemanticRouter(LLM):
         # LLM MODE
         elif self.routing_mode is RouterMode.LLM:
             self._llm_mode_execution_step(**kwargs)
+
+        # DECISION MODE
+        elif self.routing_mode is RouterMode.DECISION:
+            self._decision_mode_execution_step()
 
     def _update_cmd_args_list(self):
         """

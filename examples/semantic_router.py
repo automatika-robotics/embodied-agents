@@ -26,6 +26,7 @@ llm = LLM(
     outputs=[llm_out],
     model_client=qwen_client,
     trigger=llm_in,
+    config=LLMConfig(chat_history=True),
     component_name="generic_llm",
 )
 
@@ -125,6 +126,28 @@ router = SemanticRouter(
 #     routes=[llm_route, goto_route],
 #     default_route=llm_route,
 #     model_client=qwen_client, # LLM mode requires model_client
+#     component_name="router",
+# )
+
+# --- MODE 3: DECISION ROUTING (Commented Out) ---
+# To route with a decision model, which chooses the route in one forward pass,
+# comment out the active block above and uncomment this.
+# The model is served by llama.cpp's llama-server, e.g.:
+#   llama-server -m lev-Q8_0.gguf --alias lev --port 8090
+#
+# from agents.clients import GenericHTTPClient
+# from agents.models import GenericDecisionModel
+#
+# decision_client = GenericHTTPClient(
+#     GenericDecisionModel(name="lev", checkpoint="lev"), port=8090
+# )
+#
+# router = SemanticRouter(
+#     inputs=[query_topic],
+#     routes=[llm_route, goto_route],
+#     default_route=llm_route,  # If the confidence of the choice is below minimum_confidence
+#     config=SemanticRouterConfig(router_name="go-to-router", minimum_confidence=0.3),
+#     model_client=decision_client,  # Decision mode requires a decision model client
 #     component_name="router",
 # )
 

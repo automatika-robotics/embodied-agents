@@ -6,8 +6,6 @@ from typing import List, Dict, Union, Tuple, Optional, Any
 
 import rclpy
 import setproctitle
-from rclpy.executors import MultiThreadedExecutor
-from rclpy.utilities import try_shutdown
 
 from agents import config as all_configs
 from agents import components as all_components
@@ -16,11 +14,13 @@ from agents.clients.model_base import ModelClient
 from agents.ros import (
     Topic,
     FixedInput,
-    MapLayer,
+    MemLayer,
     Route,
     QoSConfig,
     SupportedType,
     Event,
+    add_additional_datatypes,
+    run_component,
 )
 
 # Python3.8 compatible NoneType
@@ -58,7 +58,7 @@ def _parse_args() -> Tuple[argparse.Namespace, List[str]]:
     parser.add_argument(
         "--layers",
         type=str,
-        help="Map Encoding layers",
+        help="Memory layers",
     )
     parser.add_argument(
         "--trigger",
@@ -112,6 +112,11 @@ def _parse_args() -> Tuple[argparse.Namespace, List[str]]:
         type=str,
         help="Serialized robot plugin spec and feedback-bus endpoint",
     )
+    parser.add_argument(
+        "--plugins",
+        type=str,
+        help="Serialized plugin specs and shared feedback-bus endpoint",
+    )
 
     return parser.parse_known_args()
 
@@ -144,7 +149,8 @@ def _parse_component_config(
 
 
 def _parse_additional_types(value: str):
-    """Get additional types"""
+    """Get the additional types and register them, before any topic, trigger
+    or event is rebuilt"""
     serialized_types = json.loads(value)
     _additional_types = []
     for s_t in serialized_types:
@@ -155,6 +161,7 @@ def _parse_additional_types(value: str):
         new_type = getattr(module, class_name)
         if issubclass(new_type, SupportedType):
             _additional_types.append(new_type)
+    add_additional_datatypes(_additional_types)
     return _additional_types
 
 
@@ -169,8 +176,6 @@ def _parse_trigger(
     :return: Trigger topics or float
     :rtype: Topic | List[Topic] | float
     """
-    # TODO: Handle additional types here
-
     # Deserialize main dict or float value
     trigger_deserialized = json.loads(trigger_str)
     if isinstance(trigger_deserialized, Dict):
@@ -190,17 +195,12 @@ def _parse_trigger(
         return trigger_deserialized
 
 
-def _deserialize_topics(
-    serialized_topics: str, additional_types: Optional[List] = None
-) -> List[Dict]:
+def _deserialize_topics(serialized_topics: str) -> List[Dict]:
     list_of_str = json.loads(serialized_topics)
     topic_dicts = []
     for t in list_of_str:
         topic_dict = json.loads(t)
         topic_dict["qos_profile"] = QoSConfig(**topic_dict.get("qos_profile", {}))
-        topic_dict["additional_types"] = (
-            additional_types if additional_types else []
-        )  # Add any additional types
         topic_dicts.append(topic_dict)
     return topic_dicts
 
@@ -276,8 +276,10 @@ def _setup_component_post_init(component: Any, args: argparse.Namespace) -> None
     if args.external_processors:
         component._external_processors_json = args.external_processors
 
-    # Rebuild the robot plugin and connect it to the HOST feedback bus
-    if args.robot_plugin:
+    # Rebuild plugins as CLIENTs and connect them to the HOST feedback bus
+    if getattr(args, "plugins", None):
+        component._plugins_json = args.plugins
+    elif args.robot_plugin:  # pre-rename ros_sugar API, kept for compat
         component._robot_plugin_json = args.robot_plugin
 
     # Set additional model clients if any
@@ -330,34 +332,30 @@ def main():
     # Get Yaml config file if provided
     config_file = args.config_file or None
 
-    additional_types = (
+    if args.additional_types:
         _parse_additional_types(args.additional_types)
-        if args.additional_types
-        else None
-    )
+
     # Get inputs/outputs/layers/routes
     inputs = (
         [
             FixedInput(**i) if i.get("fixed") else Topic(**i)
-            for i in _deserialize_topics(args.inputs, additional_types)
+            for i in _deserialize_topics(args.inputs)
         ]
         if args.inputs
         else None
     )
     outputs = (
-        [Topic(**o) for o in _deserialize_topics(args.outputs, additional_types)]
+        [Topic(**o) for o in _deserialize_topics(args.outputs)]
         if args.outputs
         else None
     )
 
-    # TODO: Handle additional types and qos in deserialization
     layers = (
-        [MapLayer(**json.loads(i)) for i in json.loads(args.layers)]
+        [MemLayer(**json.loads(i)) for i in json.loads(args.layers)]
         if args.layers
         else None
     )
 
-    # TODO: Handle additional types and qos in deserialization
     routes = (
         [Route(**json.loads(r)) for r in json.loads(args.routes)]
         if args.routes
@@ -383,23 +381,6 @@ def main():
             config_file=config_file,
         )  # we dont pass default route here as its already part of the config
     # and will be set from there
-    # Map Encoding Component
-    elif component_type == all_components.MapEncoding.__name__:
-        db_client_json = json.loads(args.db_client)
-        db_client = getattr(clients, db_client_json["client_type"])(**db_client_json)
-        if not db_client:
-            raise RuntimeError("The map encoding component expects a vectorDB client")
-        component = comp_class(
-            layers=layers,
-            position=config._position,
-            map_topic=config._map_topic,
-            db_client=db_client,
-            config=config,
-            trigger=trigger,
-            component_name=component_name,
-            config_file=config_file,
-        )
-
     elif component_type == all_components.Memory.__name__:
         embedding_client_json = json.loads(args.embedding_client)
         embedding_client = (
@@ -436,19 +417,7 @@ def main():
     # Run Post-Init Setup
     _setup_component_post_init(component, args)
 
-    executor = MultiThreadedExecutor()
-
-    executor.add_node(component)
-
-    try:
-        executor.spin()
-
-    except KeyboardInterrupt:
-        pass
-
-    finally:
-        executor.remove_node(component)
-        try_shutdown()
+    run_component(component)
 
 
 if __name__ == "__main__":

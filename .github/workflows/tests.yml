@@ -26,7 +26,8 @@ jobs:
           apt-get update
           apt-get install -y python3-pip \
               ros-${{ matrix.ros_distro }}-control-msgs \
-              ros-${{ matrix.ros_distro }}-realsense2-camera-msgs
+              ros-${{ matrix.ros_distro }}-realsense2-camera-msgs \
+              ros-${{ matrix.ros_distro }}-moveit-msgs
 
       - name: Build workspace
         run: |
@@ -48,5 +49,5 @@ jobs:
           . /opt/ros/${{ matrix.ros_distro }}/setup.sh
           . /ws/install/setup.sh
           cd $GITHUB_WORKSPACE
-          python3 -m pytest tests/ -v --ignore=tests/test_clients.py -k "not local_only"
+          python3 -m pytest tests/ -v -k "not local_only"
         shell: bash

@@ -14,7 +14,7 @@ Some clients might need additional dependacies, which are provided in the follow
 
 * - **Generic**
   - [GenericHTTPClient](agents.clients.generic.GenericHTTPClient)
-  - A generic client for interacting with OpenAI-compatible APIs, including vLLM, ms-swift, lmdeploy, Google Gemini, etc. Supports both standard and streaming responses, and works with LLMS and multimodal LLMs. Designed to be compatible with any API following the OpenAI standard. Supports tool calling.
+  - A generic client for interacting with OpenAI-compatible APIs, including vLLM, ms-swift, lmdeploy, Google Gemini, etc. Supports both standard and streaming responses, and works with LLMS and multimodal LLMs. Designed to be compatible with any API following the OpenAI standard. Supports tool calling. It also supports asking typed questions of decision models through the TypeSafe-compatible /v1/systemone API, with [GenericDecisionModel](agents.models.md#classes).
 
 * - **RoboML**
   - [RoboMLHTTPClient](agents.clients.roboml.RoboMLHTTPClient)

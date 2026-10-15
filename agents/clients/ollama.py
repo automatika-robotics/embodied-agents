@@ -1,9 +1,9 @@
-from typing import Any, Optional, Dict, Union, List, Generator
+from typing import Any, Optional, Dict, Union, List, Generator, Tuple
 
 import httpx
 
 from ..models import OllamaModel
-from ..utils import encode_img_base64
+from ..utils import encode_img_base64, tls_verify
 from .model_base import ModelClient
 
 __all__ = ["OllamaClient"]
@@ -20,6 +20,7 @@ class OllamaClient(ModelClient):
         inference_timeout: int = 30,
         init_on_activation: bool = True,
         logging_level: str = "info",
+        ca_cert: Optional[str] = None,
         **kwargs,
     ):
         try:
@@ -39,9 +40,10 @@ class OllamaClient(ModelClient):
             inference_timeout=inference_timeout,
             init_on_activation=init_on_activation,
             logging_level=logging_level,
+            ca_cert=ca_cert,
             **kwargs,
         )
-        self.client = Client(host=self._build_url())
+        self.client = Client(host=self._build_url(), verify=tls_verify(self.ca_cert))
         self._check_connection()
 
     @property
@@ -73,6 +75,48 @@ class OllamaClient(ModelClient):
             )
             raise
 
+    @property
+    def context_length(self) -> Optional[int]:
+        """The context length the model is served with: ``num_ctx`` from the
+        model options when set, since requests carry it, else what Ollama
+        reports for the loaded model, else the length the model was trained
+        with. None when nothing can be read"""
+        if num_ctx := (self.model_init_params.get("options") or {}).get("num_ctx"):
+            return num_ctx
+        served, trained = self._context_lengths()
+        return served or trained
+
+    def _context_lengths(self) -> Tuple[Optional[int], Optional[int]]:
+        """The context length the model is served with, from Ollama's process
+        list, and the one it was trained with, from its model info."""
+        checkpoint = self.model_init_params["checkpoint"]
+        served = trained = None
+        try:
+            wanted = checkpoint.removesuffix(":latest")
+            for running in self.client.ps().models:
+                names = {running.model, running.name}
+                if wanted in {name.removesuffix(":latest") for name in names}:
+                    served = running.context_length
+            info = self.client.show(checkpoint).modelinfo or {}
+            trained = next(
+                (v for k, v in info.items() if k.endswith(".context_length")), None
+            )
+        except Exception as e:
+            self.logger.debug(f"Could not read the context length of {checkpoint}: {e}")
+        return served, trained
+
+    def _warn_on_a_small_context(self) -> None:
+        """Ollama serves a model with a few thousand tokens of context unless
+        told otherwise, whatever the model supports, and truncates the prompt
+        silently past it"""
+        served, trained = self._context_lengths()
+        if served and trained and served < trained:
+            self.logger.warning(
+                f"{self.model_init_params['checkpoint']} is served with a context "
+                f"of {served} tokens of the {trained} it supports. Set num_ctx in "
+                "the OllamaModel options to use more."
+            )
+
     def _is_embedding_model(self) -> bool:
         """Detect whether the served model is an embedding model.
 
@@ -94,17 +138,24 @@ class OllamaClient(ModelClient):
 
     def _initialize(self) -> None:
         """
-        Initialize the model on platform using the paramters provided in the model specification class
+        Initialize the model on platform using the paramters provided in the model specification class.
         """
+        from ollama import ResponseError
+
         self.logger.info(f"Initializing {self.model_name} on ollama")
+        checkpoint = self.model_init_params["checkpoint"]
         try:
             # set timeout on underlying httpx client
             self.client._client.timeout = self.init_timeout
-            r = self.client.pull(self.model_init_params["checkpoint"])
-            if r.get("status") != "success":  # type: ignore
-                raise Exception(
-                    f"Could not pull model {self.model_init_params['checkpoint']}"
-                )
+            try:
+                self.client.show(checkpoint)
+            except ResponseError as e:
+                if e.status_code != 404:
+                    raise
+                self.logger.info(f"{checkpoint} is not installed in Ollama, pulling it")
+                r = self.client.pull(checkpoint)
+                if r.get("status") != "success":  # type: ignore
+                    raise Exception(f"Could not pull model {checkpoint}") from e
             # Cache capability check so _deinitialize can use it too
             self._is_embedding = self._is_embedding_model()
             # load model in memory with an appropriate empty request
@@ -126,6 +177,8 @@ class OllamaClient(ModelClient):
         self.logger.info(
             f"{self.model_name} with {self.model_init_params['checkpoint']} model initialized"
         )
+        if not self._is_embedding:
+            self._warn_on_a_small_context()
 
     def _inference(
         self, inference_input: Dict[str, Any]
@@ -138,10 +191,21 @@ class OllamaClient(ModelClient):
             "stream": inference_input.pop("stream"),
         }
 
-        # make images part of the latest message in message list
-        if images := inference_input.get("images"):
-            input["messages"][-1]["images"] = [encode_img_base64(img) for img in images]
-            inference_input.pop("images")
+        # Encode the images the chat history kept on earlier messages, and make
+        # the images of this call part of the latest message
+        messages = [
+            {**message, "images": [encode_img_base64(img) for img in message["images"]]}
+            if message.get("images")
+            else message
+            for message in input["messages"]
+        ]
+        if images := inference_input.pop("images", None):
+            messages[-1] = {
+                **messages[-1],
+                "images": messages[-1].get("images", [])
+                + [encode_img_base64(img) for img in images],
+            }
+        input["messages"] = messages
 
         # Add tools as part of input, if available
         if tools := inference_input.get("tools"):
@@ -157,6 +221,9 @@ class OllamaClient(ModelClient):
             if self.model_init_params.get("options")
             else inference_input
         )
+        # pass the thinking option
+        if (think := self.model_init_params.get("think")) is not None:
+            input["think"] = think
 
         self.logger.debug(f"Sending to ollama server: {input}")
 
@@ -179,9 +246,12 @@ class OllamaClient(ModelClient):
             )
             return
 
-        # if tool calls exist
+        # if tool calls exist, convert client return pydantic models to plain dicts
         if tool_calls := ollama_result["message"].get("tool_calls"):  # type: ignore
-            input["tool_calls"] = tool_calls
+            input["tool_calls"] = [
+                call.model_dump() if hasattr(call, "model_dump") else call
+                for call in tool_calls
+            ]
 
         input["output"] = ollama_result["message"].get("content", "")
         return input
@@ -219,7 +289,7 @@ class OllamaClient(ModelClient):
     def _deinitialize(self):
         """Deinitialize the model on the platform"""
 
-        self.logger.error(f"Deinitializing {self.model_name} model on ollama")
+        self.logger.info(f"Deinitializing {self.model_name} model on ollama")
         try:
             if getattr(self, "_is_embedding", False):
                 self.client.embed(

@@ -12,7 +12,7 @@ import msgpack
 import msgpack_numpy as m_pack
 
 from ..models import Model, OllamaModel
-from ..utils import encode_img_base64
+from ..utils import encode_img_base64, tls_verify
 from .model_base import ModelClient
 
 # patch msgpack for numpy arrays
@@ -37,6 +37,23 @@ class RoboMLError(Exception):
     pass
 
 
+def _text_only_messages(inference_input: Dict[str, Any], logger) -> Dict[str, Any]:
+    """Drop the images the chat history kept on earlier messages"""
+    messages = inference_input.get("query")
+    if isinstance(messages, list) and any(
+        isinstance(m, dict) and m.get("images") for m in messages
+    ):
+        logger.warning(
+            "Images of earlier turns are not sent to RoboML, which takes images "
+            "for the current message only. Set history_images to 1."
+        )
+        inference_input["query"] = [
+            {k: v for k, v in m.items() if k != "images"} if isinstance(m, dict) else m
+            for m in messages
+        ]
+    return inference_input
+
+
 class RoboMLHTTPClient(ModelClient):
     """An HTTP client for interaction with ML models served on RoboML"""
 
@@ -48,6 +65,7 @@ class RoboMLHTTPClient(ModelClient):
         inference_timeout: int = 30,
         init_on_activation: bool = True,
         logging_level: str = "info",
+        ca_cert: Optional[str] = None,
         **kwargs,
     ):
         if isinstance(model, OllamaModel):
@@ -61,12 +79,17 @@ class RoboMLHTTPClient(ModelClient):
             inference_timeout=inference_timeout,
             init_on_activation=init_on_activation,
             logging_level=logging_level,
+            ca_cert=ca_cert,
             **kwargs,
         )
         self.url = self._build_url()
 
         # create httpx client
-        self.client = httpx.Client(base_url=self.url, timeout=self.inference_timeout)
+        self.client = httpx.Client(
+            base_url=self.url,
+            timeout=self.inference_timeout,
+            verify=tls_verify(self.ca_cert),
+        )
         self._check_connection()
 
     def _check_connection(self) -> None:
@@ -116,6 +139,7 @@ class RoboMLHTTPClient(ModelClient):
         self, inference_input: Dict[str, Any]
     ) -> Optional[Dict[str, Union[str, Generator]]]:
         """Call inference on the model using data and inference parameters from the component"""
+        inference_input = _text_only_messages(inference_input, self.logger)
         # encode any byte or numpy array data
         if "query" in inference_input.keys():
             if isinstance(inference_input["query"], bytes):
@@ -166,18 +190,14 @@ class RoboMLHTTPClient(ModelClient):
         return result
 
     def _deinitialize(self) -> None:
-        """Deinitialize the model on the platform"""
+        """Deinitialize the model on the platform."""
 
         self.logger.info(f"Deinitializing {self.model_name} model on RoboML remote")
         stop_params = {"node_name": self.model_name}
         try:
             self.client.post("/remove_node", params=stop_params).raise_for_status()
-            self.client.close()
         except Exception as e:
             self.__handle_exceptions(e)
-            if hasattr(self, "client") and self.client and not self.client.is_closed:
-                self.logger.info("Closing HTTPX client.")
-                self.client.close()
 
     def __handle_exceptions(self, excep: Exception) -> None:
         """__handle_exceptions.
@@ -209,7 +229,7 @@ class RoboMLHTTPClient(ModelClient):
 
 
 class RoboMLWSClient(RoboMLHTTPClient):
-    """An websocket client for interaction with ML models served on RoboML"""
+    """An websocket client for interaction with ML models served on RoboML."""
 
     def __init__(
         self,
@@ -219,6 +239,7 @@ class RoboMLWSClient(RoboMLHTTPClient):
         inference_timeout: int = 30,
         init_on_activation: bool = True,
         logging_level: str = "info",
+        ca_cert: Optional[str] = None,
         **kwargs,
     ):
         if isinstance(model, OllamaModel):
@@ -232,14 +253,24 @@ class RoboMLWSClient(RoboMLHTTPClient):
             inference_timeout=inference_timeout,
             init_on_activation=init_on_activation,
             logging_level=logging_level,
+            ca_cert=ca_cert,
             **kwargs,
         )
         # Add queues and events
         self.stop_event: Optional[threading.Event] = None
         self.request_queue: Optional[queue.Queue] = None
         self.response_queue: Optional[queue.Queue] = None
-        self.websocket_endpoint = (
-            f"{self._build_url('ws')}/{self.model_name}/ws_inference"
+        if not self.url.startswith("http"):
+            raise ValueError(
+                f"RoboMLWSClient takes an http:// or https:// host, got '{host}'. "
+                "The WebSocket connection is derived from it: wss for https"
+            )
+        self.websocket_endpoint = f"ws{self.url[4:]}/{self.model_name}/ws_inference"
+        # certificate to trust only applies to wss
+        self._ws_ssl = (
+            tls_verify(self.ca_cert)
+            if self.ca_cert and self.websocket_endpoint.startswith("wss")
+            else None
         )
 
     def _inference(self) -> Optional[Dict]:
@@ -267,7 +298,9 @@ class RoboMLWSClient(RoboMLHTTPClient):
             return
 
         try:
-            async with websockets.connect(self.websocket_endpoint) as websocket:
+            async with websockets.connect(
+                self.websocket_endpoint, ssl=self._ws_ssl
+            ) as websocket:
                 while not self.stop_event.is_set():
                     try:
                         # Attempt to send
@@ -275,6 +308,9 @@ class RoboMLWSClient(RoboMLHTTPClient):
                             self.request_queue.get_nowait()
                         )  # Non-blocking
                         if websocket.close_code is None:
+                            inference_input = _text_only_messages(
+                                inference_input, self.logger
+                            )
                             await websocket.send(msgpack.packb(inference_input))
                             self.logger.debug("Sent input to server")
                             self.request_queue.task_done()
@@ -463,6 +499,7 @@ class RoboMLRESPClient(ModelClient):
                     "RoboML RESPClient currently does not handle streaming. Set stream to False in component config to get rid of this warning."
                 )
                 inference_input.pop("stream")
+            inference_input = _text_only_messages(inference_input, self.logger)
             data_b = msgpack.packb(inference_input)
             # call inference method
             result_b = self.redis.execute_command(
@@ -477,14 +514,13 @@ class RoboMLRESPClient(ModelClient):
         return result
 
     def _deinitialize(self) -> None:
-        """Deinitialize the model on the platform"""
+        """Deinitialize the model on the platform."""
 
-        self.logger.error(f"Deinitializing {self.model_name} on RoboML remote")
+        self.logger.info(f"Deinitializing {self.model_name} on RoboML remote")
         stop_params = {"node_name": self.model_name}
         try:
             stop_params_b = msgpack.packb(stop_params)
             self.redis.execute_command("remove_node", stop_params_b)
-            self.redis.close()
         except Exception as e:
             self.__handle_exceptions(e)
 

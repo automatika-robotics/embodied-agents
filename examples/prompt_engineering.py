@@ -2,7 +2,7 @@ from agents.components import Vision, MLLM
 from agents.models import VisionModel, OllamaModel
 from agents.clients import RoboMLRESPClient, OllamaClient
 from agents.ros import Topic, Launcher
-from agents.config import VisionConfig
+from agents.config import MLLMConfig, VisionConfig
 
 image0 = Topic(name="image_raw", msg_type="Image")
 detections_topic = Topic(name="detections", msg_type="Detections")
@@ -33,6 +33,7 @@ mllm = MLLM(
     outputs=[text_answer],
     model_client=mllm_client,
     trigger=text_query,
+    config=MLLMConfig(chat_history=True),
     component_name="mllm_component",
 )
 
