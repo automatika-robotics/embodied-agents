@@ -1,9 +1,12 @@
 """Tests for lifting 2D detections into metric 3D boxes — no ROS node needed."""
 
+import re
+
 import numpy as np
 import pytest
 
 from agents.utils.perception3d import (
+    _KOMPASS_MIN_VERSION,
     Box3D,
     detections_to_message_fields,
     ensure_kompass_core,
@@ -147,11 +150,12 @@ class TestKompassCoreGuard:
             ensure_kompass_core()
 
     def test_an_old_release_is_refused(self, monkeypatch):
-        """Before 0.8.4 the detector rotated every box a quarter turn on its
-        own; running against it would misplace boxes silently."""
+        """A release older than the minimum is refused, naming the minimum and
+        the version found: older detectors misplace boxes silently."""
         monkeypatch.setattr("agents.utils.perception3d.find_spec", lambda name: object())
-        monkeypatch.setattr("importlib.metadata.version", lambda name: "0.8.3")
-        with pytest.raises(ImportError, match="0.8.5.*found 0.8.3"):
+        monkeypatch.setattr("importlib.metadata.version", lambda name: "0.0.1")
+        minimum = re.escape(".".join(map(str, _KOMPASS_MIN_VERSION)))
+        with pytest.raises(ImportError, match=f"{minimum}.*found 0\\.0\\.1"):
             ensure_kompass_core()
 
 
