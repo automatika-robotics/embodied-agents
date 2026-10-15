@@ -21,6 +21,7 @@ from agents.ros import (
     QoSConfig,
     SupportedType,
     Event,
+    add_additional_datatypes,
 )
 
 # Python3.8 compatible NoneType
@@ -149,7 +150,8 @@ def _parse_component_config(
 
 
 def _parse_additional_types(value: str):
-    """Get additional types"""
+    """Get the additional types and register them, before any topic, trigger
+    or event is rebuilt"""
     serialized_types = json.loads(value)
     _additional_types = []
     for s_t in serialized_types:
@@ -160,6 +162,7 @@ def _parse_additional_types(value: str):
         new_type = getattr(module, class_name)
         if issubclass(new_type, SupportedType):
             _additional_types.append(new_type)
+    add_additional_datatypes(_additional_types)
     return _additional_types
 
 
@@ -174,8 +177,6 @@ def _parse_trigger(
     :return: Trigger topics or float
     :rtype: Topic | List[Topic] | float
     """
-    # TODO: Handle additional types here
-
     # Deserialize main dict or float value
     trigger_deserialized = json.loads(trigger_str)
     if isinstance(trigger_deserialized, Dict):
@@ -357,14 +358,12 @@ def main():
         else None
     )
 
-    # TODO: Handle additional types and qos in deserialization
     layers = (
         [MapLayer(**json.loads(i)) for i in json.loads(args.layers)]
         if args.layers
         else None
     )
 
-    # TODO: Handle additional types and qos in deserialization
     routes = (
         [Route(**json.loads(r)) for r in json.loads(args.routes)]
         if args.routes
