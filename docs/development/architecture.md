@@ -149,7 +149,7 @@ BaseComponentConfig (ros_sugar)
         ├── SemanticRouterConfig
         ├── DecisionConfig
         └── MotionDetectorConfig
-  └── MapConfig (extends BaseComponentConfig directly)
+  └── MemoryConfig, MoveItConfig (extend BaseComponentConfig directly)
 ```
 
 Each config class:

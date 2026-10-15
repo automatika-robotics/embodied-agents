@@ -134,7 +134,7 @@ def introspection_validation(output: str) -> Optional[str]:
 introspector.add_publisher_preprocessor(introspection_answer, introspection_validation)
 
 
-### Memory (replaces MapEncoding) ###
+### Memory ###
 position = Topic(name="odom", msg_type="Odometry")
 
 memory = Memory(

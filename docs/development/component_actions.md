@@ -194,7 +194,6 @@ A written function runs in the launcher process. It has `run_action('<tool name>
 | **LLM**, **VLM** | `get_history()` | The conversation so far as text, a line per message (a planning tool) |
 | **TextToSpeech** | `say(text)` | Convert text to speech and play on device |
 | **TextToSpeech** | `stop_playback()` | Stop current audio playback |
-| **MapEncoding** | `add_point(layer, point)` | Add a labeled point to a map layer |
 
 All `ModelComponent` subclasses also inherit:
 

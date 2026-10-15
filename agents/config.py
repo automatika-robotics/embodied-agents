@@ -17,7 +17,6 @@ __all__ = [
     "TextToSpeechConfig",
     "SemanticRouterConfig",
     "DecisionConfig",
-    "MapConfig",
     "MemoryConfig",
     "MotionDetectorConfig",
     "VideoMessageMakerConfig",
@@ -1281,33 +1280,6 @@ class SpeechToTextConfig(ModelComponentConfig):
             "word_timestamps": self._word_timestamps,
             "vad_filter": self._vad_filter,
         }
-
-
-@define(kw_only=True)
-class MapConfig(BaseComponentConfig):
-    """Configuration for a MapEncoding component.
-
-    :param map_name: The name of the map.
-    :type map_name: str
-    :param distance_func: The function used to calculate distance when retreiving information from the map collection. Can be one of "l2" (L2 distance), "ip" (Inner Product), or "cosine" (Cosine similarity). Default is "l2".
-    :type distance_func: str
-
-    Example of usage:
-    ```python
-    config = MapConfig(map_name="my_map", distance_func="ip")
-    ```
-    """
-
-    map_name: str = field()
-    distance_func: Literal["l2", "ip", "cosine"] = field(
-        default="l2", validator=base_validators.in_(["l2", "ip", "cosine"])
-    )
-    _position: Optional[Topic] = field(
-        default=None, converter=_get_optional_topic, alias="_position"
-    )
-    _map_topic: Optional[Topic] = field(
-        default=None, converter=_get_optional_topic, alias="_map_topic"
-    )
 
 
 @define(kw_only=True)

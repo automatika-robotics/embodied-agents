@@ -14,7 +14,7 @@ from agents.clients.model_base import ModelClient
 from agents.ros import (
     Topic,
     FixedInput,
-    MapLayer,
+    MemLayer,
     Route,
     QoSConfig,
     SupportedType,
@@ -58,7 +58,7 @@ def _parse_args() -> Tuple[argparse.Namespace, List[str]]:
     parser.add_argument(
         "--layers",
         type=str,
-        help="Map Encoding layers",
+        help="Memory layers",
     )
     parser.add_argument(
         "--trigger",
@@ -351,7 +351,7 @@ def main():
     )
 
     layers = (
-        [MapLayer(**json.loads(i)) for i in json.loads(args.layers)]
+        [MemLayer(**json.loads(i)) for i in json.loads(args.layers)]
         if args.layers
         else None
     )
@@ -381,23 +381,6 @@ def main():
             config_file=config_file,
         )  # we dont pass default route here as its already part of the config
     # and will be set from there
-    # Map Encoding Component
-    elif component_type == all_components.MapEncoding.__name__:
-        db_client_json = json.loads(args.db_client)
-        db_client = getattr(clients, db_client_json["client_type"])(**db_client_json)
-        if not db_client:
-            raise RuntimeError("The map encoding component expects a vectorDB client")
-        component = comp_class(
-            layers=layers,
-            position=config._position,
-            map_topic=config._map_topic,
-            db_client=db_client,
-            config=config,
-            trigger=trigger,
-            component_name=component_name,
-            config_file=config_file,
-        )
-
     elif component_type == all_components.Memory.__name__:
         embedding_client_json = json.loads(args.embedding_client)
         embedding_client = (

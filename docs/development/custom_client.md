@@ -110,7 +110,7 @@ The default implementation returns `False`.
 
 ## DBClient for Vector Databases
 
-`DBClient` (defined in `agents.clients.db_base`) is the equivalent of `ModelClient` for vector database connections. It is used by `MapEncoding` and `SemanticRouter` components.
+`DBClient` (defined in `agents.clients.db_base`) is the equivalent of `ModelClient` for vector database connections. It is used by the `SemanticRouter` in vector mode, and for retrieval augmented generation in the `LLM`, `VLM` and `Cortex` components.
 
 The abstract methods:
 
