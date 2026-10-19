@@ -27,6 +27,7 @@ from .utils import (
     build_lerobot_features_from_dataset_info,
     find_missing_values,
     get_frame_id,
+    get_stamp,
     get_stamp_secs,
     _LANGUAGE_CODES,
 )
@@ -45,6 +46,7 @@ __all__ = [
     "find_missing_values",
     "flatten",
     "get_frame_id",
+    "get_stamp",
     "get_stamp_secs",
     "draw_detection_bounding_boxes",
     "draw_points_2d",

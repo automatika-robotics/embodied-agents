@@ -452,6 +452,61 @@ class _GrounderSetup(_SyntheticCamera):
         comp._execution_step(topic=Topic(name="text_in", msg_type="String"))
 
 
+class TestTextAboutAPicture:
+    """A reply to a question about a picture is dated with that picture."""
+
+    @pytest.fixture
+    def describer(self, rclpy_init, mock_model_client):
+        comp = MLLM(
+            inputs=[
+                Topic(name="text_in", msg_type="String"),
+                Topic(name="img_in", msg_type="Image"),
+            ],
+            outputs=[Topic(name="reply", msg_type="StreamingString")],
+            model_client=mock_model_client,
+            config=MLLMConfig(task="general"),
+            component_name="test_describer",
+        )
+        mock_component_internals(comp)
+        comp.publishers_dict = {
+            topic.name: MagicMock(output_topic=topic) for topic in comp.out_topics
+        }
+        comp._task = "general"
+        comp._string_publishers = ["reply"]
+        comp._poi_publishers = []
+        comp._detections_publishers = []
+        comp._detections3d_publishers = []
+        return comp
+
+    def test_the_reply_carries_the_pictures_stamp(self, describer, mock_model_client):
+        mock_model_client.inference.return_value = {"output": "a cup on the table"}
+        trig = MagicMock()
+        trig.get_output.return_value = "what do you see"
+        describer.trig_callbacks = {"text_in": trig}
+        picture = _image("cam", stamp=5.5)
+        describer.callbacks = {
+            "img_in": _callback(picture, output=np.zeros((2, 2, 3)), name="img_in")
+        }
+        describer._execution_step(topic=Topic(name="text_in", msg_type="String"))
+        _, kwargs = describer.publishers_dict["reply"].publish.call_args
+        assert kwargs["stamp"] == picture.header.stamp
+
+    def test_several_pictures_leave_the_stamp_to_the_publisher(
+        self, describer, mock_model_client
+    ):
+        mock_model_client.inference.return_value = {"output": "two cups"}
+        trig = MagicMock()
+        trig.get_output.return_value = "what do you see"
+        describer.trig_callbacks = {"text_in": trig}
+        describer.callbacks = {
+            name: _callback(_image(name, stamp=t), output=np.zeros((2, 2, 3)), name=name)
+            for name, t in (("img_in", 1.0), ("img_two", 2.0))
+        }
+        describer._execution_step(topic=Topic(name="text_in", msg_type="String"))
+        _, kwargs = describer.publishers_dict["reply"].publish.call_args
+        assert kwargs["stamp"] is None
+
+
 class TestGroundedLift(_GrounderSetup):
     """Grounded 2D boxes are lifted onto the depth latched with the picture
     the model saw, and published as Detections3D named by the query."""
@@ -475,6 +530,21 @@ class TestGroundedLift(_GrounderSetup):
         pixels, _ = self._published(grounder, "d2")
         assert pixels["bboxes"] == [list(self.PATCH)]
         assert pixels["labels"] == ["the orange"]
+
+    def test_grounded_outputs_carry_the_pictures_stamp(
+        self, grounder, mock_model_client
+    ):
+        """Both the 2D boxes and their lift are dated with the frame the model
+        saw, not with the moment they were published."""
+        mock_model_client.inference.return_value = {"output": [list(self.PATCH)]}
+        self._wire(grounder, stamp=5.5, depth_stamp=5.5)
+        self._trigger(grounder)
+        picture = grounder.callbacks["img_in"].msg
+        _, published_2d = self._published(grounder, "d2")
+        _, published_3d = self._published(grounder, "d3")
+        assert published_2d["stamp"] == picture.header.stamp
+        assert published_3d["stamp"] == picture.header.stamp
+        assert "time_stamp" not in published_2d and "time_stamp" not in published_3d
 
     def test_nothing_grounded_is_an_empty_message(self, grounder, mock_model_client):
         """The model looked and found nothing: an observation, published so

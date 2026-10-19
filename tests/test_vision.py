@@ -75,25 +75,62 @@ class TestDetectionFrames:
         publish_kwargs = vision.publishers_dict["out"].publish.call_args[1]
         assert publish_kwargs["frame_id"] == "front_camera_optical"
 
-    def test_source_frame_from_rgbd(self, vision):
+    def test_publish_passes_source_stamp(self, vision, mock_model_client):
+        """The detections keep the time of the frame they were made in, not
+        the time they were published after inference."""
+        mock_model_client.inference.return_value = {
+            "output": [{"bboxes": [[0, 0, 1, 1]], "labels": ["cup"], "scores": [0.9]}]
+        }
+        callback = MagicMock()
+        callback.msg = _image("front_camera_optical", stamp=12.5)
+        callback.get_output.return_value = [[0, 0, 0]]
+        vision.callbacks = {"image": callback}
+        vision.trig_callbacks = {}
+        vision._execution_step()
+        publish_kwargs = vision.publishers_dict["out"].publish.call_args[1]
+        assert publish_kwargs["stamp"] == callback.msg.header.stamp
+        assert "time_stamp" not in publish_kwargs
+
+    def test_3d_boxes_carry_their_frames_stamp(self):
+        from builtin_interfaces.msg import Time
+
+        from agents.ros import Detections3D
+
+        stamp = Time(sec=3, nanosec=250_000_000)
+        msg = Detections3D.convert([((0.0, 0.0, 1.0), (1.0, 1.0, 1.0))], stamp=stamp)
+        assert msg.header.stamp == stamp
+        assert Detections3D.convert([]).header.stamp == Time()
+
+    def test_a_text_about_a_picture_carries_its_stamp(self):
+        from builtin_interfaces.msg import Time
+
+        from agents.ros import StreamingString
+
+        stamp = Time(sec=3, nanosec=250_000_000)
+        assert StreamingString.convert("a cup", stamp=stamp).header.stamp == stamp
+        assert StreamingString.convert("a cup").header.stamp == Time()
+
+    def test_source_header_from_rgbd(self, vision):
         rgbd = MagicMock()
-        rgbd.rgb = _image("rgbd_optical")
+        rgbd.rgb = _image("rgbd_optical", stamp=7.25)
         vision._images = [rgbd]
-        assert vision._source_frame() == "rgbd_optical"
+        header = vision._source_header()
+        assert header.frame_id == "rgbd_optical"
+        assert header.stamp == rgbd.rgb.header.stamp
 
-    def test_source_frame_none_without_header(self, vision):
+    def test_source_header_none_without_header(self, vision):
         vision._images = [MagicMock(spec=[])]
-        assert vision._source_frame() is None
+        assert vision._source_header() is None
 
-    def test_multi_camera_leaves_outer_frame_unset(self, vision):
+    def test_multi_camera_leaves_outer_header_unset(self, vision):
         """A single frame would name only one of the cameras — the nested
-        per-source detections carry the frames instead."""
-        vision._images = [_image("left_camera"), _image("right_camera")]
-        assert vision._source_frame() is None
+        per-source detections carry the frames and their times instead."""
+        vision._images = [_image("left_camera", stamp=1.0), _image("right_camera", stamp=2.0)]
+        assert vision._source_header() is None
 
-    def test_no_images_has_no_frame(self, vision):
+    def test_no_images_has_no_header(self, vision):
         vision._images = []
-        assert vision._source_frame() is None
+        assert vision._source_header() is None
 
 
 class TestDetectionSet:

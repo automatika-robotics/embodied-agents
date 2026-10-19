@@ -302,6 +302,7 @@ class StreamingString(SupportedType):
         output: str,
         stream: bool = False,
         done: bool = True,
+        stamp: Optional[Any] = None,
         **_,
     ) -> ROSStreamingString:
         """
@@ -309,6 +310,9 @@ class StreamingString(SupportedType):
         :return: ROSStreamingString
         """
         msg = ROSStreamingString()
+        # The time of the source that prompted the text reply, else None
+        if stamp is not None:
+            msg.header.stamp = stamp
         msg.stream = stream
         msg.done = done
         msg.data = output
@@ -533,6 +537,7 @@ class Detections3D(SupportedType):
         depth_validity: Optional[List[float]] = None,
         boxes_2d: Optional[List] = None,
         source_frame: str = "",
+        stamp: Optional[Any] = None,
         **_,
     ) -> ROSDetections3D:
         """
@@ -543,6 +548,9 @@ class Detections3D(SupportedType):
         :return: Detections3D
         """
         msg = ROSDetections3D()
+        # The frame's time, when the caller has it
+        if stamp is not None:
+            msg.header.stamp = stamp
         boxes = []
         for center, size in output:
             box = ROSBbox3D()

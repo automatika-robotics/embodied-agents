@@ -659,6 +659,16 @@ def get_frame_id(msg: Any) -> str:
     return getattr(header, "frame_id", None) or getattr(msg, "frame_id", "") or ""
 
 
+def get_stamp(msg: Any) -> Optional[Any]:
+    """Capture time of a ROS message as its header's time,
+    An RGBD message answers for its colour image.
+
+    :param msg: Any ROS message, with or without a header
+    """
+    header = getattr(getattr(msg, "rgb", msg), "header", None)
+    return getattr(header, "stamp", None)
+
+
 def get_stamp_secs(msg: Any) -> float:
     """Capture time of a ROS message in seconds, 0 when it does not say.
 

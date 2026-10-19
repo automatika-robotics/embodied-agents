@@ -27,7 +27,7 @@ from ..ros import (
     ROSCompressedImage,
     component_action,
 )
-from ..utils import validate_func_args
+from ..utils import validate_func_args, get_stamp
 from ..utils.perception3d import resolve_lift_camera
 from .depth_lift import DepthLiftMixin
 from .llm import LLM
@@ -624,20 +624,20 @@ class MLLM(DepthLiftMixin, LLM):
         """
         published: List[str] = []
         fields = None
+        # get the source frames stamp, none if multiple
+        stamp = get_stamp(self._images[0]) if len(self._images) == 1 else None
         if self._task == "general":
             result["output"] = self._strip_think_tokens(result["output"])
             self.history.add_reply(result["output"])
             for pub_name in self._string_publishers:
-                self.publishers_dict[pub_name].publish(
-                    **result, time_stamp=self.get_ros_time()
-                )
+                self.publishers_dict[pub_name].publish(**result, stamp=stamp)
                 published.append(pub_name)
         elif self._task in ("pointing", "trajectory"):
             for pub_name in self._poi_publishers:
                 self.publishers_dict[pub_name].publish(
                     **result,
                     image=self._images[0],  # POI msg takes only one image
-                    time_stamp=self.get_ros_time(),
+                    stamp=stamp,
                 )
                 published.append(pub_name)
         elif self._task in ("grounding", "affordance"):
@@ -658,7 +658,7 @@ class MLLM(DepthLiftMixin, LLM):
                 publisher.publish(
                     [boxes] if multi else boxes,
                     images=self._images if multi else next(iter(self._images), None),
-                    time_stamp=self.get_ros_time(),
+                    stamp=None if multi else stamp,
                 )
                 published.append(pub_name)
             fields = self._publish_grounded_3d(result["output"])
@@ -716,7 +716,7 @@ class MLLM(DepthLiftMixin, LLM):
                 fields["output"],
                 **{k: v for k, v in fields.items() if k != "output"},
                 frame_id=self.config.detections_frame,
-                time_stamp=self.get_ros_time(),
+                stamp=get_stamp(self._lift_msg),
             )
         return fields
 

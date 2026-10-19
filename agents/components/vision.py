@@ -30,7 +30,7 @@ from ..utils import (
     load_model,
     draw_points_2d,
     draw_detection_bounding_boxes,
-    get_frame_id,
+    get_stamp,
 )
 from ..utils.perception3d import resolve_lift_camera
 from .depth_lift import DepthLiftMixin
@@ -848,7 +848,7 @@ class Vision(DepthLiftMixin, ModelComponent):
                         boxes["output"],
                         **{k: v for k, v in boxes.items() if k != "output"},
                         frame_id=self.config.detections_frame,
-                        time_stamp=kwargs.get("time_stamp"),
+                        stamp=get_stamp(self._lift_msg),
                     )
             elif issubclass(msg_type, (Detections, Trackings)):
                 publisher.publish(
@@ -910,13 +910,13 @@ class Vision(DepthLiftMixin, ModelComponent):
             boxes_2d=pixels,
         )
 
-    def _source_frame(self) -> Optional[str]:
-        """Frame of the camera the detections were made in, None unless
-        exactly one camera contributed.
+    def _source_header(self) -> Optional[Any]:
+        """Header of the picture the detections were made in, its frame and
+        its time. None unless exactly one camera contributed.
         """
         if len(self._images) != 1:
             return None
-        return get_frame_id(getattr(self._images[0], "rgb", self._images[0])) or None
+        return getattr(getattr(self._images[0], "rgb", self._images[0]), "header", None)
 
     def _execution_step(self, *args, **kwargs):
         """_execution_step.
@@ -946,11 +946,12 @@ class Vision(DepthLiftMixin, ModelComponent):
             return
 
         # result acquired, publish inference result
+        header = self._source_header()
         self._publish(
             result,
             images=self._images,
-            frame_id=self._source_frame(),
-            time_stamp=self.get_ros_time(),
+            frame_id=(header.frame_id or None) if header else None,
+            stamp=header.stamp if header else None,
         )
         if self.config.enable_visualization:
             result["images"] = inference_input["images"]
