@@ -63,7 +63,7 @@ class TestClientsWarnWhenStarted:
         "model_type": "GenericLLM",
         "model_name": "m",
         "init_timeout": 10,
-        "model_init_params": {},
+        "model_init_params": {"checkpoint": "m"},
     }
 
     def _started(self, monkeypatch, host):
