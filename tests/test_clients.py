@@ -7,7 +7,8 @@ deselects them. Hosts, ports and models are set with environment variables:
 - Ollama, for OllamaClient and for GenericHTTPClient against Ollama's
   OpenAI-compatible endpoint: OLLAMA_HOST (127.0.0.1), OLLAMA_PORT (11434),
   OLLAMA_MODEL (qwen2.5vl:latest, a vision model that does not think, so its
-  reply is all content)
+  reply is all content), OLLAMA_DECISION_MODEL (kev:0.8b-q8_0, a decision
+  model tag, pulled when missing; needs Ollama 0.40.4 and ollama-python 0.6.3)
 - RoboML (``roboml``), for the HTTP and WebSocket clients: ROBOML_HOST
   (127.0.0.1), ROBOML_PORT (8000)
 - RoboML RESP (``roboml-resp``): ROBOML_RESP_PORT (6379)
@@ -54,6 +55,7 @@ pytestmark = pytest.mark.local_only
 HOST = os.environ.get("OLLAMA_HOST", "127.0.0.1")
 OLLAMA_PORT = int(os.environ.get("OLLAMA_PORT", 11434))
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5vl:latest")
+OLLAMA_DECISION_MODEL = os.environ.get("OLLAMA_DECISION_MODEL", "kev:0.8b-q8_0")
 ROBOML_HOST = os.environ.get("ROBOML_HOST", "127.0.0.1")
 ROBOML_PORT = int(os.environ.get("ROBOML_PORT", 8000))
 ROBOML_RESP_PORT = int(os.environ.get("ROBOML_RESP_PORT", 6379))
@@ -108,6 +110,14 @@ def text_of(chunk) -> str:
 @pytest.fixture(scope="class")
 def ollama():
     client = started(OllamaClient(OllamaModel(name="llm", checkpoint=OLLAMA_MODEL)))
+    yield client
+    client.deinitialize()
+
+
+@pytest.fixture(scope="class")
+def ollama_decision():
+    model = OllamaModel(name="decision", checkpoint=OLLAMA_DECISION_MODEL)
+    client = started(OllamaClient(model, host=HOST, port=OLLAMA_PORT))
     yield client
     client.deinitialize()
 
@@ -341,6 +351,33 @@ class TestGenericHTTPClientDecisions:
 
     def test_inference_after_initializing_again(self, decision):
         result = initialized_again(decision).inference({
+            "state": {"speech": "Please continue"},
+            "questions": {"stop": self.QUESTIONS["stop"]},
+        })
+        assert result["output"]["stop"]["noul"] < 0.5
+
+
+class TestOllamaClientDecisions:
+    QUESTIONS = TestGenericHTTPClientDecisions.QUESTIONS
+
+    def test_the_tag_is_a_decision_model(self, ollama_decision):
+        assert ollama_decision.supports_decisions
+        assert not ollama_decision.supports_tool_calls
+
+    def test_inference(self, ollama_decision):
+        result = ollama_decision.inference({
+            "state": "Speech heard by the robot: 'Stop right now!'",
+            "questions": self.QUESTIONS,
+        })
+        answers = result["output"]
+        assert set(answers) == set(self.QUESTIONS)
+        assert answers["stop"]["noul"] > 0.5
+        assert answers["route"]["choice"] in ("goto", "chat")
+        assert sum(answers["route"]["probabilities"].values()) == pytest.approx(1.0)
+        assert 0.0 <= answers["urgency"]["score"] <= 2.0
+
+    def test_inference_after_initializing_again(self, ollama_decision):
+        result = initialized_again(ollama_decision).inference({
             "state": {"speech": "Please continue"},
             "questions": {"stop": self.QUESTIONS["stop"]},
         })

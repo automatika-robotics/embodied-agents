@@ -57,7 +57,7 @@ class SemanticRouter(LLM):
     :type db_client: Optional[DBClient]
     :param model_client:
         (LLM Mode) A model client used for intelligent intent analysis and tool calling.
-        (Decision Mode) A model client with a decision model, such as GenericHTTPClient with a GenericDecisionModel.
+        (Decision Mode) A model client with a decision model: GenericHTTPClient with a GenericDecisionModel, or OllamaClient with a decision model tag.
     :type model_client: Optional[ModelClient]
     :param component_name:
         The name of this Semantic Router component (default: "router_component").

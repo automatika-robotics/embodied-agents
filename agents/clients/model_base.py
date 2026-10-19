@@ -1,6 +1,5 @@
-import threading
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Optional, Dict, Union, Generator, MutableMapping
+from typing import Any, Optional, Dict, Union, Generator, MutableMapping
 
 from rclpy import logging
 
@@ -64,50 +63,6 @@ class ModelClient(ABC):
             self.model_name, logging.get_logging_severity_from_string(logging_level)
         )
         self.inference_timeout = inference_timeout
-        # A download the server runs for a model that is not cached
-        self._pull: Optional[threading.Thread] = None
-        self._pull_decile = 0
-
-    def _pull_in_background(self, pull: Callable[[], None]) -> None:
-        """Run a model download in a thread so the recipe goes on being built.
-        It is waited for with ``_wait_for_pull`` where the model is needed.
-
-        :param pull: Runs the download to its end, logging progress with
-            ``_log_pull_progress``; its exception is logged as the failure
-        """
-        checkpoint = self.model_init_params.get("checkpoint")
-
-        def run():
-            try:
-                pull()
-            except Exception as e:
-                self.logger.error(f"Could not pull model {checkpoint}: {e}")
-
-        self._pull_decile = 0
-        self._pull = threading.Thread(target=run, daemon=True)
-        self._pull.start()
-
-    def _wait_for_pull(self) -> None:
-        """Block until a download started in the background has ended"""
-        if self._pull is not None and self._pull.is_alive():
-            self.logger.info(
-                f"Waiting for the pull of {self.model_init_params.get('checkpoint')} to finish"
-            )
-            self._pull.join()
-
-    def _log_pull_progress(self, done: int, total: int, stage: str = "") -> None:
-        """Log a download once per tenth of the way, with the stage it is in"""
-        if total <= 0:
-            return
-        decile = int(10 * done / total)
-        if decile == self._pull_decile:
-            return
-        self._pull_decile = decile
-        where = f" {stage}" if stage else ""
-        self.logger.info(
-            f"Pulling {self.model_init_params.get('checkpoint')}{where}: "
-            f"{done / 1e6:.0f} of {total / 1e6:.0f} MB ({10 * decile}%)"
-        )
 
     def _build_url(self, default_scheme: str = "http") -> str:
         """Construct the connection URL from ``host`` and ``port``.

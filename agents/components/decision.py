@@ -108,8 +108,9 @@ class DecisionComponent(ModelComponent):
         by id, in the API format. Each gets an output topic. Needs inputs or
         action states to be asked about.
     :type questions: Optional[dict[str, dict]]
-    :param model_client: A model client with a decision model, such as
-        GenericHTTPClient with a GenericDecisionModel.
+    :param model_client: A model client with a decision model: GenericHTTPClient
+        with a GenericDecisionModel, or OllamaClient with the OllamaModel of a
+        decision model tag.
     :type model_client: ModelClient
     :param config: The configuration for the component. Defaults to DecisionConfig().
     :type config: Optional[DecisionConfig]
@@ -171,8 +172,8 @@ class DecisionComponent(ModelComponent):
         if not model_client.supports_decisions:
             raise TypeError(
                 f"The provided model client ({model_client.__class__.__name__}) "
-                "does not serve a decision model. Use a client with a "
-                "GenericDecisionModel, such as GenericHTTPClient."
+                "does not serve a decision model. Use GenericHTTPClient with a "
+                "GenericDecisionModel, or OllamaClient with a decision model tag."
             )
 
         config = config or DecisionConfig()

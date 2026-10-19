@@ -365,10 +365,14 @@ class TestOllamaModelsAreLoaded:
     }
 
     def _client(self, show_error=None):
-        client = OllamaClient(self.MODEL)
-        client.client = MagicMock()
-        client.client.show.side_effect = show_error
-        client.client.pull.return_value = {"status": "success"}
+        """A client over a fake Ollama, in place from construction so the
+        capabilities probe reaches it and not the registry"""
+        fake = MagicMock()
+        fake.show.side_effect = show_error
+        fake.pull.return_value = iter([{"status": "success"}])
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr("ollama.Client", MagicMock(return_value=fake))
+            client = OllamaClient(self.MODEL)
         return client
 
     def test_an_installed_model_is_loaded_without_a_pull(self):
@@ -384,15 +388,16 @@ class TestOllamaModelsAreLoaded:
 
         client._initialize()
 
-        client.client.pull.assert_called_once_with("qwen3:0.6b")
+        client.client.pull.assert_called_once_with("qwen3:0.6b", stream=True)
         client.client.generate.assert_called_once()
 
-    def test_other_errors_are_raised_without_a_pull(self):
+    def test_other_errors_do_not_pull(self):
         client = self._client(ollama.ResponseError("server error", 500))
 
-        with pytest.raises(ollama.ResponseError):
-            client._initialize()
+        # The warm up request decides whether the server is usable
+        client._initialize()
         client.client.pull.assert_not_called()
+        client.client.generate.assert_called_once()
 
 
 class TestOllamaThinkingSwitch:

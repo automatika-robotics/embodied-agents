@@ -1,3 +1,4 @@
+import threading
 from typing import Any, Optional, Dict, Union, List, Generator, Tuple
 
 import httpx
@@ -8,9 +9,15 @@ from .model_base import ModelClient
 
 __all__ = ["OllamaClient"]
 
+# Decision model warm up query
+DECISION_WARMUP = {
+    "state": "Warming up.",
+    "questions": {"warmup": {"type": "noul", "instructions": "Is this a test?"}},
+}
+
 
 class OllamaClient(ModelClient):
-    """An HTTP client for interaction with ML models served on ollama"""
+    """An HTTP client for interaction with ML models served on ollama."""
 
     def __init__(
         self,
@@ -45,15 +52,98 @@ class OllamaClient(ModelClient):
         )
         self.client = Client(host=self._build_url(), verify=tls_verify(self.ca_cert))
         self._check_connection()
+        self._capabilities: Optional[List[str]] = None
+
+        # A pull of a tag that is not installed, run in the background
+        self._pull: Optional[threading.Thread] = None
+        self._probe_capabilities()
 
     @property
     def supports_tool_calls(self) -> bool:
         """
-        Ollama client supports tool calling.
+        Ollama chat models support tool calling, decision models do not.
+        Does not wait for a pull: a model still being pulled is taken for
+        a chat model.
 
         :rtype: bool
         """
-        return True
+        return self._capabilities is None or "decision" not in self._capabilities
+
+    @property
+    def supports_decisions(self) -> bool:
+        """
+        Whether the model is a decision model, by its Ollama capabilities.
+        Waits for a pull in progress.
+
+        :rtype: bool
+        """
+        return "decision" in self._model_capabilities()
+
+    def _probe_capabilities(self, pull: bool = True) -> None:
+        """Read the model's capabilities from Ollama. A tag that is not
+        installed yet is pulled in the background"""
+        from ollama import ResponseError
+
+        checkpoint = self.model_init_params["checkpoint"]
+        try:
+            self._capabilities = self.client.show(checkpoint).capabilities or []
+        except ResponseError as e:
+            if e.status_code != 404:
+                self.logger.debug(
+                    f"Could not read the capabilities of {checkpoint}: {e}"
+                )
+            elif pull:
+                self.logger.info(
+                    f"{checkpoint} is not pulled locally in Ollama, pulling it in the background"
+                )
+                self._pull = threading.Thread(target=self._pull_model, daemon=True)
+                self._pull.start()
+            else:
+                self.logger.error(
+                    f"{checkpoint} does not exist locally in Ollama and could not be pulled"
+                )
+        except Exception as e:
+            self.logger.debug(f"Could not read the capabilities of {checkpoint}: {e}")
+
+    def _pull_model(self) -> None:
+        """Pull the model. Logs the stages of the pull, and the progress of
+        each layer once per tenth."""
+        checkpoint = self.model_init_params["checkpoint"]
+        stage, decile = None, 0
+        try:
+            for progress in self.client.pull(checkpoint, stream=True):
+                completed, total = (
+                    progress.get("completed") or 0,
+                    progress.get("total") or 0,
+                )
+                if progress.get("status") != stage:
+                    stage, decile = progress.get("status"), 0
+                    # show per layer progress
+                    if not total:
+                        self.logger.info(f"Pulling {checkpoint}: {stage}")
+                # do not log below a display unit
+                if total >= 1e6 and int(10 * completed / total) > decile:
+                    decile = int(10 * completed / total)
+                    self.logger.info(
+                        f"Pulling {checkpoint}: {completed / 1e6:.0f} of {total / 1e6:.0f} MB "
+                        f"({10 * decile}%)"
+                    )
+        except Exception as e:
+            self.logger.error(f"Could not pull model {checkpoint}: {e}")
+
+    def _model_capabilities(self) -> List[str]:
+        """The model's capabilities, after any pull has finished"""
+        if self._capabilities is None:
+            if self._pull is None:
+                self._probe_capabilities()
+            if self._pull is not None:
+                if self._pull.is_alive():
+                    self.logger.info(
+                        f"Waiting for the pull of {self.model_init_params['checkpoint']} to finish"
+                    )
+                    self._pull.join()
+                self._probe_capabilities(pull=False)
+        return self._capabilities or []
 
     def _check_connection(self) -> None:
         """Check if the platfrom is being served on specified IP and port"""
@@ -118,53 +208,39 @@ class OllamaClient(ModelClient):
             )
 
     def _is_embedding_model(self) -> bool:
-        """Detect whether the served model is an embedding model.
-
-        First checks Ollama's ``show()`` capabilities list, then falls back
-        to the legacy internal name used by ChromaClient.
-        """
+        """Detect whether the served model is an embedding model: the name
+        ChromaClient gives its embedding model, or the embedding capability
+        reported by Ollama."""
         if self.model_name == "internal_ollama_embeddings":
             return True
-        try:
-            info = self.client.show(self.model_init_params["checkpoint"])
-            capabilities = getattr(info, "capabilities", None) or []
-            return "embedding" in capabilities
-        except Exception as e:
-            self.logger.debug(
-                f"Could not probe capabilities for "
-                f"{self.model_init_params['checkpoint']}: {e}"
-            )
-            return False
+        return "embedding" in self._model_capabilities()
 
     def _initialize(self) -> None:
         """
         Initialize the model on platform using the paramters provided in the model specification class.
         """
-        from ollama import ResponseError
-
         self.logger.info(f"Initializing {self.model_name} on ollama")
         checkpoint = self.model_init_params["checkpoint"]
         try:
             # set timeout on underlying httpx client
             self.client._client.timeout = self.init_timeout
-            try:
-                self.client.show(checkpoint)
-            except ResponseError as e:
-                if e.status_code != 404:
-                    raise
-                self.logger.info(f"{checkpoint} is not installed in Ollama, pulling it")
-                r = self.client.pull(checkpoint)
-                if r.get("status") != "success":  # type: ignore
-                    raise Exception(f"Could not pull model {checkpoint}") from e
+            # Check capabilities, will also pull a model that doesnt exist
+            self._capabilities = self._model_capabilities()
             # Cache capability check so _deinitialize can use it too
             self._is_embedding = self._is_embedding_model()
-            # load model in memory with an appropriate empty request
+            # load embedding model in memory with an empty request
             if self._is_embedding:
                 self.client.embed(
                     model=self.model_init_params["checkpoint"],
                     input="",
                     keep_alive=10,
                 )
+            # load a decision model in memory with a stub request
+            elif self.supports_decisions:
+                self.client.systemone(
+                    model=checkpoint, keep_alive=10, **DECISION_WARMUP
+                )
+            # load a text generation model in memory
             else:
                 self.client.generate(
                     model=self.model_init_params["checkpoint"], keep_alive=10
@@ -177,13 +253,16 @@ class OllamaClient(ModelClient):
         self.logger.info(
             f"{self.model_name} with {self.model_init_params['checkpoint']} model initialized"
         )
-        if not self._is_embedding:
+        if not self._is_embedding and not self.supports_decisions:
             self._warn_on_a_small_context()
 
     def _inference(
         self, inference_input: Dict[str, Any]
     ) -> Optional[Dict[str, Union[str, Generator]]]:
         """Call inference on the model using data and inference parameters from the component"""
+        # decision model inference
+        if self.supports_decisions:
+            return self._decide(inference_input)
         # create input
         input = {
             "model": self.model_init_params["checkpoint"],
@@ -256,6 +335,29 @@ class OllamaClient(ModelClient):
         input["output"] = ollama_result["message"].get("content", "")
         return input
 
+    def _decide(self, inference_input: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Ask a decision model the typed questions about a state, and return
+        the answers keyed by question id"""
+        request = {
+            "model": self.model_init_params["checkpoint"],
+            "state": inference_input["state"],
+            "questions": inference_input["questions"],
+        }
+        if images := inference_input.get("images"):
+            request["images"] = [encode_img_base64(img) for img in images]
+        try:
+            self.client._client.timeout = self.inference_timeout
+            response = self.client.systemone(**request)
+        except Exception as e:
+            self.logger.error(str(e))
+            return
+        return {
+            "output": {
+                question_id: answer.model_dump()
+                for question_id, answer in response.answers.items()
+            }
+        }
+
     def _embed(
         self, input: Union[str, List[str]], truncate: bool = False
     ) -> Optional[List[List]]:
@@ -296,6 +398,12 @@ class OllamaClient(ModelClient):
                     model=self.model_init_params["checkpoint"],
                     input="",
                     keep_alive=0,
+                )
+            elif self.supports_decisions:
+                self.client.systemone(
+                    model=self.model_init_params["checkpoint"],
+                    keep_alive=0,
+                    **DECISION_WARMUP,
                 )
             else:
                 self.client.generate(
