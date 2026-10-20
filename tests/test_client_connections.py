@@ -372,6 +372,7 @@ class TestOllamaModelsAreLoaded:
         fake.pull.return_value = iter([{"status": "success"}])
         with pytest.MonkeyPatch.context() as patch:
             patch.setattr("ollama.Client", MagicMock(return_value=fake))
+            patch.setattr(OllamaClient, "_check_connection", lambda self: None)
             client = OllamaClient(self.MODEL)
         return client
 
@@ -405,14 +406,17 @@ class TestOllamaThinkingSwitch:
     where Ollama reads it (inside the options it would be ignored)"""
 
     def _chat(self, think):
-        client = OllamaClient({
-            **TestOllamaModelsAreLoaded.MODEL,
-            "model_init_params": {
-                "checkpoint": "qwen3.5:latest",
-                "think": think,
-                "options": None,
-            },
-        })
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr("ollama.Client", MagicMock())
+            patch.setattr(OllamaClient, "_check_connection", lambda self: None)
+            client = OllamaClient({
+                **TestOllamaModelsAreLoaded.MODEL,
+                "model_init_params": {
+                    "checkpoint": "qwen3.5:latest",
+                    "think": think,
+                    "options": None,
+                },
+            })
         client.client = MagicMock()
         client.client.chat.return_value = {"message": {"content": "hi"}}
         client._inference({
@@ -452,6 +456,9 @@ class TestChromaClientLifecycle:
 
     def _client(self, monkeypatch, handler):
         monkeypatch.setattr(ChromaClient, "_check_connection", lambda self: None)
+        # Its Ollama embedder checks the server and the model when constructed
+        monkeypatch.setattr(OllamaClient, "_check_connection", lambda self: None)
+        monkeypatch.setattr(ollama, "Client", MagicMock())
         client = ChromaClient(ChromaDB())
         monkeypatch.undo()
         client.client = httpx.Client(

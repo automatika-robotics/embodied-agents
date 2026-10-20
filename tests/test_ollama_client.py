@@ -17,6 +17,13 @@ from agents.clients.ollama import OllamaClient
 from agents.models import OllamaModel
 
 
+@pytest.fixture(autouse=True)
+def no_server(monkeypatch):
+    """No test reaches a server: the client checks its connection with a
+    request of its own when constructed, not through the fake"""
+    monkeypatch.setattr(OllamaClient, "_check_connection", lambda self: None)
+
+
 def make_client(capabilities=("completion", "tools")):
     """A client over a fake Ollama, which records the requests it gets. The
     fake reports the given capabilities for the model"""

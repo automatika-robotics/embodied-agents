@@ -40,7 +40,7 @@ jobs:
           pip install --ignore-installed pytest opencv-python-headless \
                       'attrs>=23.2.0' jinja2 httpx msgpack msgpack-numpy \
                       setproctitle pyyaml toml platformdirs tqdm websockets \
-                      emem
+                      emem ollama
           colcon build --symlink-install
         shell: bash
 
