@@ -2,8 +2,8 @@
 Changelog for package automatika_embodied_agents
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+0.8.0 (2026-10-20)
+------------------
 * (chore) Bumps required min sugarcoat version
 * (feature) Adds support for decision models in ollama client and shows model pull progress
 * (feature) Adds model download in thread in model base along with model progress
