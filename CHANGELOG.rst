@@ -2,6 +2,201 @@
 Changelog for package automatika_embodied_agents
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+* (chore) Bumps required min sugarcoat version
+* (feature) Adds support for decision models in ollama client and shows model pull progress
+* (feature) Adds model download in thread in model base along with model progress
+* (fix) Fixes stamping messages correctly in vision processing
+* (chore) Removes deprecated map encoding component
+* (fix) Adds correct handling of additional types in recipes which include other sugarcoated packages
+* (docs) Updates examples with chat history set to true
+* (feature) Adds getting and resetting chat history as actions for llm
+* (feature) Adds handling cortex planning calls as chat history
+* (fix) Serialize pydantic tool calls returned in ollama client
+* (feature) Adds summarization and use of chat history in cortex planning loop
+* (feature) Adds calculation of history budget from models reported context for supporting clients
+* (feature) Adds turn by turn chat history with turn and token budget based trimming
+* (fix) Fixes resetting chat history with the reset phrase preserving system prompt
+* (fix) Fixes sending images correctly as part of the last message to generic and ollama clients
+* (docs) Updates docs for scratch functions
+* (feature) Adds a scratch pad for the planner to write custom functions for actions and internal events when none available
+* (fix) Fixes passing think option to ollama models
+* (chore) Adds decision model example
+* (feature) Adds calling component actions for state gathering in decision component
+* (refactor) Adds overriding base component method for creating service clients in model components
+* (refactor) Simplifies external component tool calling in llm
+* (refactor) Lifts calling component actions on other components to model component
+* (feature) Adds a component action to get current task
+* (feature) Makes cortex monitoring loop use tool calls instead of text response parsing and handled failures and skipped steps correctly
+* (feature) Adds DECISION mode in semantic router for using decision models
+* (feature) Adds a decision component for calling decision models
+* (feature) Adds a decision msg and its sender/callback for one answer from a decision component
+* (feature) Adds calling the systemone decision api in the generic http client
+* (feature) Adds generic decision model wrapper
+* (fix) Fixes deinit in clients to keep the connection open for safe restart
+* (fix) Fixes bug in chroma db deinit and creating a collection without a distance function
+* (chore) Fixes integration tests and remove the ignore in the CI
+* (docs) Adds minor edit in cortex docs
+* (fix) Adds a small gil release sleep in vla busy loop when inputs not received
+* (fix) Fixes tool call results being sent back to model in llm component
+* (fix) Fixes ollama model init for models already on disk are not pulled
+* (refactor) Standardizes tool call parsing for OpenAI compatible servers
+* (refactor) Adds calling external processors based on the new contract in llm and vla components
+* (fix) Fixes using events as triggers in components by returning the correct action return type
+* (refator) Replaces dots with hyphens in tool names for cortex
+* (feature) Adds plugin tools to be compilable into routines and removes duplicates when sending tools to planner
+* (feature) Makes planning actions compilable into a routine
+* (refactor) Registers and calls plugins actions via the monitor
+* (feature) Adds dynamically adding events/actions during planning step in cortex
+* (feature) Adds compilation of plan steps into monitored routines in cortex execution
+* (feature) Adds adding headless routines to cortex for being called and monitored as action servers
+* (feature) Adds a wait tool in cortex to dwell on actions after calling them so they can take effect
+* (fix) Fixes how cortex parses action responses
+* (feature) Adds checksum verification to local model downloads that we manage ourselves
+* (fix) Strips the scheme if added to the lerobot client host with a warning
+* (fix) Fixes correct handling of wss endpoints in roboml websocket client
+* (feature) Adds a ca cert option to provide a self signed certificate for trusted self hosted model and db servers
+* (feature) Adds proper serialization of key env variable and warning when sending over http
+* (feature) Adds issuing a warning for non encrypted external connections when not to loopback addresses
+* (feature) Adds registration of sensor plugins in planning prompt and adds proper execution of plugin actions as launcher process methods with kwargs
+* (feature) Adds ui callback for trackings
+* (feature) Adds ui callback for jointstate
+* (fix) Fixes output of streaming string and adds ui element for video
+* (refactor) Makes goal sending to action servers by cortex conditional on previous goal being cancelled
+* (feature) Updates action return types based on requirement from new sugarcoat version
+* (fix) Fixes warnings and adds a debug log in case no trusted 3d lifts are available
+* (refactor) Adds depth factor when creating depth detector so conversion and filtering happens in core
+* (refactor) Reads depth validity directly from lifted boxes and removes calculation perception3d utils
+* (refactor) Uses source index from depth detector for lifted boxes and give depth images in the right format for zero copy
+* (fix) Adds configuring transform providers when creating subscribers in base component overload
+* (refactor) Uses log_once from base component instead of rclpy once=True
+* (feature) Adds 3d lifitng using pointcloud as depth for vision and mllm components
+* (feature) Enables pointcloud type to be used in 3d utilities for creating a depth detector
+* (feature) Adds image resizing config option to reduce downstream computation of motion detection
+* (fix) Stops cloud points being accumulated if odom is wired but hasnt arrived to avoid frame mismatch
+* (feature) Adds a ring buffer to publish before and after frames when motion is detected from video
+* (feature) Adds turn threshold so that motion detection is paused on robots rotating in please similar to robots with above threshold speed
+* (fix) Fixes handling of single channel (IR) image streams for motion detection
+* (feature) Adds per pixel flow magnitude thresolding for optical flow based motion detection
+* (feature) Takes out globals shifts when calculating frame difference to make motion detection more robust
+* (fix) Fixes motion detection using images, gives a default method and adds blurring before frame difference calculation
+* (refactor) Simplifies detections2d callbacks for string creation and removes unnecessary utils
+* (feature) Allows detections3d to be used in llm and mllm context
+* (feature) Adds storing 3d lifted object detections in memory
+* (fix) Fixes interop vs intraop param setting for ncpu in voice models as well (irrelevant for perf though)
+* (feature) Gets local vision model width and height from its input spec to resize incoming input and sets correct param for ncpu
+* (feature) Adds plugin config serialization to executable
+* (fix) Fixes the check for trigger topics when input topic is replaced before activation
+* (feature) Adds a run task action to the mllm component for cortex triggered grounding
+* (feature) Adds labels to 2d boxes from grounding in mllm component
+* (feature) Adds grasp orientation and tolerance params for both pick and pose goals
+* (refactor) Removes explicit named targets from the config as params (to be supplied only in the srdf)
+* (feature) Adds side approach in the pick action as a configurable maneuver for grippers that need to approach horizontally
+* (feature) Adds adding acm for grasping contact to plan around and freezing refreshes during pick and place
+* (feature) Removes planning padding for attaching the objects post grasp
+* (feature) Returns camera position from 3d lifting in order to push bbox centers to appoximate middle of the object
+* (feature) Adds label filtering param to ignore unrelated background objects
+* (feature) Adds a forward kinematics client to get end effector orientation for poses where orientation is not given (identity), specially in cartesian motion
+* (feature) Adds a seperate cartesian group config param for use with orientation-tracking IK for underactuated arms
+* (feature) Freezes scene when an object is held to avoid mixing labels between similar objects
+* (feature) Adds lifting to 3d and publishing detections3d in vlm component
+* (feature) Adds 3d contract inputs and contract checking to vlm component
+* (feature) Adds 3d lift config to vlm config
+* (feature) Adds place routine and updates docstring in the component
+* (feature) Adds pick and place routine for action server execution
+* (feature) Adds a target match radius around a target for pick and place given by pose
+* (feature) Adds PICK and PLACE move modes
+* (feature) Caches object geometry for objects in the scene
+* (feature) Adds config knob for pick and place clearance
+* (feature) Enhance moveit action with pick and place modes
+* (feature) Adds action and functionality for refreshing planning scene from objects received from detections on_goal, continuously or manually via action
+* (feature) Adds attaching and detaching links to planning scene
+* (feature) Adds scene planning component actions
+* (feature) Adds scene planning service clients for the moveit component
+* (feature) Adds detections3d as input to moveit component
+* (feature) Adds multiprocessing launch for the new features in vision component
+* (feature) Adds planning related config params for moveit component, adds validators to all literals
+* (feature) Adds moveit utils for scene planning
+* (feature) Adds 3d lifting using depth detector in vision component for detections3d output
+* (feature) Add Detection3d as input to the vision component along with vision contract
+* (feature) Adds config options for lifting 2d detections to 3d in vision component
+* (chore) Adds tests for vision component
+* (feature) Adds a simplified contract in vision component for inputs/outputs
+* (fix) Fixes checking for truthiness of ndarray
+* (fix) Removes guard that would have raised with an ndarray
+* (fix) Fixes publishing grounding outputs from mllm with multiple camera inputs
+* (refactor) Makes Trackings and Detections2d raise if given detections/trackings from multiple cameras
+* (fix) Fixes creating the depth detector with the correct rotation convention in ROS
+* (refactor) Adds a helper for creating 2d bboxes
+* (feature) Adds utilities for lifting 2d bboxes to 3d metric space via kompass-core
+* (feature) Adds detection3d msg callback and sender
+* (feature) Adds 3d bbox and detection messages
+* (feature) Adds frame id to all vision messages
+* (chore) Updates CI for testing moveit component
+* (feature) Adds moveit action server component for calling moveit services
+* (feature) Adds configuration for new moveit component
+* (chore) Adds tests for moveit utils
+* (feature) Adds utils for building moveit msgs and service requests and parsing them
+* (feature) Adds an action msg for MoveIt action server component
+* (fix) Fixes creating renampe_map (and _features) in lerebot policy
+* (fix) Fixes the action branches for cleanup where inputs not received on time or cancel is requested
+* (fix) Adds depth camera feature check and appropriate warning along with using the observation prefix
+* (feature) Adds utility function for getting channels from dataset spec and exposes observation prefix as a constant
+* (fix) Adds iterator finalization for llm stream handling so that local model iterators dont wait for garbage collection if an exception occurs while publishing
+* (fix) Adds within think block termination warning to streaming output path in llms
+* (fix) Fixes monotonic duration for joints trajectory and joint jog message publishing (one action tick per command)
+* (chore) Updates local llm, local vlm and router tests
+* (fix) Fixes setting stream to true for local vlm in the config
+* (feature) Adds guard for consecutive requests to local vlm and adds streaming option for local vlm
+* (feature) Adds handling concurrent calls to local llm and tool call extraction
+* (fix) Fixes stripping thinking tokens when thinking block is cut off due to max new tokens
+* (fix) Fixes semantic router init of local models
+* (feature) Adds new defaults for local llm and vlm, use of model options and correct resolution of different model families
+* (chore) Adds tests for modified local stt
+* (feature) Adds wakeword detection with sherpa's key word spotter, customized wake words via config
+* (feature) Adds model archive download utility
+* (feature) Adds model options for loading all tts models available in sherpa-onnx
+* (feature) Adds model options for local stt and updates default to parakeet
+* (chore) Adds tests for local tts
+* (fix) Fixes loading local models from disk
+* (feature) Adds streaming generation to local tts model use
+* (feature) Handles all sherpa model families and streaming generation
+* (feature) Adds additional sherpa generation options and updates default model to pocket
+* (fix) Handles aborted goals and event based termination reset correctly
+* (fix) Fixes reading images for inference input when reading tick and image callback tick have a mismatch
+* (feature) Adds urdf to policy unit conversion along with a heuristic warning path
+* (fix) Fixes logging of stop event
+* (feature) Adds policy action units config option for auto conversion
+* (feature) Adds utility to convert joint limits to units utilized by the policy
+* (refactor) Changes default max_new_tokens to 512
+* (fix) Adds missing abstract method to vla to avoid abc enforcement in newer rclpy
+* (feature) Updates the VLA component to set preset agg functions and take depth images as input
+* (feature) Makes dtype degradation explicit based on lerobot behavior for feature checking
+* (feature) Adds preset aggregator function as config param
+* (feature) Adds getting depth only images from rgbd callback
+* (feature) Updates lerobot client with a policy type error (if policy is not supported) and a rename map
+* (feature) Exposes latest lerobot policies for usage in available model types
+* (fix) Fixes bugs in JointState and JointJog senders
+  - Correctly copies accelerations
+  - time_from_start converted to proper Duration
+  - Fixes duration in JointJog
+* (feature) Adds the notion of coherent clusters > min cluster size, for use as motion evidence to reduce false positives
+* (chore) Updates tests for motion detection
+* (feature) Adds new params to config for the accumulation window and adds some rational defaults
+* (feature) Adds differencing against union of a time-window of scans to detect voxels with motion so that non standard scan patterns like livox can be covered
+* (chore) Adds motion detection example and updates tests
+* (chore) Deprecates images to video component in favour of the new motion detection component
+* (feature) Adds a new motion detector component to detect motion from images or pointclouds and publish videos or centers of motion
+* (feature) Adds prior memory addition to memlayers and removes redundant attributes
+* (feature) Adds rate sampled outputs for custom types for api/UI and modified streaming string output to give commulated string for mid stream consumers
+* (fix) Fixes parsing tool call args from openAI compatible clients in cortex
+* (fix) Fixes a serialization bug in generic client affecting initialization setup
+* (fix) Disables launch_ros from testing
+* (fix) Disables incompatible launch_testing pytest plugin in CI
+* (fix) Fixes multiprocessing launch check for generic client (`#34 <https://github.com/automatika-robotics/embodied-agents/issues/34>`_)
+* Contributors: ahr
+
 0.7.4 (2026-06-05)
 ------------------
 * (chore) Bumps up sugarcoat version
