@@ -14,7 +14,7 @@ Some clients might need additional dependacies, which are provided in the follow
 
 * - **Generic**
   - [GenericHTTPClient](agents.clients.generic.GenericHTTPClient)
-  - A generic client for interacting with OpenAI-compatible APIs, including vLLM, ms-swift, lmdeploy, Google Gemini, etc. Supports both standard and streaming responses, and works with LLMS and multimodal LLMs. Designed to be compatible with any API following the OpenAI standard. Supports tool calling.
+  - A generic client for interacting with OpenAI-compatible APIs, including vLLM, ms-swift, lmdeploy, Google Gemini, etc. Supports both standard and streaming responses, and works with LLMS and multimodal LLMs. Designed to be compatible with any API following the OpenAI standard. Supports tool calling. It also supports asking typed questions of decision models through the TypeSafe-compatible /v1/systemone API, with [GenericDecisionModel](agents.models.md#classes).
 
 * - **RoboML**
   - [RoboMLHTTPClient](agents.clients.roboml.RoboMLHTTPClient)
@@ -31,7 +31,7 @@ Some clients might need additional dependacies, which are provided in the follow
 
 * - **Ollama**
   - [OllamaClient](agents.clients.ollama.OllamaClient)
-  - An HTTP client for interacting with ML models served on [Ollama](https://ollama.com). Supports LLMs/MLLMs and embedding models. It can be invoked with the generic [OllamaModel](agents.models.md#classes). Supports tool calling.
+  - An HTTP client for interacting with ML models served on [Ollama](https://ollama.com). Supports LLMs/MLLMs, embedding models and decision models. It can be invoked with the generic [OllamaModel](agents.models.md#classes). Supports tool calling.
     Requires `pip install ollama`.
 
 * - **LeRobot**

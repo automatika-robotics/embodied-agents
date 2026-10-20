@@ -106,9 +106,12 @@ html_theme_options = {
 LLMS_TXT_SELECTION = [
     "development/architecture.md",
     "development/custom_component.md",
+    "development/advanced_component.md",
+    "development/component_actions.md",
     "development/custom_client.md",
     "development/custom_model.md",
     "development/messages.md",
+    "development/adding_modality.md",
 ]
 
 

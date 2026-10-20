@@ -65,6 +65,7 @@ Model
   │     └── GenericMLLM
   ├── GenericTTS
   ├── GenericSTT
+  ├── GenericDecisionModel (TypeSafe-compatible /v1/systemone)
   ├── Whisper (adds compute_type)
   ├── TransformersTTS (adds voice, vocoder_checkpoint)
   ├── VisionModel (adds tracking options)

@@ -4,6 +4,7 @@ import httpx
 
 from ..vectordbs import DB
 from ..models import OllamaModel
+from ..utils import tls_verify
 from .db_base import DBClient
 from .ollama import OllamaClient
 
@@ -25,6 +26,7 @@ class ChromaClient(DBClient):
         response_timeout: int = 30,
         init_on_activation: bool = True,
         logging_level: str = "info",
+        ca_cert: Optional[str] = None,
         **kwargs,
     ):
         super().__init__(
@@ -34,12 +36,17 @@ class ChromaClient(DBClient):
             response_timeout=response_timeout,
             init_on_activation=init_on_activation,
             logging_level=logging_level,
+            ca_cert=ca_cert,
             **kwargs,
         )
         self.url = f"{self._build_url()}/api/v2"
 
         # create httpx client
-        self.client = httpx.Client(base_url=self.url, timeout=self.response_timeout)
+        self.client = httpx.Client(
+            base_url=self.url,
+            timeout=self.response_timeout,
+            verify=tls_verify(self.ca_cert),
+        )
 
         # create ollama client if using ollama embeddings
         if self.db_init_params["embeddings"] == "ollama":
@@ -134,7 +141,6 @@ class ChromaClient(DBClient):
                 To install ChromaDB, follow instructions on https://docs.trychroma.com/docs/overview/getting-started
                 """
             )
-            self.client.close()
             raise
 
     def _initialize(self) -> None:
@@ -161,14 +167,13 @@ class ChromaClient(DBClient):
         metadata: Optional[Dict[str, Any]] = None,
         get_only: bool = False,
     ):
-        effective_metadata = metadata or {}
-        effective_metadata["hnsw:space"] = distance_func
+        effective_metadata = dict(metadata or {})
+        if distance_func:
+            effective_metadata["hnsw:space"] = distance_func
 
-        payload = {
-            "name": collection_name,
-            "metadata": effective_metadata,
-            "get_or_create": True,
-        }
+        payload = {"name": collection_name, "get_or_create": True}
+        if effective_metadata:
+            payload["metadata"] = effective_metadata
         try:
             if get_only:
                 collection_info = self._api_call(
@@ -368,11 +373,10 @@ class ChromaClient(DBClient):
         return {"output": output} if output else None
 
     def _deinitialize(self) -> None:
-        """Deinitialize DB client"""
-        if self.db_init_params["ollama"]:
-            self.embeddings_client.initialize()
-        self.client.close()
-        self.logger.info("ChromaDB HTTP client closed.")
+        """Deinitialize the embeddings model."""
+        if self.db_init_params["embeddings"] == "ollama":
+            self.embeddings_client.deinitialize()
+        self.logger.info("ChromaDB client deinitialized.")
 
     def _embed(self, input: Union[str, List[str]]) -> Optional[List[List]]:
         # Create embeddings

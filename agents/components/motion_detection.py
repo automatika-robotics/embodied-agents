@@ -3,8 +3,6 @@ from typing import Deque, List, Optional, Union
 
 import cv2
 import numpy as np
-from ros_sugar.tf import TFListener, TFListenerConfig
-
 from ..config import MotionDetectorConfig
 from ..ros import (
     Bool,
@@ -138,23 +136,26 @@ class MotionDetector(Component):
         )
 
         # Check that position topic was not provided as a trigger
-        if position and position.name in getattr(self, "trig_callbacks", {}):
+        if position and position.name in getattr(self, "_trigger_topic_names", []):
             raise TypeError(
                 "MotionDetector position topic cannot be used as the component trigger."
             )
 
         # Image modality state
         self._frames: Union[List[ROSImage], List[ROSCompressedImage]] = []
+        # buffer for frames just before an episode opens
+        self._preroll: Deque = deque(maxlen=self.config.video_preroll_frames)
         self._last_frame: Optional[np.ndarray] = None
         self._roi_mask: Optional[np.ndarray] = None
+        # heading of the previous odometry reading, for the turn rate
+        self._last_heading: Optional[float] = None
+        self._last_heading_time: float = 0.0
 
         # Point cloud modality state
         # occupancy history of the last `accumulation_window` clouds
         self._voxel_history: Deque[np.ndarray] = deque(
             maxlen=self.config.accumulation_window
         )
-        self._sensor_tf_listener: Optional[TFListener] = None
-        self._sensor_tf_warned: bool = False
 
         # Motion state machine
         self._motion_active: bool = False
@@ -277,38 +278,87 @@ class MotionDetector(Component):
                 self.config.threshold,
                 self.config.flow_kwargs,
             )
-        return True
+        # this should not happen after config validation
+        raise ValueError(
+            f"Unknown motion_estimation_func {self.config.motion_estimation_func!r}"
+        )
 
     def _ego_motion_paused(self) -> bool:
-        """True when image processing should pause because the robot itself is moving."""
+        """True when image processing should pause because the robot itself is
+        moving. Translating faster than ``ego_speed_threshold`` or turning
+        faster than ``ego_turn_threshold``.
+        """
         if not (self.position and self.config.pause_on_ego_motion):
             return False
         odom = self.callbacks[self.position.name].get_output()
-        return odom is not None and abs(odom[4]) > self.config.ego_speed_threshold
+        if odom is None:
+            return False
+        ros_time = self.get_ros_time()
+        now = ros_time.sec + ros_time.nanosec * 1e-9
+        heading = float(odom[3])
+        turn_rate = 0.0
+        if self._last_heading is not None and now > self._last_heading_time:
+            delta = heading - self._last_heading
+            delta = float(np.arctan2(np.sin(delta), np.cos(delta)))  # wrapped
+            turn_rate = abs(delta) / (now - self._last_heading_time)
+        self._last_heading, self._last_heading_time = heading, now
+        return (
+            abs(odom[4]) > self.config.ego_speed_threshold
+            or turn_rate > self.config.ego_turn_threshold
+        )
 
     def _process_image(self, msg, output: np.ndarray) -> None:
         """Collects incoming image messages while motion is detected and
         publishes them as a video when the motion ends.
         """
-        gray = cv2.cvtColor(output, cv2.COLOR_RGB2GRAY)
+        # single-channel streams arrive as 2D arrays and are already gray
+        gray = output if output.ndim == 2 else cv2.cvtColor(output, cv2.COLOR_RGB2GRAY)
+        if gray.dtype != np.uint8:
+            if not np.issubdtype(gray.dtype, np.integer):
+                raise TypeError(
+                    "Image motion detection expects 8- or 16-bit images, got "
+                    f"{gray.dtype}"
+                )
+            # perform a FIXED rescale to keep consecutive frames comparable
+            gray = cv2.convertScaleAbs(gray, alpha=255.0 / np.iinfo(gray.dtype).max)
+        scale = self.config.image_scale
+        if scale < 1.0:
+            gray = cv2.resize(
+                gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA
+            )
+        # ignore set polygons of robot's own body, given in the camera's
+        # pixels, scale them with the frame they are applied to
         if self.config.roi_ignore_polygon:
             if self._roi_mask is None:
                 self._roi_mask = motion.roi_mask(
-                    gray.shape, self.config.roi_ignore_polygon
+                    gray.shape,
+                    [(x * scale, y * scale) for x, y in self.config.roi_ignore_polygon],
                 )
             gray = gray * self._roi_mask
 
         detected = False
-        if self._last_frame is not None and not self._ego_motion_paused():
-            detected = self._estimate_image_motion(gray)
-        self._last_frame = gray
+        if self._ego_motion_paused():
+            # do not keep a moving frame as the reference for the first still one
+            self._last_frame = None
+        else:
+            if self._last_frame is not None:
+                detected = self._estimate_image_motion(gray)
+            self._last_frame = gray
 
         buffer_full = False
-        if detected:
+        in_episode = self._motion_active
+        if detected and not in_episode:
+            # motion episode opens, put the frames leading up to it
+            self._frames.extend(self._preroll)
+            self._preroll.clear()
+        if detected or in_episode:
+            # keep all frames of the episode, including the still frames of the tail
             self._frames.append(msg)
             # A full buffer ends the episode early so long motion produces
             # consecutive videos
             buffer_full = len(self._frames) >= self.config.max_video_frames
+        else:
+            self._preroll.append(msg)
 
         episode_ended = self._step_motion_state(detected)
 
@@ -339,30 +389,20 @@ class MotionDetector(Component):
         if not cloud_frame or cloud_frame == self.config.base_frame:
             return points
 
-        if self._sensor_tf_listener is None:
-            self._sensor_tf_listener = self.create_tf_listener(
-                TFListenerConfig(
-                    source_frame=cloud_frame,
-                    goal_frame=self.config.base_frame,
-                    static_tf=True,
-                )
+        # Cached per frame pair by the component; a static mount is looked up once
+        listener = self.get_transform_listener(
+            cloud_frame, self.config.base_frame, static_tf=True
+        )
+        if not listener.got_transform:
+            self.log_once(
+                "sensor_tf",
+                f"Transform from cloud frame '{cloud_frame}' to base frame "
+                f"'{self.config.base_frame}' is not available (yet). Assuming the "
+                "cloud is given in the robot base frame until the transform is found.",
             )
-
-        if not self._sensor_tf_listener.got_transform:
-            if not self._sensor_tf_warned:
-                self.get_logger().warning(
-                    f"Transform from cloud frame '{cloud_frame}' to base frame "
-                    f"'{self.config.base_frame}' is not available (yet). Assuming the "
-                    "cloud is given in the robot base frame until the transform is found."
-                )
-                self._sensor_tf_warned = True
             return points
 
-        return motion.apply_transform(
-            points,
-            self._sensor_tf_listener.translation,
-            self._sensor_tf_listener.rotation,
-        )
+        return motion.apply_transform(points, listener.translation, listener.rotation)
 
     def _process_cloud(self, cloud) -> None:
         """Differences the incoming cloud against the accumulated occupancy
@@ -384,10 +424,14 @@ class MotionDetector(Component):
         frame_id = cloud.frame_id
         if self.position:
             odom = self.callbacks[self.position.name].get_output()
-            if odom is not None:
-                points = self._apply_sensor_extrinsic(points, cloud.frame_id)
-                points = motion.transform_cloud(points, odom)
-                frame_id = self.callbacks[self.position.name].frame_id or frame_id
+            if odom is None:
+                # dont accumulate points before odometry so we dont have clouds
+                # in different frames
+                self.get_logger().debug("No odometry yet, not accumulating clouds")
+                return
+            points = self._apply_sensor_extrinsic(points, cloud.frame_id)
+            points = motion.transform_cloud(points, odom)
+            frame_id = self.callbacks[self.position.name].frame_id or frame_id
 
         voxels = motion.unique_voxels(
             points, self.config.voxel_size, device=self.config.device

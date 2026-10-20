@@ -12,6 +12,7 @@ __all__ = [
     "GenericMLLM",
     "GenericTTS",
     "GenericSTT",
+    "GenericDecisionModel",
     "TransformersLLM",
     "TransformersMLLM",
     "OllamaModel",
@@ -166,7 +167,7 @@ class GenericTTS(Model):
     :param name: An arbitrary name given to the model.
     :type name: str
     :param checkpoint: The model identifier (e.g., "tts-1", "tts-1-hd").
-                       For details: https://platform.openai.com/docs/models/tts
+                       For details: https://developers.openai.com/api/docs/models/tts-1
     :type checkpoint: str
     :param voice: The voice ID to use. OpenAI standard voices: 'alloy', 'echo', 'fable',
                   'onyx', 'nova', 'shimmer'. Other providers may have different IDs.
@@ -209,7 +210,7 @@ class GenericSTT(Model):
     :param name: An arbitrary name given to the model.
     :type name: str
     :param checkpoint: The model identifier (e.g., "whisper-1").
-                       For details: https://platform.openai.com/docs/models/whisper
+                       For details: https://developers.openai.com/api/docs/models/whisper-1
     :type checkpoint: str
     :param language: The language of the input audio (ISO-639-1 format, e.g., 'en', 'fr').
                      Improves accuracy if known. Default is None (auto-detect).
@@ -246,6 +247,36 @@ class GenericSTT(Model):
 
 
 @define(kw_only=True)
+class GenericDecisionModel(Model):
+    """
+    A generic decision model for TypeSafe-compatible /v1/systemone APIs.
+
+    A decision model answers typed questions about a state (choice, score or yes/no),
+    each in one forward pass without generating text, and gives a probability for
+    every answer.
+    Find details [here](https://github.com/ggml-org/llama.cpp/tree/master/tools/server#post-v1systemone-typesafe-compatible-system-one-api)
+
+    :param name: An arbitrary name given to the model.
+    :type name: str
+    :param checkpoint: The model identifier on the server, as listed by its /v1/models
+                       endpoint. llama-server lists the model file name, or the name
+                       given with --alias. In router mode, it uses it to pick the model.
+    :type checkpoint: str
+    :param init_timeout: The timeout in seconds for the initialization process. Defaults to None.
+    :type init_timeout: int, optional
+
+    Example usage:
+    ```python
+    # llama-server -m lev-Q8_0.gguf --alias lev
+    lev = GenericDecisionModel(name="lev", checkpoint="lev")
+    ```
+    """
+
+    def _get_init_params(self) -> Dict:
+        return {"checkpoint": self.checkpoint}
+
+
+@define(kw_only=True)
 class OllamaModel(LLM):
     """An Ollama model that needs to be initialized with an ollama tag as checkpoint.
 
@@ -255,6 +286,11 @@ class OllamaModel(LLM):
     :type checkpoint: str
     :param init_timeout: The timeout in seconds for the initialization process. Defaults to None.
     :type init_timeout: int, optional
+    :param think: Whether a thinking model thinks before it answers. None, the
+        default, leaves it to the model's own default. False makes a planner or
+        a tool-calling component answer much faster, and keeps a thinking model
+        from using its whole token budget before it answers.
+    :type think: bool, optional
     :param options: Optional dictionary to configure generation behavior. Options that conflict with component config options such as (num_predict and temperature) will be overridden if set in component config. Only the following keys with their specified value types are allowed. For details check [Ollama api documentation](https://github.com/ollama/ollama/blob/main/docs/api.md#generate-request-with-options):
         - num_keep: int
         - seed: int
@@ -277,7 +313,6 @@ class OllamaModel(LLM):
         - main_gpu: int
         - use_mmap: bool
         - num_thread: int
-        - think: bool
     :type options: dict, optional
 
      Example usage:
@@ -291,6 +326,7 @@ class OllamaModel(LLM):
 
     checkpoint: str = field(default="llama3.2:3b")
     port: Optional[int] = field(default=11434)
+    think: Optional[bool] = field(default=None)
     options: Optional[Dict[str, Any]] = field(default=None)
 
     @options.validator
@@ -320,7 +356,6 @@ class OllamaModel(LLM):
             "main_gpu": int,
             "use_mmap": bool,
             "num_thread": int,
-            "think": bool,
         }
 
         for key, val in value.items():
@@ -341,6 +376,7 @@ class OllamaModel(LLM):
         """Get init params for model initialization."""
         return {
             "checkpoint": self.checkpoint,
+            "think": self.think,
             "options": self.options,
         }
 
@@ -406,18 +442,18 @@ class RoboBrain2(Model):
     }
         :param name: An arbitrary name given to the model.
         :type name: str
-        :param checkpoint: The name of the pre-trained model's checkpoint. Default is "BAAI/RoboBrain2.5-4B". For available checkpoints consult [RoboBrain2 and RoboBrain2.5 Model Collections](https://huggingface.co/collections/BAAI) on HuggingFace or ModelScope.
+        :param checkpoint: The name of the pre-trained model's checkpoint. Default is "BAAI/RoboBrain2.0-3B". For available checkpoints consult [RoboBrain2 and RoboBrain2.5 Model Collections](https://huggingface.co/collections/BAAI) on HuggingFace or ModelScope.
         :type checkpoint: str
         :param init_timeout: The timeout in seconds for the initialization process. Defaults to None.
         :type init_timeout: int, optional
 
         Example usage:
         ```python
-        robobrain = RoboBrain2(name='robobrain', checkpoint="BAAI/RoboBrain2.5-8B-NV")
+        robobrain = RoboBrain2(name='robobrain', checkpoint="BAAI/RoboBrain2.0-7B")
         ```
     """
 
-    checkpoint: str = field(default="BAAI/RoboBrain2.5-4B")
+    checkpoint: str = field(default="BAAI/RoboBrain2.0-3B")
 
     def _get_init_params(self) -> Dict:
         """Get init params for model initialization."""
@@ -609,9 +645,23 @@ class LeRobotPolicy(Model):
     checkpoint: str = field(default="lerobot/smolvla_base")
     policy_type: Literal[
         "smolvla", "diffusion", "act", "pi0", "pi05", "groot", "tdmpc", "vqbet"
-    ] = field(default="smolvla")
+    ] = field(
+        default="smolvla",
+        validator=base_validators.in_([
+            "smolvla",
+            "diffusion",
+            "act",
+            "pi0",
+            "pi05",
+            "groot",
+            "tdmpc",
+            "vqbet",
+        ]),
+    )
     actions_per_chunk: int = field(default=50)
-    policy_device: Literal["cpu", "cuda"] = field(default="cuda")
+    policy_device: Literal["cpu", "cuda"] = field(
+        default="cuda", validator=base_validators.in_(["cpu", "cuda"])
+    )
     dataset_info_file: Optional[str] = field(default=None)
     rename_map: Dict[str, str] = field(default=Factory(dict))
     _features: Dict = field(

@@ -4,8 +4,9 @@ A MotionDetector component watches the camera stream and publishes:
 - a Bool motion state topic, used here as an event source
 - a Video message collecting the frames of each coherent motion sequence
 
-When motion starts, an event triggers a TextToSpeech component that plays
-an alert on the robot's speakers. The video of each motion episode is
+When motion starts, an event calls the `say` action of a TextToSpeech
+component, which plays an alert on the robot's speakers. The video of each
+motion episode is
 published once the motion ends and can be recorded or passed to models
 that accept image sequences.
 
@@ -18,7 +19,7 @@ from agents.components import MotionDetector, TextToSpeech
 from agents.config import MotionDetectorConfig, TextToSpeechConfig
 from agents.clients import RoboMLWSClient
 from agents.models import TransformersTTS
-from agents.ros import Launcher, Topic, FixedInput, Event
+from agents.ros import Action, Launcher, Topic, Event
 
 # Define Topics
 camera_image = Topic(name="/image_raw", msg_type="Image")
@@ -47,23 +48,25 @@ event_motion_detected = Event(
 )
 
 # Setup the TextToSpeech Component (The Alarm)
-# It has a fixed alert text and only runs when the motion event fires,
-# playing the alert directly on the robot's speakers.
-alert_text = FixedInput(
-    name="alert",
-    msg_type="String",
-    fixed="Attention: motion detected in the monitored area.",
-)
+# It speaks anything published on tts_in, directly on the robot's speakers,
+# and the motion event below makes it say the alert
+tts_in = Topic(name="tts_in", msg_type="String")
 
 tts = TransformersTTS(name="tts")
 roboml_tts = RoboMLWSClient(tts)
 
 alert_speaker = TextToSpeech(
-    inputs=[alert_text],
-    trigger=event_motion_detected,  # Only runs when motion starts
+    inputs=[tts_in],
+    trigger=tts_in,
     model_client=roboml_tts,
     config=TextToSpeechConfig(play_on_device=True),
     component_name="alert_speaker",
+)
+
+# When motion starts, say the alert
+say_alert = Action(
+    alert_speaker.say,
+    kwargs={"text": "Attention: motion detected in the monitored area."},
 )
 
 # --- Point cloud variant ---
@@ -90,6 +93,7 @@ launcher = Launcher()
 launcher.enable_ui(outputs=[motion_state, motion_video])
 launcher.add_pkg(
     components=[motion_detector, alert_speaker],
+    events_actions={event_motion_detected: say_alert},
     multiprocessing=True,
     package_name="automatika_embodied_agents",
 )

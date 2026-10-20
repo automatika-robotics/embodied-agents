@@ -29,7 +29,7 @@ text_answer = Topic(name="text1", msg_type="String")
 qwen_vl = OllamaModel(name="qwen_vl", checkpoint="qwen2.5vl:latest")
 qwen_client = OllamaClient(qwen_vl)
 mllm_config = MLLMConfig(
-    stream=True
+    stream=True, chat_history=True
 )  # Other inference specific paramters can be provided here
 
 mllm = MLLM(

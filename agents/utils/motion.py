@@ -3,7 +3,6 @@
 Point cloud voxelization can optionally run on GPU through torch when available.
 """
 
-import math
 import warnings
 from typing import Dict, List, Tuple
 
@@ -38,8 +37,16 @@ _KEY_MASK = (1 << _KEY_BITS) - 1
 # ---------------------------------------------------------------------------
 
 
+# Median frame-to-frame shift (gray levels) above which the whole frame is
+# taken to have changed exposure rather than content
+_GLOBAL_SHIFT_MIN = 3
+
+
 def frame_difference(
-    previous_gray: np.ndarray, current_gray: np.ndarray, threshold: float
+    previous_gray: np.ndarray,
+    current_gray: np.ndarray,
+    threshold: float,
+    pixel_threshold: int = 25,
 ) -> bool:
     """Difference between two grayscale frames thresholded to a motion bool.
 
@@ -49,17 +56,22 @@ def frame_difference(
     :type current_gray: np.ndarray
     :param threshold: Percentage of changed pixels for detecting motion
     :type threshold: float
+    :param pixel_threshold: Absolute grayscale change (0-255) above which a
+        pixel counts as changed. Sensor and compression noise stay well below
+        the default after the blur; real change is far above it
+    :type pixel_threshold: int
     :rtype: bool
     """
-    # calculate frame difference
-    diff = cv2.subtract(current_gray, previous_gray)
-    # apply blur to improve thresholding
-    diff = cv2.medianBlur(diff, 3)
-    # apply adaptive thresholding
-    mask = cv2.adaptiveThreshold(
-        diff, 1, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2
-    )
-    return mask.sum() > (threshold * math.prod(current_gray.shape) / 100)
+    # Blur first so pixel noise cannot register as change.
+    delta = cv2.GaussianBlur(current_gray, (5, 5), 0).astype(np.int16)
+    delta -= cv2.GaussianBlur(previous_gray, (5, 5), 0).astype(np.int16)
+    # Take that global shift out before thresholding so a white balance or auto-exposure
+    # doesn't generate false moves
+    shift = float(np.median(delta))
+    if abs(shift) > _GLOBAL_SHIFT_MIN:
+        delta -= int(round(shift))
+    changed = np.count_nonzero(np.abs(delta) > pixel_threshold)
+    return changed > threshold * delta.size / 100
 
 
 def optical_flow(
@@ -67,6 +79,7 @@ def optical_flow(
     current_gray: np.ndarray,
     threshold: float,
     flow_kwargs: Dict,
+    flow_threshold: float = 1.0,
 ) -> bool:
     """Farneback optical flow between two frames thresholded to a motion bool.
 
@@ -78,13 +91,18 @@ def optical_flow(
     :type threshold: float
     :param flow_kwargs: Keyword arguments for cv2.calcOpticalFlowFarneback
     :type flow_kwargs: Dict
+    :param flow_threshold: Flow magnitude in pixels per frame above which a
+        pixel counts as moving, whatever its direction
+    :type flow_threshold: float
     :rtype: bool
     """
     flow = cv2.calcOpticalFlowFarneback(
         previous_gray, current_gray, None, **flow_kwargs
     )
-    mask = np.uint8(flow > 1) / 10
-    return mask.sum() > (threshold * math.prod(current_gray.shape) / 100)
+    # the fraction of PIXELS that moved, by flow magnitude
+    magnitude = np.hypot(flow[..., 0], flow[..., 1])
+    moving = np.count_nonzero(magnitude > flow_threshold)
+    return moving > threshold * magnitude.size / 100
 
 
 def roi_mask(
